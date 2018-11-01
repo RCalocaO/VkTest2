@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../RCUtils/RCUtilsBase.h"
+#include "../RCUtils/RCUtilsCmdLine.h"
 
 /*
 #define WIN32_LEAN_AND_MEAN
@@ -33,13 +34,15 @@ inline void ZeroVulkanMem(T& VulkanStruct, VkStructureType Type)
 	memset((uint8_t*)&VulkanStruct.sType + sizeof(VkStructureType), 0, Size);
 }
 
-struct SVulkanInstance
+struct SVulkan
 {
 	VkInstance Instance = VK_NULL_HANDLE;
 	VkDebugReportCallbackEXT DebugReportCallback = nullptr;
 
 	std::vector<VkPhysicalDevice> DiscreteDevices;
 	std::vector<VkPhysicalDevice> IntegratedDevices;
+
+	VkSurfaceKHR Surface = VK_NULL_HANDLE;
 
 	struct FDevice
 	{
@@ -89,11 +92,11 @@ struct SVulkanInstance
 
 	void GetPhysicalDevices()
 	{
-		uint32 Count = 0;
-		VERIFY_VKRESULT(vkEnumeratePhysicalDevices(Instance, &Count, nullptr));
+		uint32 NumDevices = 0;
+		VERIFY_VKRESULT(vkEnumeratePhysicalDevices(Instance, &NumDevices, nullptr));
 
-		std::vector<VkPhysicalDevice> PhysicalDevices(Count);
-		VERIFY_VKRESULT(vkEnumeratePhysicalDevices(Instance, &Count, PhysicalDevices.data()));
+		std::vector<VkPhysicalDevice> PhysicalDevices(NumDevices);
+		VERIFY_VKRESULT(vkEnumeratePhysicalDevices(Instance, &NumDevices, PhysicalDevices.data()));
 
 		for (auto& PD : PhysicalDevices)
 		{
@@ -144,10 +147,10 @@ struct SVulkanInstance
 
 	static void CreateDevice(FDevice& Device)
 	{
-		uint32 Count = 0;
-		VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(Device.PhysicalDevice, nullptr, &Count, nullptr));
-		std::vector<VkExtensionProperties> ExtensionProperties(Count);
-		VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(Device.PhysicalDevice, nullptr, &Count, ExtensionProperties.data()));
+		uint32 NumExtensions = 0;
+		VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(Device.PhysicalDevice, nullptr, &NumExtensions, nullptr));
+		std::vector<VkExtensionProperties> ExtensionProperties(NumExtensions);
+		VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(Device.PhysicalDevice, nullptr, &NumExtensions, ExtensionProperties.data()));
 
 		check(Device.Props.limits.timestampComputeAndGraphics);
 
@@ -189,9 +192,65 @@ struct SVulkanInstance
 		CreateInfo.hinstance = GetModuleHandle(0);
 		CreateInfo.hwnd = glfwGetWin32Window(Window);
 
-		VkSurfaceKHR Surface = VK_NULL_HANDLE;
 		VERIFY_VKRESULT(vkCreateWin32SurfaceKHR(Instance, &CreateInfo, 0, &Surface));
 #endif
+
+		uint32 NumFormats = 0;
+		VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(Device.PhysicalDevice, Surface, &NumFormats, nullptr));
+		check(NumFormats > 0);
+		std::vector<VkSurfaceFormatKHR> Formats(NumFormats);
+		VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(Device.PhysicalDevice, Surface, &NumFormats, Formats.data()));
+
+		VkFormat Format = VK_FORMAT_UNDEFINED;
+		if (Formats.size() > 1)
+		{
+			for (VkSurfaceFormatKHR FoundFormat : Formats)
+			{
+				if (FoundFormat.format == VK_FORMAT_R8G8B8A8_UNORM || FoundFormat.format == VK_FORMAT_B8G8R8A8_UNORM)
+				{
+					Format = FoundFormat.format;
+					break;
+				}
+			}
+		}
+
+		if (Format == VK_FORMAT_UNDEFINED)
+		{
+			Format = Formats[0].format;
+		}
+	}
+
+	VkPhysicalDevice FindPhysicalDeviceByVendorID(uint32 VendorID)
+	{
+		for (auto Pair : Devices)
+		{
+			if (Pair.second.Props.vendorID == VendorID)
+			{
+				return Pair.first;
+			}
+		}
+		return VK_NULL_HANDLE;
+	}
+
+	VkPhysicalDevice SelectPreferredDevice()
+	{
+		RCUtils::FCmdLine& CmdLine = RCUtils::FCmdLine::Get();
+		if (CmdLine.Contains("-preferIntel"))
+		{
+			return FindPhysicalDeviceByVendorID(0x8086);
+		}
+/*
+		else if (CmdLine.Contains("-preferAMD"))
+		{
+			return FindPhysicalDeviceByVendorID(0);
+		}
+*/
+		else if (CmdLine.Contains("-preferNVidia"))
+		{
+			return FindPhysicalDeviceByVendorID(0x10de);
+		}
+
+		return VK_NULL_HANDLE;
 	}
 
 	void SetupDevices(GLFWwindow* Window)
@@ -199,13 +258,17 @@ struct SVulkanInstance
 		GetPhysicalDevices();
 		check(!DiscreteDevices.empty() || !IntegratedDevices.empty());
 
-		if (!DiscreteDevices.empty())
+		PhysicalDevice = SelectPreferredDevice();
+		if (PhysicalDevice == VK_NULL_HANDLE)
 		{
-			PhysicalDevice = DiscreteDevices.front();
-		}
-		else
-		{
-			PhysicalDevice = IntegratedDevices.front();
+			if (!DiscreteDevices.empty())
+			{
+				PhysicalDevice = DiscreteDevices.front();
+			}
+			else
+			{
+				PhysicalDevice = IntegratedDevices.front();
+			}
 		}
 
 		CreateDevice(Devices[PhysicalDevice]);
@@ -283,17 +346,17 @@ struct SVulkanInstance
 		VkInstanceCreateInfo Info;
 		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
 
-		uint32_t Count = 0;
-		VERIFY_VKRESULT(vkEnumerateInstanceLayerProperties(&Count, nullptr));
+		uint32_t NumLayers = 0;
+		VERIFY_VKRESULT(vkEnumerateInstanceLayerProperties(&NumLayers, nullptr));
 
-		std::vector<VkLayerProperties> LayerProperties(Count);
-		VERIFY_VKRESULT(vkEnumerateInstanceLayerProperties(&Count, LayerProperties.data()));
+		std::vector<VkLayerProperties> LayerProperties(NumLayers);
+		VERIFY_VKRESULT(vkEnumerateInstanceLayerProperties(&NumLayers, LayerProperties.data()));
 
-		Count = 0;
-		VERIFY_VKRESULT(vkEnumerateInstanceExtensionProperties(nullptr, &Count, nullptr));
+		uint32 NumExtensions = 0;
+		VERIFY_VKRESULT(vkEnumerateInstanceExtensionProperties(nullptr, &NumExtensions, nullptr));
 
-		std::vector<VkExtensionProperties> ExtensionProperties(Count);
-		VERIFY_VKRESULT(vkEnumerateInstanceExtensionProperties(nullptr, &Count, ExtensionProperties.data()));
+		std::vector<VkExtensionProperties> ExtensionProperties(NumExtensions);
+		VERIFY_VKRESULT(vkEnumerateInstanceExtensionProperties(nullptr, &NumExtensions, ExtensionProperties.data()));
 
 		const char* Layers[] =
 		{
