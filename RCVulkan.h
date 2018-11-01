@@ -32,7 +32,7 @@ inline void ZeroVulkanMem(T& VulkanStruct, VkStructureType Type)
 //	static_assert( (void*)&VulkanStruct == (void*)&VulkanStruct.sType, "Vulkan struct size mismatch");
 	VulkanStruct.sType = Type;
 	const auto Size = sizeof(VulkanStruct) - sizeof(VkStructureType);
-	memset((uint8_t*)&VulkanStruct.sType + sizeof(VkStructureType), 0, Size);
+	memset((uint8*)&VulkanStruct.sType + sizeof(VkStructureType), 0, Size);
 }
 
 struct SVulkan
@@ -43,25 +43,220 @@ struct SVulkan
 	std::vector<VkPhysicalDevice> DiscreteDevices;
 	std::vector<VkPhysicalDevice> IntegratedDevices;
 
-	VkSurfaceKHR Surface = VK_NULL_HANDLE;
-
-	struct FDevice
+	struct SDevice
 	{
 		VkDevice Device = VK_NULL_HANDLE;
 		VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
 		VkPhysicalDeviceProperties Props;
+		VkQueue GfxQueue = VK_NULL_HANDLE;
+		VkQueue ComputeQueue = VK_NULL_HANDLE;
+		VkQueue TransferQueue = VK_NULL_HANDLE;
+		VkQueue PresentQueue = VK_NULL_HANDLE;
 		uint32 GfxQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 ComputeQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 TransferQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
+
+		VkImageView CreateImageView(VkImage Image, VkFormat Format)
+		{
+			VkImageViewCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO);
+			Info.format = Format;
+			Info.image = Image;
+
+			VkImageView ImageView = VK_NULL_HANDLE;
+			VERIFY_VKRESULT(vkCreateImageView(Device, &Info, nullptr, &ImageView));
+			return ImageView;
+		}
+
+		VkSemaphore CreateSemaphore()
+		{
+			VkSemaphoreCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO);
+			VkSemaphore Semaphore = VK_NULL_HANDLE;
+			VERIFY_VKRESULT(vkCreateSemaphore(Device, &Info, nullptr, &Semaphore));
+			return Semaphore;
+		}
+
+		void Create()
+		{
+			uint32 NumExtensions = 0;
+			VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &NumExtensions, nullptr));
+			std::vector<VkExtensionProperties> ExtensionProperties(NumExtensions);
+			VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &NumExtensions, ExtensionProperties.data()));
+
+			check(Props.limits.timestampComputeAndGraphics);
+
+			float Priorities[1] ={1.0f};
+
+			const char* DeviceExtensions[] =
+			{
+				VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+				/*
+							VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+							VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
+							VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+				*/
+			};
+
+			VerifyExtensions(ExtensionProperties, DeviceExtensions);
+
+			VkDeviceQueueCreateInfo QueueInfo;
+			ZeroVulkanMem(QueueInfo, VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
+			QueueInfo.queueFamilyIndex = GfxQueueIndex;
+			QueueInfo.queueCount = 1;
+			QueueInfo.pQueuePriorities = Priorities;
+
+			VkDeviceCreateInfo CreateInfo;
+			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
+			CreateInfo.queueCreateInfoCount = 1;
+			CreateInfo.pQueueCreateInfos = &QueueInfo;
+			CreateInfo.ppEnabledExtensionNames = DeviceExtensions;
+			CreateInfo.enabledExtensionCount = sizeof(DeviceExtensions) / sizeof(DeviceExtensions[0]);
+
+			VERIFY_VKRESULT(vkCreateDevice(PhysicalDevice, &CreateInfo, nullptr, &Device));
+
+			vkGetDeviceQueue(Device, GfxQueueIndex, 0, &GfxQueue);
+			vkGetDeviceQueue(Device, TransferQueueIndex, 0, &TransferQueue);
+			vkGetDeviceQueue(Device, ComputeQueueIndex, 0, &ComputeQueue);
+			vkGetDeviceQueue(Device, PresentQueueIndex, 0, &PresentQueue);
+		}
 	};
+
+	struct FSwapchain
+	{
+		SDevice* Device = nullptr;
+		VkSwapchainKHR Swapchain = VK_NULL_HANDLE;
+		VkSemaphore AcquireBackbufferSemaphore = VK_NULL_HANDLE;
+		VkSemaphore FinalSemaphore = VK_NULL_HANDLE;
+		uint32 ImageIndex = ~0;
+		std::vector<VkImage> Images;
+		std::vector<VkImageView> ImageViews;
+		VkSurfaceKHR Surface = VK_NULL_HANDLE;
+		VkFormat Format = VK_FORMAT_UNDEFINED;
+		VkSurfaceCapabilitiesKHR SurfaceCaps;
+
+		void SetupSurface(SDevice* InDevice, VkInstance Instance, GLFWwindow* Window)
+		{
+			Device = InDevice;
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
+			{
+				VkWin32SurfaceCreateInfoKHR CreateInfo;
+				ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
+				CreateInfo.hinstance = GetModuleHandle(0);
+				CreateInfo.hwnd = glfwGetWin32Window(Window);
+
+				VERIFY_VKRESULT(vkCreateWin32SurfaceKHR(Instance, &CreateInfo, 0, &Surface));
+			}
+#endif
+			VkBool32 bSupportsPresent = false;
+			VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceSupportKHR(Device->PhysicalDevice, Device->PresentQueueIndex, Surface, &bSupportsPresent));
+			check(bSupportsPresent);
+
+			uint32 NumFormats = 0;
+			VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(Device->PhysicalDevice, Surface, &NumFormats, nullptr));
+			check(NumFormats > 0);
+			std::vector<VkSurfaceFormatKHR> Formats(NumFormats);
+			VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(Device->PhysicalDevice, Surface, &NumFormats, Formats.data()));
+
+			if (Formats.size() > 1)
+			{
+				for (VkSurfaceFormatKHR FoundFormat : Formats)
+				{
+					if (FoundFormat.format == VK_FORMAT_R8G8B8A8_UNORM || FoundFormat.format == VK_FORMAT_B8G8R8A8_UNORM)
+					{
+						Format = FoundFormat.format;
+						break;
+					}
+				}
+			}
+
+			if (Format == VK_FORMAT_UNDEFINED)
+			{
+				Format = Formats[0].format;
+			}
+
+			VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(Device->PhysicalDevice, Surface, &SurfaceCaps));
+
+			AcquireBackbufferSemaphore = Device->CreateSemaphore();
+			FinalSemaphore = Device->CreateSemaphore();
+		}
+
+		void Create(SDevice& Device, GLFWwindow* Window)
+		{
+			DestroyImages();
+
+			VkSwapchainCreateInfoKHR CreateInfo;
+			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
+			CreateInfo.surface = Surface;
+			CreateInfo.minImageCount = Min(2u, SurfaceCaps.minImageCount);
+			//CreateInfo.maxImageCount = std::max(3u, SurfaceCaps.maxImageCount);
+			CreateInfo.imageFormat = Format;
+			CreateInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+			CreateInfo.imageExtent.width = SurfaceCaps.currentExtent.width;
+			CreateInfo.imageExtent.height = SurfaceCaps.currentExtent.height;
+			CreateInfo.imageArrayLayers = 1;
+			CreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+			CreateInfo.queueFamilyIndexCount = 1;
+			CreateInfo.pQueueFamilyIndices = &Device.PresentQueueIndex;
+			CreateInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+			CreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+			CreateInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+			CreateInfo.oldSwapchain = Swapchain;
+
+			VERIFY_VKRESULT(vkCreateSwapchainKHR(Device.Device, &CreateInfo, nullptr, &Swapchain));
+
+			uint32 NumImages = 0;
+			VERIFY_VKRESULT(vkGetSwapchainImagesKHR(Device.Device, Swapchain, &NumImages, nullptr));
+			Images.resize(NumImages);
+			VERIFY_VKRESULT(vkGetSwapchainImagesKHR(Device.Device, Swapchain, &NumImages, Images.data()));
+
+			ImageViews.resize(NumImages);
+			for (uint32 i = 0; i < NumImages; ++i)
+			{
+				ImageViews[i] = Device.CreateImageView(Images[i], Format);
+			}
+		}
+
+		void DestroyImages()
+		{
+			for (VkImageView& ImageView : ImageViews)
+			{
+				if (ImageView != VK_NULL_HANDLE)
+				{
+					vkDestroyImageView(Device->Device, ImageView, nullptr);
+					ImageView = VK_NULL_HANDLE;
+				}
+			}
+		}
+
+		void AcquireBackbuffer()
+		{
+			uint64 Timeout = 5 * 1000 * 1000;
+			VERIFY_VKRESULT(vkAcquireNextImageKHR(Device->Device, Swapchain, Timeout, AcquireBackbufferSemaphore, VK_NULL_HANDLE, &ImageIndex));
+		}
+
+		void Present(VkQueue Queue, VkSemaphore WaitSemaphore)
+		{
+			VkPresentInfoKHR Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_PRESENT_INFO_KHR);
+			Info.waitSemaphoreCount = 1;
+			Info.pWaitSemaphores = &WaitSemaphore;
+			Info.swapchainCount = 1;
+			Info.pSwapchains = &Swapchain;
+			Info.pImageIndices = &ImageIndex;
+
+			VERIFY_VKRESULT(vkQueuePresentKHR(Queue, &Info));
+		}
+	};
+	FSwapchain Swapchain;
 
 	struct FRenderPass
 	{
 		VkRenderPass RenderPass = VK_NULL_HANDLE;
 	};
 
-	std::map<VkPhysicalDevice, FDevice> Devices;
+	std::map<VkPhysicalDevice, SDevice> Devices;
 
 	VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
 
@@ -153,110 +348,14 @@ struct SVulkan
 			Device.ComputeQueueIndex = ComputeQueueIndex;
 			Device.GfxQueueIndex = GfxQueueIndex;
 			Device.TransferQueueIndex = TransferQueueIndex;
+			Device.PresentQueueIndex = PresentQueueIndex;
 		}
 	}
 
-	static void CreateDevice(FDevice& Device)
+	void SetupSwapchain(SDevice& Device, GLFWwindow* Window)
 	{
-		uint32 NumExtensions = 0;
-		VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(Device.PhysicalDevice, nullptr, &NumExtensions, nullptr));
-		std::vector<VkExtensionProperties> ExtensionProperties(NumExtensions);
-		VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(Device.PhysicalDevice, nullptr, &NumExtensions, ExtensionProperties.data()));
-
-		check(Device.Props.limits.timestampComputeAndGraphics);
-
-		float Priorities[1] = {1.0f};
-
-		const char* DeviceExtensions[] =
-		{
-			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-/*
-			VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-			VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
-			VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
-*/
-		};
-
-		VerifyExtensions(ExtensionProperties, DeviceExtensions);
-
-		VkDeviceQueueCreateInfo QueueInfo;
-		ZeroVulkanMem(QueueInfo, VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
-		QueueInfo.queueFamilyIndex = Device.GfxQueueIndex;
-		QueueInfo.queueCount = 1;
-		QueueInfo.pQueuePriorities = Priorities;
-
-		VkDeviceCreateInfo CreateInfo;
-		ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
-		CreateInfo.queueCreateInfoCount = 1;
-		CreateInfo.pQueueCreateInfos = &QueueInfo;
-		CreateInfo.ppEnabledExtensionNames = DeviceExtensions;
-		CreateInfo.enabledExtensionCount = sizeof(DeviceExtensions) / sizeof(DeviceExtensions[0]);
-
-		VERIFY_VKRESULT(vkCreateDevice(Device.PhysicalDevice, &CreateInfo, nullptr, &Device.Device));
-	}
-
-	void SetupSwapchain(FDevice& Device, GLFWwindow* Window)
-	{
-#if defined(VK_USE_PLATFORM_WIN32_KHR)
-		{
-			VkWin32SurfaceCreateInfoKHR CreateInfo;
-			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
-			CreateInfo.hinstance = GetModuleHandle(0);
-			CreateInfo.hwnd = glfwGetWin32Window(Window);
-
-			VERIFY_VKRESULT(vkCreateWin32SurfaceKHR(Instance, &CreateInfo, 0, &Surface));
-		}
-#endif
-		VkBool32 bSupportsPresent = false;
-		VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceSupportKHR(Device.PhysicalDevice, Device.GfxQueueIndex, Surface, &bSupportsPresent));
-		check(bSupportsPresent);
-
-		uint32 NumFormats = 0;
-		VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(Device.PhysicalDevice, Surface, &NumFormats, nullptr));
-		check(NumFormats > 0);
-		std::vector<VkSurfaceFormatKHR> Formats(NumFormats);
-		VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(Device.PhysicalDevice, Surface, &NumFormats, Formats.data()));
-
-		VkFormat Format = VK_FORMAT_UNDEFINED;
-		if (Formats.size() > 1)
-		{
-			for (VkSurfaceFormatKHR FoundFormat : Formats)
-			{
-				if (FoundFormat.format == VK_FORMAT_R8G8B8A8_UNORM || FoundFormat.format == VK_FORMAT_B8G8R8A8_UNORM)
-				{
-					Format = FoundFormat.format;
-					break;
-				}
-			}
-		}
-
-		if (Format == VK_FORMAT_UNDEFINED)
-		{
-			Format = Formats[0].format;
-		}
-
-		VkSurfaceCapabilitiesKHR SurfaceCaps;
-		VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(Device.PhysicalDevice, Surface, &SurfaceCaps));
-
-		VkSwapchainCreateInfoKHR CreateInfo;
-		ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
-		CreateInfo.surface = Surface;
-		CreateInfo.minImageCount = Min(2u, SurfaceCaps.minImageCount);
-		//CreateInfo.maxImageCount = std::max(3u, SurfaceCaps.maxImageCount);
-		CreateInfo.imageFormat = Format;
-		CreateInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-		CreateInfo.imageExtent.width = SurfaceCaps.currentExtent.width;
-		CreateInfo.imageExtent.height = SurfaceCaps.currentExtent.height;
-		CreateInfo.imageArrayLayers = 1;
-		CreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-		CreateInfo.queueFamilyIndexCount = 1;
-		CreateInfo.pQueueFamilyIndices = &Device.PresentQueueIndex;
-		CreateInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-		CreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-		CreateInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-
-		VkSwapchainKHR Swapchain = VK_NULL_HANDLE;
-		VERIFY_VKRESULT(vkCreateSwapchainKHR(Device.Device, &CreateInfo, nullptr, &Swapchain));
+		Swapchain.SetupSurface(&Device, Instance, Window);
+		Swapchain.Create(Device, Window);
 	}
 
 	VkPhysicalDevice FindPhysicalDeviceByVendorID(uint32 VendorID)
@@ -310,18 +409,21 @@ struct SVulkan
 			}
 		}
 
-		CreateDevice(Devices[PhysicalDevice]);
+		Devices[PhysicalDevice].Create();
 		SetupSwapchain(Devices[PhysicalDevice], Window);
 	}
 
-	static VkBool32 DebugReport(VkDebugReportFlagsEXT Flags, VkDebugReportObjectTypeEXT ObjectType, uint64_t Object,
-		size_t Location, int32_t MessageCode, const char* LayerPrefix, const char* Message, void* UserData)
+	static VkBool32 DebugReport(VkDebugReportFlagsEXT Flags, VkDebugReportObjectTypeEXT ObjectType, uint64 Object,
+		size_t Location, int32 MessageCode, const char* LayerPrefix, const char* Message, void* UserData)
 	{
-		std::string s = (Flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) ? "[Error]" : "";
+		std::string s = "***";
+		s += (Flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) ? "[Error]" : "";
 		s += (Flags & VK_DEBUG_REPORT_WARNING_BIT_EXT) ? "[Warning]" : "";
 		s += (Flags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) ? "[Perf]" : "";
+		s += (Flags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) ? "[Info]" : "";
 		s += " ";
 		s += Message;
+		s += "\n";
 		::OutputDebugStringA(s.c_str());
 		return VK_FALSE;
 	}
@@ -330,7 +432,7 @@ struct SVulkan
 	{
 		VkDebugReportCallbackCreateInfoEXT Info;
 		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT);
-		Info.flags = VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT | VK_DEBUG_REPORT_ERROR_BIT_EXT;
+		Info.flags = /*VK_DEBUG_REPORT_INFORMATION_BIT_EXT | */VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT | VK_DEBUG_REPORT_ERROR_BIT_EXT;
 		Info.pfnCallback = DebugReport;
 
 		VERIFY_VKRESULT(vkCreateDebugReportCallbackEXT(Instance, &Info, 0, &DebugReportCallback));
@@ -385,7 +487,7 @@ struct SVulkan
 		VkInstanceCreateInfo Info;
 		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
 
-		uint32_t NumLayers = 0;
+		uint32 NumLayers = 0;
 		VERIFY_VKRESULT(vkEnumerateInstanceLayerProperties(&NumLayers, nullptr));
 
 		std::vector<VkLayerProperties> LayerProperties(NumLayers);
@@ -422,6 +524,12 @@ struct SVulkan
 
 	void Deinit()
 	{
+		if (DebugReportCallback != VK_NULL_HANDLE)
+		{
+			vkDestroyDebugReportCallbackEXT(Instance, DebugReportCallback, nullptr);
+			DebugReportCallback = VK_NULL_HANDLE;
+		}
+
 		vkDestroyInstance(Instance, nullptr);
 		Instance = VK_NULL_HANDLE;
 	}
