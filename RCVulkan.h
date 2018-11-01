@@ -3,6 +3,7 @@
 #include "../RCUtils/RCUtilsBase.h"
 #include "../RCUtils/RCUtilsCmdLine.h"
 
+#include <algorithm>
 /*
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -49,9 +50,15 @@ struct SVulkan
 		VkDevice Device = VK_NULL_HANDLE;
 		VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
 		VkPhysicalDeviceProperties Props;
-		uint32 GfxQueue = VK_QUEUE_FAMILY_IGNORED;
-		uint32 ComputeQueue = VK_QUEUE_FAMILY_IGNORED;
-		uint32 TransferQueue = VK_QUEUE_FAMILY_IGNORED;
+		uint32 GfxQueueIndex = VK_QUEUE_FAMILY_IGNORED;
+		uint32 ComputeQueueIndex = VK_QUEUE_FAMILY_IGNORED;
+		uint32 TransferQueueIndex = VK_QUEUE_FAMILY_IGNORED;
+		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
+	};
+
+	struct FRenderPass
+	{
+		VkRenderPass RenderPass = VK_NULL_HANDLE;
 	};
 
 	std::map<VkPhysicalDevice, FDevice> Devices;
@@ -103,18 +110,22 @@ struct SVulkan
 			VkPhysicalDeviceProperties Props;
 			vkGetPhysicalDeviceProperties(PD, &Props);
 
-			uint32 GfxQueue = FindQueue(PD, VK_QUEUE_GRAPHICS_BIT);
-			uint32 ComputeQueue = FindQueue(PD, VK_QUEUE_COMPUTE_BIT);
-			uint32 TransferQueue = FindQueue(PD, VK_QUEUE_TRANSFER_BIT);
-			if (GfxQueue == VK_QUEUE_FAMILY_IGNORED)
-			{
-				continue;
-			}
-
+			uint32 GfxQueueIndex = FindQueue(PD, VK_QUEUE_GRAPHICS_BIT);
+			uint32 ComputeQueueIndex = FindQueue(PD, VK_QUEUE_COMPUTE_BIT);
+			uint32 TransferQueueIndex = FindQueue(PD, VK_QUEUE_TRANSFER_BIT);
+			uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 #if defined(VK_USE_PLATFORM_WIN32_KHR) && VK_USE_PLATFORM_WIN32_KHR
-			if (!vkGetPhysicalDeviceWin32PresentationSupportKHR(PD, GfxQueue))
+			if (vkGetPhysicalDeviceWin32PresentationSupportKHR(PD, GfxQueueIndex))
 			{
-				continue;
+				PresentQueueIndex = GfxQueueIndex;
+			}
+			else if (GfxQueueIndex != ComputeQueueIndex && vkGetPhysicalDeviceWin32PresentationSupportKHR(PD, ComputeQueueIndex))
+			{
+				PresentQueueIndex = ComputeQueueIndex;
+			}
+			else if (GfxQueueIndex != TransferQueueIndex && vkGetPhysicalDeviceWin32PresentationSupportKHR(PD, TransferQueueIndex))
+			{
+				PresentQueueIndex = TransferQueueIndex;
 			}
 #endif
 			if (Props.apiVersion < VK_API_VERSION_1_1)
@@ -139,9 +150,9 @@ struct SVulkan
 			auto& Device = Devices[PD];
 			Device.PhysicalDevice = PD;
 			Device.Props = Props;
-			Device.ComputeQueue = ComputeQueue;
-			Device.GfxQueue = GfxQueue;
-			Device.TransferQueue = TransferQueue;
+			Device.ComputeQueueIndex = ComputeQueueIndex;
+			Device.GfxQueueIndex = GfxQueueIndex;
+			Device.TransferQueueIndex = TransferQueueIndex;
 		}
 	}
 
@@ -170,7 +181,7 @@ struct SVulkan
 
 		VkDeviceQueueCreateInfo QueueInfo;
 		ZeroVulkanMem(QueueInfo, VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
-		QueueInfo.queueFamilyIndex =Device.GfxQueue;
+		QueueInfo.queueFamilyIndex = Device.GfxQueueIndex;
 		QueueInfo.queueCount = 1;
 		QueueInfo.pQueuePriorities = Priorities;
 
@@ -187,13 +198,18 @@ struct SVulkan
 	void SetupSwapchain(FDevice& Device, GLFWwindow* Window)
 	{
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
-		VkWin32SurfaceCreateInfoKHR CreateInfo;
-		ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
-		CreateInfo.hinstance = GetModuleHandle(0);
-		CreateInfo.hwnd = glfwGetWin32Window(Window);
+		{
+			VkWin32SurfaceCreateInfoKHR CreateInfo;
+			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR);
+			CreateInfo.hinstance = GetModuleHandle(0);
+			CreateInfo.hwnd = glfwGetWin32Window(Window);
 
-		VERIFY_VKRESULT(vkCreateWin32SurfaceKHR(Instance, &CreateInfo, 0, &Surface));
+			VERIFY_VKRESULT(vkCreateWin32SurfaceKHR(Instance, &CreateInfo, 0, &Surface));
+		}
 #endif
+		VkBool32 bSupportsPresent = false;
+		VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceSupportKHR(Device.PhysicalDevice, Device.GfxQueueIndex, Surface, &bSupportsPresent));
+		check(bSupportsPresent);
 
 		uint32 NumFormats = 0;
 		VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceFormatsKHR(Device.PhysicalDevice, Surface, &NumFormats, nullptr));
@@ -218,6 +234,29 @@ struct SVulkan
 		{
 			Format = Formats[0].format;
 		}
+
+		VkSurfaceCapabilitiesKHR SurfaceCaps;
+		VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(Device.PhysicalDevice, Surface, &SurfaceCaps));
+
+		VkSwapchainCreateInfoKHR CreateInfo;
+		ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
+		CreateInfo.surface = Surface;
+		CreateInfo.minImageCount = Min(2u, SurfaceCaps.minImageCount);
+		//CreateInfo.maxImageCount = std::max(3u, SurfaceCaps.maxImageCount);
+		CreateInfo.imageFormat = Format;
+		CreateInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+		CreateInfo.imageExtent.width = SurfaceCaps.currentExtent.width;
+		CreateInfo.imageExtent.height = SurfaceCaps.currentExtent.height;
+		CreateInfo.imageArrayLayers = 1;
+		CreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+		CreateInfo.queueFamilyIndexCount = 1;
+		CreateInfo.pQueueFamilyIndices = &Device.PresentQueueIndex;
+		CreateInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+		CreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+		CreateInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+
+		VkSwapchainKHR Swapchain = VK_NULL_HANDLE;
+		VERIFY_VKRESULT(vkCreateSwapchainKHR(Device.Device, &CreateInfo, nullptr, &Swapchain));
 	}
 
 	VkPhysicalDevice FindPhysicalDeviceByVendorID(uint32 VendorID)
