@@ -38,7 +38,7 @@ inline void ZeroVulkanMem(T& VulkanStruct, VkStructureType Type)
 struct SVulkan
 {
 	VkInstance Instance = VK_NULL_HANDLE;
-	VkDebugReportCallbackEXT DebugReportCallback = nullptr;
+	VkDebugUtilsMessengerEXT DebugReportCallback = nullptr;
 
 	std::vector<VkPhysicalDevice> DiscreteDevices;
 	std::vector<VkPhysicalDevice> IntegratedDevices;
@@ -57,12 +57,16 @@ struct SVulkan
 		uint32 TransferQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 
-		VkImageView CreateImageView(VkImage Image, VkFormat Format)
+		VkImageView CreateImageView(VkImage Image, VkFormat Format, VkImageAspectFlags Aspect, VkImageViewType ViewType)
 		{
 			VkImageViewCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO);
 			Info.format = Format;
 			Info.image = Image;
+			Info.viewType = ViewType;
+			Info.subresourceRange.aspectMask = Aspect;
+			Info.subresourceRange.layerCount = 1;
+			Info.subresourceRange.levelCount = 1;
 
 			VkImageView ImageView = VK_NULL_HANDLE;
 			VERIFY_VKRESULT(vkCreateImageView(Device, &Info, nullptr, &ImageView));
@@ -214,7 +218,7 @@ struct SVulkan
 			ImageViews.resize(NumImages);
 			for (uint32 i = 0; i < NumImages; ++i)
 			{
-				ImageViews[i] = Device.CreateImageView(Images[i], Format);
+				ImageViews[i] = Device.CreateImageView(Images[i], Format, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D);
 			}
 		}
 
@@ -413,29 +417,43 @@ struct SVulkan
 		SetupSwapchain(Devices[PhysicalDevice], Window);
 	}
 
-	static VkBool32 DebugReport(VkDebugReportFlagsEXT Flags, VkDebugReportObjectTypeEXT ObjectType, uint64 Object,
-		size_t Location, int32 MessageCode, const char* LayerPrefix, const char* Message, void* UserData)
+	static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
+		VkDebugUtilsMessageTypeFlagsEXT MessageType, const VkDebugUtilsMessengerCallbackDataEXT* CallbackData,
+		void* UserData)
 	{
 		std::string s = "***";
-		s += (Flags & VK_DEBUG_REPORT_ERROR_BIT_EXT) ? "[Error]" : "";
-		s += (Flags & VK_DEBUG_REPORT_WARNING_BIT_EXT) ? "[Warning]" : "";
-		s += (Flags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) ? "[Perf]" : "";
-		s += (Flags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) ? "[Info]" : "";
+		s += (MessageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) ? "[Valid]" : "";
+		s += (MessageType & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT) ? "[Gen]" : "";
+		s += (MessageType & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) ? "[Perf]" : "";
+		s += (MessageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) ? "[Error]" : "";
+		s += (MessageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) ? "[Warn]" : "";
+		s += (MessageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) ? "[Info]" : "";
+		s += (MessageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) ? "[Verb]" : "";
 		s += " ";
-		s += Message;
+		if (CallbackData && CallbackData->pMessage)
+		{
+			s += CallbackData->pMessage;
+		}
 		s += "\n";
+
 		::OutputDebugStringA(s.c_str());
 		return VK_FALSE;
 	}
 
 	void InitDebugCallback()
 	{
-		VkDebugReportCallbackCreateInfoEXT Info;
-		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT);
-		Info.flags = /*VK_DEBUG_REPORT_INFORMATION_BIT_EXT | */VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT | VK_DEBUG_REPORT_ERROR_BIT_EXT;
-		Info.pfnCallback = DebugReport;
+		VkDebugUtilsMessengerCreateInfoEXT Info;
+		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
+		Info.messageSeverity =
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+		Info.messageType =
+			VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+			VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+		Info.pfnUserCallback = DebugReport;
 
-		VERIFY_VKRESULT(vkCreateDebugReportCallbackEXT(Instance, &Info, 0, &DebugReportCallback));
+		VERIFY_VKRESULT(vkCreateDebugUtilsMessengerEXT(Instance, &Info, nullptr, &DebugReportCallback));
 	}
 
 	static void VerifyLayer(const std::vector<VkLayerProperties>& LayerProperties, const char* Name)
@@ -510,7 +528,7 @@ struct SVulkan
 		const char* Extensions[] = 
 		{
 			VK_KHR_SURFACE_EXTENSION_NAME,
-			VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+			VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #if defined(VK_USE_PLATFORM_WIN32_KHR) && VK_USE_PLATFORM_WIN32_KHR
 			VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
 #endif
@@ -526,7 +544,7 @@ struct SVulkan
 	{
 		if (DebugReportCallback != VK_NULL_HANDLE)
 		{
-			vkDestroyDebugReportCallbackEXT(Instance, DebugReportCallback, nullptr);
+			vkDestroyDebugUtilsMessengerEXT(Instance, DebugReportCallback, nullptr);
 			DebugReportCallback = VK_NULL_HANDLE;
 		}
 
