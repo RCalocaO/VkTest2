@@ -4,6 +4,7 @@
 #include "../RCUtils/RCUtilsCmdLine.h"
 
 #include <algorithm>
+#include <atomic>
 /*
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -27,6 +28,13 @@
 #define VERIFY_VKRESULT(x)	if ((x) != VK_SUCCESS) { ::OutputDebugStringA(#x); ::OutputDebugStringA("\n"); check(0);}
 
 template <typename T>
+inline void ZeroMem(T& Object)
+{
+	const auto Size = sizeof(T);
+	memset(&Object, 0, Size);
+}
+
+template <typename T>
 inline void ZeroVulkanMem(T& VulkanStruct, VkStructureType Type)
 {
 //	static_assert( (void*)&VulkanStruct == (void*)&VulkanStruct.sType, "Vulkan struct size mismatch");
@@ -43,9 +51,143 @@ struct SVulkan
 	std::vector<VkPhysicalDevice> DiscreteDevices;
 	std::vector<VkPhysicalDevice> IntegratedDevices;
 
+	struct FFence
+	{
+		VkFence Fence = VK_NULL_HANDLE;
+		/*std::atomic<*/uint64 Counter = 0;
+		VkDevice Device = VK_NULL_HANDLE;
+
+		void Create(VkDevice Device)
+		{
+			check(Fence == VK_NULL_HANDLE);
+			VkFenceCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
+			VERIFY_VKRESULT(vkCreateFence(Device, &Info, nullptr, &Fence));
+		}
+
+		operator VkFence()
+		{
+			return Fence;
+		}
+
+		void Refresh()
+		{
+			VkResult Result = vkGetFenceStatus(Device, Fence);
+			if (Result == VK_SUCCESS)
+			{
+				++Counter;
+				vkResetFences(Device, 1, &Fence);
+			}
+			else if (Result != VK_NOT_READY)
+			{
+				check(0);
+			}
+		}
+	};
+
+	struct FCmdBuffer
+	{
+		FFence Fence;
+		VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+
+		enum class EState
+		{
+			Available,
+			Begun,
+			InRenderPass,
+			Ended,
+			Submitted,
+		};
+		EState State = EState::Available;
+
+		void Create(VkDevice Device, VkCommandPool CmdPool)
+		{
+			VkCommandBufferAllocateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
+			Info.commandBufferCount = 1;
+			Info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+			Info.commandPool = CmdPool;
+			vkAllocateCommandBuffers(Device, &Info, &CmdBuffer);
+
+			Fence.Create(Device);
+		}
+
+		operator VkCommandBuffer()
+		{
+			return CmdBuffer;
+		}
+
+		inline bool IsAvailable() const
+		{
+			return State == EState::Available;
+		}
+
+		void Begin()
+		{
+			check(State == EState::Available);
+			VkCommandBufferBeginInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
+			Info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+			VERIFY_VKRESULT(vkBeginCommandBuffer(CmdBuffer, &Info));
+			State = EState::Begun;
+		}
+
+		void End()
+		{
+			check(State == EState::Begun);
+			vkEndCommandBuffer(CmdBuffer);
+			State = EState::Ended;
+		}
+	};
+
+	struct FCommandPool
+	{
+		VkCommandPool CmdPool = VK_NULL_HANDLE;
+		VkDevice Device = VK_NULL_HANDLE;
+
+		void Create(VkDevice InDevice, uint32 InQueueIndex)
+		{
+			Device = InDevice;
+			QueueIndex = InQueueIndex;
+
+			VkCommandPoolCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO);
+			Info.queueFamilyIndex = QueueIndex;
+			vkCreateCommandPool(Device, &Info, nullptr, &CmdPool);
+		}
+
+		FCmdBuffer& GetOrAddCmdBuffer()
+		{
+			for (auto& CmdBuffer : CmdBuffers)
+			{
+				if (CmdBuffer.IsAvailable())
+				{
+					return CmdBuffer;
+				}
+			}
+
+			FCmdBuffer CmdBuffer;
+			CmdBuffer.Create(Device, CmdPool);
+			CmdBuffers.push_back(CmdBuffer);
+
+			return CmdBuffers.back();
+		}
+
+		FCmdBuffer& Begin()
+		{
+			FCmdBuffer& CmdBuffer = GetOrAddCmdBuffer();
+			CmdBuffer.Begin();
+			return CmdBuffer;
+		}
+
+		std::vector<FCmdBuffer> CmdBuffers;
+		uint32 QueueIndex  = ~0;
+	};
+
 	struct SDevice
 	{
 		VkDevice Device = VK_NULL_HANDLE;
+		std::map<uint32, FCommandPool> CmdPools;
 		VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
 		VkPhysicalDeviceProperties Props;
 		VkQueue GfxQueue = VK_NULL_HANDLE;
@@ -124,6 +266,45 @@ struct SVulkan
 			vkGetDeviceQueue(Device, TransferQueueIndex, 0, &TransferQueue);
 			vkGetDeviceQueue(Device, ComputeQueueIndex, 0, &ComputeQueue);
 			vkGetDeviceQueue(Device, PresentQueueIndex, 0, &PresentQueue);
+
+			CmdPools[GfxQueueIndex].Create(Device, GfxQueueIndex);
+			if (GfxQueueIndex != ComputeQueueIndex)
+			{
+				CmdPools[ComputeQueueIndex].Create(Device, ComputeQueueIndex);
+			}
+			if (GfxQueueIndex != TransferQueueIndex)
+			{
+				CmdPools[TransferQueueIndex].Create(Device, TransferQueueIndex);
+			}
+		}
+
+		FCmdBuffer& BeginCommandBuffer(uint32 QueueIndex)
+		{
+			return CmdPools[QueueIndex].Begin();
+		}
+
+		void Submit(VkQueue Queue, FCmdBuffer& CmdBuffer, VkPipelineStageFlags WaitFlags, VkSemaphore WaitSemaphore, VkSemaphore SignalSemaphore, VkFence Fence)
+		{
+			check(CmdBuffer.State == FCmdBuffer::EState::Ended);
+
+			VkSubmitInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_SUBMIT_INFO);
+			Info.commandBufferCount = 1;
+			Info.pCommandBuffers = &CmdBuffer.CmdBuffer;
+			if (WaitSemaphore != VK_NULL_HANDLE)
+			{
+				Info.waitSemaphoreCount = 1;
+				Info.pWaitSemaphores = &WaitSemaphore;
+				Info.pWaitDstStageMask = &WaitFlags;
+			}
+			if (SignalSemaphore != VK_NULL_HANDLE)
+			{
+				Info.signalSemaphoreCount = 1;
+				Info.pSignalSemaphores = &SignalSemaphore;
+			}
+			vkQueueSubmit(Queue, 1, &Info, Fence);
+
+			CmdBuffer.State = FCmdBuffer::EState::Submitted;
 		}
 	};
 
@@ -200,7 +381,7 @@ struct SVulkan
 			CreateInfo.imageExtent.width = SurfaceCaps.currentExtent.width;
 			CreateInfo.imageExtent.height = SurfaceCaps.currentExtent.height;
 			CreateInfo.imageArrayLayers = 1;
-			CreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+			CreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 			CreateInfo.queueFamilyIndexCount = 1;
 			CreateInfo.pQueueFamilyIndices = &Device.PresentQueueIndex;
 			CreateInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;

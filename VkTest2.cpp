@@ -12,12 +12,39 @@
 static SVulkan GVulkan;
 
 
+static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
+{
+	VkClearColorValue ClearColors;
+	ClearColors.float32[0] = Color[0];
+	ClearColors.float32[1] = Color[1];
+	ClearColors.float32[2] = Color[2];
+	ClearColors.float32[3] = Color[3];
+
+	VkImageSubresourceRange Range;
+	ZeroMem(Range);
+	Range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	Range.layerCount = 1;
+	Range.levelCount = 1;
+	vkCmdClearColorImage(CmdBuffer, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &ClearColors, 1, &Range);
+}
+
 void Render()
 {
 	SVulkan::SDevice& Device = GVulkan.Devices[GVulkan.PhysicalDevice];
 	GVulkan.Swapchain.AcquireBackbuffer();
 
+	vkResetCommandPool(Device.Device, Device.CmdPools[Device.GfxQueueIndex].CmdPool, 0);
+
+	SVulkan::FCmdBuffer& CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
+	float ClearColor[4] = {1.0f, 1.0f, 0.0f, 0.0f};
+	ClearImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
+	CmdBuffer.End();
+
+	uint64 FenceCounter = CmdBuffer.Fence.Counter;
+	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore, CmdBuffer.Fence);
+
 	GVulkan.Swapchain.Present(Device.TransferQueue, GVulkan.Swapchain.FinalSemaphore);
+	vkWaitForFences(Device.Device, 1, &CmdBuffer.Fence.Fence, VK_TRUE, 5 * 1000 * 1000);
 }
 
 
