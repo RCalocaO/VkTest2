@@ -36,8 +36,22 @@ void Render()
 	vkResetCommandPool(Device.Device, Device.CmdPools[Device.GfxQueueIndex].CmdPool, 0);
 
 	SVulkan::FCmdBuffer& CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
-	float ClearColor[4] = {1.0f, 1.0f, 0.0f, 0.0f};
+
+	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
+		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0, 
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_IMAGE_ASPECT_COLOR_BIT);
+
+	static float F = 0;
+	F += 0.025f;
+	float ClearColor[4] = {0.0f, abs(sin(F)), abs(cos(F)), 0.0f};
 	ClearImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
+
+	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0,
+		VK_IMAGE_ASPECT_COLOR_BIT);
+
 	CmdBuffer.End();
 
 	uint64 FenceCounter = CmdBuffer.Fence.Counter;

@@ -100,6 +100,11 @@ struct SVulkan
 		};
 		EState State = EState::Available;
 
+		inline bool IsOutsideRenderPass() const
+		{
+			return State == EState::Begun;
+		}
+
 		void Create(VkDevice Device, VkCommandPool CmdPool)
 		{
 			VkCommandBufferAllocateInfo Info;
@@ -276,6 +281,22 @@ struct SVulkan
 			{
 				CmdPools[TransferQueueIndex].Create(Device, TransferQueueIndex);
 			}
+		}
+
+		void TransitionImage(FCmdBuffer& CmdBuffer, VkImage Image, VkPipelineStageFlags SrcStageMask, VkImageLayout SrcLayout, VkAccessFlags SrcAccessMask, VkPipelineStageFlags DestStageMask, VkImageLayout DestLayout, VkAccessFlags DestAccessMask, VkImageAspectFlags AspectMask)
+		{
+			check(CmdBuffer.IsOutsideRenderPass());
+			VkImageMemoryBarrier ImageBarrier;
+			ZeroVulkanMem(ImageBarrier, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER);
+			ImageBarrier.srcAccessMask = SrcAccessMask;
+			ImageBarrier.dstAccessMask = DestAccessMask;
+			ImageBarrier.oldLayout = SrcLayout;
+			ImageBarrier.newLayout = DestLayout;
+			ImageBarrier.image = Image;
+			ImageBarrier.subresourceRange.aspectMask = AspectMask;
+			ImageBarrier.subresourceRange.layerCount = 1;
+			ImageBarrier.subresourceRange.levelCount = 1;
+			vkCmdPipelineBarrier(CmdBuffer.CmdBuffer, SrcStageMask, DestStageMask, 0, 0, nullptr, 0, nullptr, 1, &ImageBarrier);
 		}
 
 		FCmdBuffer& BeginCommandBuffer(uint32 QueueIndex)
