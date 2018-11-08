@@ -269,15 +269,13 @@ struct SVulkan
 
 			float Priorities[1] ={1.0f};
 
-			const char* DeviceExtensions[] =
+			std::vector<const char*> DeviceExtensions =
 			{
 				VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-				/*
-							VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-							VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
-							VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
-				*/
 			};
+			//DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+			//DeviceExtensions.push_back(VK_KHR_16BIT_STORAGE_EXTENSION_NAME);
+			//DeviceExtensions.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
 
 			VerifyExtensions(ExtensionProperties, DeviceExtensions);
 
@@ -309,8 +307,10 @@ struct SVulkan
 			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
 			CreateInfo.queueCreateInfoCount = (uint32)QueueInfos.size();
 			CreateInfo.pQueueCreateInfos = QueueInfos.data();
-			CreateInfo.ppEnabledExtensionNames = DeviceExtensions;
-			CreateInfo.enabledExtensionCount = sizeof(DeviceExtensions) / sizeof(DeviceExtensions[0]);
+			CreateInfo.ppEnabledExtensionNames = DeviceExtensions.data();
+			CreateInfo.enabledExtensionCount = (uint32)DeviceExtensions.size();
+			::OutputDebugStringA("Enabled Device Extensions:\n");
+			PrintList(DeviceExtensions);
 
 			VERIFY_VKRESULT(vkCreateDevice(PhysicalDevice, &CreateInfo, nullptr, &Device));
 
@@ -834,12 +834,11 @@ struct SVulkan
 		check(0);
 	}
 
-	template <size_t N>
-	static void VerifyLayers(const std::vector<VkLayerProperties>& LayerProperties, const char* (&Layers)[N])
+	static void VerifyLayers(const std::vector<VkLayerProperties>& LayerProperties, const std::vector<const char*>& Layers)
 	{
-		for (size_t t = 0; t < N; ++t)
+		for (const auto& Layer : Layers)
 		{
-			VerifyLayer(LayerProperties, Layers[t]);
+			VerifyLayer(LayerProperties, Layer);
 		}
 	}
 
@@ -856,10 +855,9 @@ struct SVulkan
 		check(0);
 	}
 
-	template <size_t N>
-	static void VerifyExtensions(const std::vector<VkExtensionProperties>& ExtensionProperties, const char* (&Extensions)[N])
+	static void VerifyExtensions(const std::vector<VkExtensionProperties>& ExtensionProperties, const std::vector<const char*>& Extensions)
 	{
-		for (size_t t = 0; t < N; ++t)
+		for (size_t t = 0; t < Extensions.size(); ++t)
 		{
 			VerifyExtension(ExtensionProperties, Extensions[t]);
 		}
@@ -881,6 +879,16 @@ struct SVulkan
 		{
 			::OutputDebugStringA("* ");
 			::OutputDebugStringA(Entry.extensionName);
+			::OutputDebugStringA("\n");
+		}
+	}
+
+	static void PrintList(const std::vector<const char*>& List)
+	{
+		for (const auto& Entry : List)
+		{
+			::OutputDebugStringA("* ");
+			::OutputDebugStringA(Entry);
 			::OutputDebugStringA("\n");
 		}
 	}
@@ -908,16 +916,19 @@ struct SVulkan
 		::OutputDebugStringA("Found Instance Extensions:\n");
 		PrintExtensions(ExtensionProperties);
 
-		const char* Layers[] =
+		std::vector<const char*> Layers =
 		{
 			"VK_LAYER_LUNARG_api_dump",
 			"VK_LAYER_LUNARG_standard_validation",
 		};
 		VerifyLayers(LayerProperties, Layers);
-		Info.ppEnabledLayerNames = Layers;
-		Info.enabledLayerCount = sizeof(Layers) / sizeof(Layers[0]);
+		Info.ppEnabledLayerNames = Layers.data();
+		Info.enabledLayerCount = (uint32)Layers.size();
 
-		const char* Extensions[] = 
+		::OutputDebugStringA("Using Instance Layers:\n");
+		PrintList(Layers);
+
+		std::vector<const char*> Extensions = 
 		{
 			VK_KHR_SURFACE_EXTENSION_NAME,
 			VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
@@ -926,8 +937,11 @@ struct SVulkan
 #endif
 		};
 		VerifyExtensions(ExtensionProperties, Extensions);
-		Info.ppEnabledExtensionNames = Extensions;
-		Info.enabledExtensionCount = sizeof(Extensions) / sizeof(Extensions[0]);
+		Info.ppEnabledExtensionNames = Extensions.data();
+		Info.enabledExtensionCount = (uint32)Extensions.size();
+
+		::OutputDebugStringA("Using Instance Extensions:\n");
+		PrintList(Extensions);
 
 		VERIFY_VKRESULT(vkCreateInstance(&Info, nullptr, &Instance));
 	}
