@@ -33,7 +33,7 @@ void Render()
 	SVulkan::SDevice& Device = GVulkan.Devices[GVulkan.PhysicalDevice];
 	GVulkan.Swapchain.AcquireBackbuffer();
 
-	vkResetCommandPool(Device.Device, Device.CmdPools[Device.GfxQueueIndex].CmdPool, 0);
+	Device.ResetCommandPools();
 
 	SVulkan::FCmdBuffer& CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
@@ -57,8 +57,8 @@ void Render()
 	uint64 FenceCounter = CmdBuffer.Fence.Counter;
 	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore, CmdBuffer.Fence);
 
-	GVulkan.Swapchain.Present(Device.TransferQueue, GVulkan.Swapchain.FinalSemaphore);
-	vkWaitForFences(Device.Device, 1, &CmdBuffer.Fence.Fence, VK_TRUE, 5 * 1000 * 1000);
+	GVulkan.Swapchain.Present(Device.PresentQueue, GVulkan.Swapchain.FinalSemaphore);
+	Device.WaitForFence(CmdBuffer.Fence);
 }
 
 
