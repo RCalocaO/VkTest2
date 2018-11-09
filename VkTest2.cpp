@@ -6,11 +6,171 @@
 #include <GLFW/glfw3.h>
 
 #include "RCVulkan.h"
+#include "../RCUtils/RCUtilsFile.h"
+#include <direct.h>
 
 #pragma comment(lib, "glfw3.lib")
 
 static SVulkan GVulkan;
 
+struct FShaderInfo
+{
+	enum class EStage
+	{
+		Unknown = -1,
+		Vertex,
+		Pixel,
+
+		Compute = 16,
+	};
+	EStage Stage = EStage::Unknown;
+	std::string EntryPoint;
+	std::string SourceFile;
+	std::string BinaryFile;
+	std::string AsmFile;
+	SVulkan::FShader* Shader = nullptr;
+
+	inline bool NeedsRecompiling() const
+	{
+		return RCUtils::IsNewerThan(SourceFile, BinaryFile);
+	}
+};
+
+struct FShaderLibrary
+{
+	std::vector<FShaderInfo*> ShaderInfos;
+
+	FShaderInfo* RegisterShader(const char* OriginalFilename, const char* EntryPoint, FShaderInfo::EStage Stage)
+	{
+		FShaderInfo* Info = new FShaderInfo;
+		Info->EntryPoint = EntryPoint;
+		Info->Stage = Stage;
+
+		std::string RootDir;
+		std::string BaseFilename;
+		std::string Extension = RCUtils::SplitPath(OriginalFilename, RootDir, BaseFilename, false);
+
+		std::string OutDir = RCUtils::MakePath(RootDir, "out");
+		_mkdir(OutDir.c_str());
+
+		Info->SourceFile = RCUtils::MakePath(RootDir, BaseFilename + "." + Extension);
+		Info->BinaryFile = RCUtils::MakePath(OutDir, BaseFilename + "." + Info->EntryPoint + ".spv");
+		Info->AsmFile = RCUtils::MakePath(OutDir, BaseFilename + "." + Info->EntryPoint + ".spvasm");
+
+		ShaderInfos.push_back(Info);
+
+		return Info;
+	}
+
+	void RecompileShaders()
+	{
+		for (auto* Info : ShaderInfos)
+		{
+			if (Info->NeedsRecompiling())
+			{
+				DoCompileFromSource(Info);
+			}
+			else if (!Info->Shader)
+			{
+				DoCompileFromBinary(Info);
+			}
+		}
+	}
+
+	static std::string GetGlslangCommandLine()
+	{
+		std::string Out;
+		char Glslang[MAX_PATH];
+		char SDKDir[MAX_PATH];
+		::GetEnvironmentVariableA("VULKAN_SDK", SDKDir, MAX_PATH - 1);
+		sprintf_s(Glslang, "%s\\Bin\\glslangValidator.exe", SDKDir);
+		Out = Glslang;
+		Out += " -V -r -l -H -D --hlsl-iomap --auto-map-bindings";
+		return Out;
+	}
+
+	static std::string GetStageName(FShaderInfo::EStage Stage)
+	{
+		switch (Stage)
+		{
+		case FShaderInfo::EStage::Compute:	return "comp";
+		case FShaderInfo::EStage::Vertex:	return "vert";
+		case FShaderInfo::EStage::Pixel:	return "frag";
+		default:
+			break;
+		}
+
+		return "INVALID";
+	}
+
+	bool CreateShader(FShaderInfo* Info, std::vector<char>& Data)
+	{
+		Info->Shader = new SVulkan::FShader;
+		Info->Shader->SpirV = Data;
+		return Info->Shader->Create(GVulkan.Devices[GVulkan.PhysicalDevice].Device);
+	}
+
+	bool DoCompileFromBinary(FShaderInfo* Info)
+	{
+		std::vector<char> File = RCUtils::LoadFileToArray(Info->BinaryFile.c_str());
+		if (File.empty())
+		{
+			check(0);
+			return false;
+		}
+
+		check(!Info->Shader);
+		//#todo: Destroy old; sync with rendering
+		//if (Info.Shader)
+		//{
+		//	ShadersToDestroy.push_back(Info.Shader);
+		//}
+		return CreateShader(Info, File);
+	}
+
+	bool DoCompileFromSource(FShaderInfo* Info)
+	{
+		static const std::string GlslangProlog = GetGlslangCommandLine();
+
+		std::string Compile = GlslangProlog;
+		Compile += " -e " + Info->EntryPoint;
+		Compile += " -o " + RCUtils::AddQuotes(Info->BinaryFile);
+		Compile += " -S " + GetStageName(Info->Stage);
+		Compile += " " + RCUtils::AddQuotes(Info->SourceFile);
+		Compile += " > " + RCUtils::AddQuotes(Info->AsmFile);
+		int ReturnCode = system(Compile.c_str());
+		if (ReturnCode)
+		{
+			std::vector<char> File = RCUtils::LoadFileToArray(Info->AsmFile.c_str());
+			if (File.empty())
+			{
+				std::string Error = "Compile error: No output for file ";
+				Error += Info->SourceFile;
+				::OutputDebugStringA(Error.c_str());
+			}
+			else
+			{
+				std::string FileString = &File[0];
+				FileString.resize(File.size());
+				std::string Error = "Compile error:\n";
+				Error += FileString;
+				Error += "\n";
+				::OutputDebugStringA(Error.c_str());
+
+				int DialogResult = ::MessageBoxA(nullptr, Error.c_str(), Info->SourceFile.c_str(), MB_CANCELTRYCONTINUE);
+				if (DialogResult == IDTRYAGAIN)
+				{
+					return DoCompileFromSource(Info);
+				}
+			}
+
+			return false;
+		}
+
+		return DoCompileFromBinary(Info);
+	}
+};
+static FShaderLibrary GShaderLibrary;
 
 static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 {
@@ -66,6 +226,13 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 {
 }
 
+static void SetupShaders()
+{
+	GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
+	GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
+	GShaderLibrary.RecompileShaders();
+}
+
 static GLFWwindow* Init()
 {
 	int RC = glfwInit();
@@ -79,6 +246,8 @@ static GLFWwindow* Init()
 	GVulkan.Init(Window);
 
 	glfwSetKeyCallback(Window, KeyCallback);
+
+	SetupShaders();
 
 	return Window;
 }

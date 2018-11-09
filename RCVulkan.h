@@ -53,6 +53,30 @@ struct SVulkan
 	std::vector<VkPhysicalDevice> DiscreteDevices;
 	std::vector<VkPhysicalDevice> IntegratedDevices;
 
+	struct FShader
+	{
+		VkShaderModule ShaderModule;
+		std::vector<char> SpirV;
+		VkDevice Device;
+
+		bool Create(VkDevice InDevice)
+		{
+			Device = InDevice;
+
+			check(!SpirV.empty());
+			check(SpirV.size() % 4 == 0);
+
+			VkShaderModuleCreateInfo CreateInfo;
+			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
+			CreateInfo.codeSize = SpirV.size();
+			CreateInfo.pCode = (uint32*)&SpirV[0];
+
+			VERIFY_VKRESULT(vkCreateShaderModule(Device, &CreateInfo, nullptr, &ShaderModule));
+
+			return true;
+		}
+	};
+
 	struct FFence
 	{
 		VkFence Fence = VK_NULL_HANDLE;
@@ -916,11 +940,18 @@ struct SVulkan
 		::OutputDebugStringA("Found Instance Extensions:\n");
 		PrintExtensions(ExtensionProperties);
 
-		std::vector<const char*> Layers =
+		std::vector<const char*> Layers;
+
+		if (RCUtils::FCmdLine::Get().Contains("-apidump"))
 		{
-			"VK_LAYER_LUNARG_api_dump",
-			"VK_LAYER_LUNARG_standard_validation",
-		};
+			Layers.push_back("VK_LAYER_LUNARG_api_dump");
+		}
+
+		if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
+		{
+			Layers.push_back("VK_LAYER_LUNARG_standard_validation");
+		}
+
 		VerifyLayers(LayerProperties, Layers);
 		Info.ppEnabledLayerNames = Layers.data();
 		Info.enabledLayerCount = (uint32)Layers.size();
