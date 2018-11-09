@@ -30,6 +30,11 @@ struct FShaderInfo
 	std::string AsmFile;
 	SVulkan::FShader* Shader = nullptr;
 
+	~FShaderInfo()
+	{
+		check(!Shader);
+	}
+
 	inline bool NeedsRecompiling() const
 	{
 		return RCUtils::IsNewerThan(SourceFile, BinaryFile);
@@ -39,6 +44,12 @@ struct FShaderInfo
 struct FShaderLibrary
 {
 	std::vector<FShaderInfo*> ShaderInfos;
+
+	VkDevice Device =  VK_NULL_HANDLE;
+	void Init(VkDevice InDevice)
+	{
+		Device = InDevice;
+	}
 
 	FShaderInfo* RegisterShader(const char* OriginalFilename, const char* EntryPoint, FShaderInfo::EStage Stage)
 	{
@@ -107,7 +118,7 @@ struct FShaderLibrary
 	{
 		Info->Shader = new SVulkan::FShader;
 		Info->Shader->SpirV = Data;
-		return Info->Shader->Create(GVulkan.Devices[GVulkan.PhysicalDevice].Device);
+		return Info->Shader->Create(Device);
 	}
 
 	bool DoCompileFromBinary(FShaderInfo* Info)
@@ -169,8 +180,118 @@ struct FShaderLibrary
 
 		return DoCompileFromBinary(Info);
 	}
+
+	void DestroyShaders()
+	{
+		//#todo-rco: Sync with GPU
+		for (auto* Info : ShaderInfos)
+		{
+			delete Info->Shader;
+			Info->Shader = nullptr;
+		}
+	}
+
+	void Destroy()
+	{
+		DestroyShaders();
+
+		for (auto* Info : ShaderInfos)
+		{
+			delete Info;
+		}
+		ShaderInfos.resize(0);
+	}
 };
 static FShaderLibrary GShaderLibrary;
+
+struct FPSOCache
+{
+	std::map<SVulkan::FShader*, std::map<SVulkan::FShader*, VkPipelineLayout>> PipelineLayouts;
+
+	VkDevice Device =  VK_NULL_HANDLE;
+	void Init(VkDevice InDevice)
+	{
+		Device = InDevice;
+	}
+
+	VkPipelineLayout GetOrCreatePipelineLayout(SVulkan::FShader* VS, SVulkan::FShader* PS)
+	{
+		auto& VSList = PipelineLayouts[VS];
+		auto Found = VSList.find(PS);
+		if (Found != VSList.end())
+		{
+			return Found->second;
+		}
+
+		VkPipelineLayoutCreateInfo Info;
+		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
+
+		VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+		VERIFY_VKRESULT(vkCreatePipelineLayout(Device, &Info, nullptr, &PipelineLayout));
+
+		VSList[PS] = PipelineLayout;
+
+		return PipelineLayout;
+	}
+
+	template <typename TFunction>
+	void CreatePSO(FShaderInfo* VS, FShaderInfo* PS, TFunction Callback)
+	{
+		check(VS->Shader && VS->Shader->ShaderModule);
+		if (PS)
+		{
+			check(PS->Shader && PS->Shader->ShaderModule);
+		}
+
+		VkGraphicsPipelineCreateInfo GfxPipelineInfo;
+		ZeroVulkanMem(GfxPipelineInfo, VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO);
+
+		VkPipelineShaderStageCreateInfo StageInfos[2];
+		ZeroVulkanMem(StageInfos[0], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
+		StageInfos[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+		StageInfos[0].module = VS->Shader->ShaderModule;
+		StageInfos[0].pName = VS->EntryPoint.c_str();
+		GfxPipelineInfo.stageCount = 1;
+
+		if (PS)
+		{
+			ZeroVulkanMem(StageInfos[1], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
+			StageInfos[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+			StageInfos[1].module = PS->Shader->ShaderModule;
+			StageInfos[1].pName = PS->EntryPoint.c_str();
+			++GfxPipelineInfo.stageCount;
+		}
+		GfxPipelineInfo.pStages = StageInfos;
+
+		VkPipelineLayout PipelineLayout = GetOrCreatePipelineLayout(VS->Shader, PS ? PS->Shader : nullptr);
+
+		VkPipelineRasterizationStateCreateInfo RasterizerInfo;
+		ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
+		RasterizerInfo.cullMode = VK_CULL_MODE_NONE;
+		GfxPipelineInfo.pRasterizationState = &RasterizerInfo;
+
+		GfxPipelineInfo.layout = PipelineLayout;
+
+		Callback(GfxPipelineInfo);
+
+		VkPipeline Pipeline;
+		VERIFY_VKRESULT(vkCreateGraphicsPipelines(GVulkan.Devices[GVulkan.PhysicalDevice].Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &Pipeline));
+	}
+
+	void Destroy()
+	{
+		for (auto VSPair : PipelineLayouts)
+		{
+			for (auto PSPair : VSPair.second)
+			{
+				vkDestroyPipelineLayout(Device, PSPair.second, nullptr);
+			}
+		}
+
+		PipelineLayouts.clear();
+	}
+};
+static FPSOCache GPSOCache;
 
 static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 {
@@ -228,9 +349,13 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 
 static void SetupShaders()
 {
-	GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
-	GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
+	auto* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
+	auto* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
 	GShaderLibrary.RecompileShaders();
+
+	GPSOCache.CreatePSO(NoVBClipVS, RedPS, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	{
+	});
 }
 
 static GLFWwindow* Init()
@@ -244,6 +369,8 @@ static GLFWwindow* Init()
 	check(Window);
 
 	GVulkan.Init(Window);
+	GShaderLibrary.Init(GVulkan.Devices[GVulkan.PhysicalDevice].Device);
+	GPSOCache.Init(GVulkan.Devices[GVulkan.PhysicalDevice].Device);
 
 	glfwSetKeyCallback(Window, KeyCallback);
 
@@ -255,6 +382,10 @@ static GLFWwindow* Init()
 static void Deinit(GLFWwindow* Window)
 {
 	glfwDestroyWindow(Window);
+
+	GPSOCache.Destroy();
+	GShaderLibrary.Destroy();
+
 	GVulkan.Deinit();
 }
 

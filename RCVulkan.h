@@ -75,6 +75,12 @@ struct SVulkan
 
 			return true;
 		}
+
+		~FShader()
+		{
+			vkDestroyShaderModule(Device, ShaderModule, nullptr);
+			ShaderModule = VK_NULL_HANDLE;
+		}
 	};
 
 	struct FFence
