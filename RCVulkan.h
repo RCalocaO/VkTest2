@@ -302,6 +302,10 @@ struct SVulkan
 			std::vector<const char*> DeviceExtensions =
 			{
 				VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+				//VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+				VK_KHR_MAINTENANCE1_EXTENSION_NAME,
+				VK_KHR_MAINTENANCE2_EXTENSION_NAME,
+				//VK_KHR_MULTIVIEW_EXTENSION_NAME,
 			};
 			//DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
 			//DeviceExtensions.push_back(VK_KHR_16BIT_STORAGE_EXTENSION_NAME);
@@ -572,6 +576,26 @@ struct SVulkan
 			}
 		}
 
+		inline VkViewport GetViewport() const
+		{
+			VkViewport Viewport;
+			ZeroMem(Viewport);
+			Viewport.width = (float)SurfaceCaps.currentExtent.width;
+			Viewport.height = (float)SurfaceCaps.currentExtent.height;
+			Viewport.maxDepth = 1.0f;
+			return Viewport;
+		}
+
+		inline VkRect2D GetScissor() const
+		{
+			VkRect2D Scissor;
+			ZeroMem(Scissor);
+			Scissor.extent.width =SurfaceCaps.currentExtent.width;
+			Scissor.extent.height = SurfaceCaps.currentExtent.height;
+			return Scissor;
+		}
+
+
 		void Destroy()
 		{
 			DestroyImages();
@@ -607,6 +631,32 @@ struct SVulkan
 	struct FRenderPass
 	{
 		VkRenderPass RenderPass = VK_NULL_HANDLE;
+		VkDevice Device = VK_NULL_HANDLE;
+
+		void Create(VkDevice InDevice)
+		{
+			Device = InDevice;
+
+			//VkAttachmentReference2KHR ColorAttachment;
+
+			VkSubpassDescription SubPassDesc;
+			ZeroMem(SubPassDesc);
+			//SubPassDesc.colorAttachmentCount = 1;
+			//SubPassDesc.pColorAttachments = &ColorAttachment;
+
+			VkRenderPassCreateInfo CreateInfo;
+			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO);
+			CreateInfo.subpassCount = 1;
+			CreateInfo.pSubpasses = &SubPassDesc;
+
+			VERIFY_VKRESULT(vkCreateRenderPass(Device, &CreateInfo, nullptr, &RenderPass));
+		}
+
+		void Destroy()
+		{
+			vkDestroyRenderPass(Device, RenderPass, nullptr);
+			RenderPass = VK_NULL_HANDLE;
+		}
 	};
 
 	std::map<VkPhysicalDevice, SDevice> Devices;
@@ -972,6 +1022,7 @@ struct SVulkan
 #if defined(VK_USE_PLATFORM_WIN32_KHR) && VK_USE_PLATFORM_WIN32_KHR
 			VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
 #endif
+			VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
 		};
 		VerifyExtensions(ExtensionProperties, Extensions);
 		Info.ppEnabledExtensionNames = Extensions.data();

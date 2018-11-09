@@ -204,9 +204,40 @@ struct FShaderLibrary
 };
 static FShaderLibrary GShaderLibrary;
 
+struct FRenderPassCache
+{
+	std::vector<SVulkan::FRenderPass*> RenderPasses;
+
+	VkDevice Device =  VK_NULL_HANDLE;
+	void Init(VkDevice InDevice)
+	{
+		Device = InDevice;
+	}
+
+	SVulkan::FRenderPass* Create()
+	{
+		SVulkan::FRenderPass* RenderPass = new SVulkan::FRenderPass();
+		RenderPass->Create(Device);
+		RenderPasses.push_back(RenderPass);
+		return RenderPass;
+	}
+
+	void Destroy()
+	{
+		for (auto* RenderPass : RenderPasses)
+		{
+			RenderPass->Destroy();
+			delete RenderPass;
+		}
+		RenderPasses.resize(0);
+	}
+};
+static FRenderPassCache GRenderPassCache;
+
 struct FPSOCache
 {
 	std::map<SVulkan::FShader*, std::map<SVulkan::FShader*, VkPipelineLayout>> PipelineLayouts;
+	std::vector<VkPipeline> PSOs;
 
 	VkDevice Device =  VK_NULL_HANDLE;
 	void Init(VkDevice InDevice)
@@ -235,7 +266,7 @@ struct FPSOCache
 	}
 
 	template <typename TFunction>
-	void CreatePSO(FShaderInfo* VS, FShaderInfo* PS, TFunction Callback)
+	VkPipeline CreatePSO(FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
 	{
 		check(VS->Shader && VS->Shader->ShaderModule);
 		if (PS)
@@ -245,6 +276,16 @@ struct FPSOCache
 
 		VkGraphicsPipelineCreateInfo GfxPipelineInfo;
 		ZeroVulkanMem(GfxPipelineInfo, VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO);
+
+		GfxPipelineInfo.renderPass = RenderPass->RenderPass;
+
+		VkPipelineInputAssemblyStateCreateInfo IAInfo;
+		ZeroVulkanMem(IAInfo, VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO);
+		GfxPipelineInfo.pInputAssemblyState = &IAInfo;
+
+		VkPipelineVertexInputStateCreateInfo VertexInputInfo;
+		ZeroVulkanMem(VertexInputInfo, VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
+		GfxPipelineInfo.pVertexInputState = &VertexInputInfo;
 
 		VkPipelineShaderStageCreateInfo StageInfos[2];
 		ZeroVulkanMem(StageInfos[0], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
@@ -268,7 +309,22 @@ struct FPSOCache
 		VkPipelineRasterizationStateCreateInfo RasterizerInfo;
 		ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
 		RasterizerInfo.cullMode = VK_CULL_MODE_NONE;
+		RasterizerInfo.rasterizerDiscardEnable = VK_TRUE;
+		RasterizerInfo.lineWidth = 1.0f;
 		GfxPipelineInfo.pRasterizationState = &RasterizerInfo;
+
+		VkViewport Viewport;
+		ZeroMem(Viewport);
+		Viewport.width = 1280;
+		Viewport.height = 960;
+		Viewport.maxDepth = 1;
+		VkRect2D Scissor;
+		Scissor.extent.width = (uint32)Viewport.width;
+		Scissor.extent.height = (uint32)Viewport.height;
+
+		VkPipelineViewportStateCreateInfo ViewportState;
+		ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
+		GfxPipelineInfo.pViewportState = &ViewportState;
 
 		GfxPipelineInfo.layout = PipelineLayout;
 
@@ -276,6 +332,8 @@ struct FPSOCache
 
 		VkPipeline Pipeline;
 		VERIFY_VKRESULT(vkCreateGraphicsPipelines(GVulkan.Devices[GVulkan.PhysicalDevice].Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &Pipeline));
+		PSOs.push_back(Pipeline);
+		return Pipeline;
 	}
 
 	void Destroy()
@@ -289,6 +347,12 @@ struct FPSOCache
 		}
 
 		PipelineLayouts.clear();
+
+		for (auto* PSO : PSOs)
+		{
+			vkDestroyPipeline(Device, PSO, nullptr);
+		}
+		PSOs.clear();
 	}
 };
 static FPSOCache GPSOCache;
@@ -353,8 +417,18 @@ static void SetupShaders()
 	auto* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
 	GShaderLibrary.RecompileShaders();
 
-	GPSOCache.CreatePSO(NoVBClipVS, RedPS, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	SVulkan::FRenderPass* RenderPass = GRenderPassCache.Create();
+
+	VkViewport Viewport = GVulkan.Swapchain.GetViewport();
+	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();
+
+	GPSOCache.CreatePSO(NoVBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
+		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
+		ViewportInfo->viewportCount = 1;
+		ViewportInfo->pViewports = &Viewport;
+		ViewportInfo->scissorCount = 1;
+		ViewportInfo->pScissors = &Scissor;
 	});
 }
 
@@ -369,8 +443,11 @@ static GLFWwindow* Init()
 	check(Window);
 
 	GVulkan.Init(Window);
-	GShaderLibrary.Init(GVulkan.Devices[GVulkan.PhysicalDevice].Device);
-	GPSOCache.Init(GVulkan.Devices[GVulkan.PhysicalDevice].Device);
+	VkDevice Device = GVulkan.Devices[GVulkan.PhysicalDevice].Device;
+
+	GRenderPassCache.Init(Device);
+	GShaderLibrary.Init(Device);
+	GPSOCache.Init(Device);
 
 	glfwSetKeyCallback(Window, KeyCallback);
 
@@ -385,6 +462,7 @@ static void Deinit(GLFWwindow* Window)
 
 	GPSOCache.Destroy();
 	GShaderLibrary.Destroy();
+	GRenderPassCache.Destroy();
 
 	GVulkan.Deinit();
 }
