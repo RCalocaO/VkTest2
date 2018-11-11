@@ -22,11 +22,11 @@ D:\GitHub\VkTest2\Shaders\Unlit.hlsl
               15:      6(int) Constant 3
               16:             TypeArray 14(fvec3) 15
               17:             TypePointer Function 16
-              19:    8(float) Constant 1056964608
-              20:    8(float) Constant 1048576000
+              19:    8(float) Constant 0
+              20:    8(float) Constant 3204448256
               21:    8(float) Constant 1065353216
               22:   14(fvec3) ConstantComposite 19 20 21
-              23:    8(float) Constant 1061158912
+              23:    8(float) Constant 1056964608
               24:   14(fvec3) ConstantComposite 20 23 21
               25:   14(fvec3) ConstantComposite 23 23 21
               26:          16 ConstantComposite 22 24 25

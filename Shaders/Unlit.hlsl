@@ -26,13 +26,13 @@ struct FVSOut
 
 float4 MainNoVBClipVS(in uint VertexID : SV_VertexID) : SV_Position
 {
-	float3 Pos[3] = { float3(0.5, 0.25, 1), float3(0.25, 0.75, 1), float3(0.75, 0.75, 1)};
+	float3 Pos[3] = { float3(0, -0.5, 1), float3(-0.5, 0.5, 1), float3(0.5, 0.5, 1)};
 	return float4(Pos[VertexID % 3], 1);
 }
 
 float4 RedPS() : SV_Target0
 {
-	return float4(0, 0, 1, 1);
+	return float4(1, 0, 0, 1);
 }
 
 FVSOut MainVS(FVSIn In)

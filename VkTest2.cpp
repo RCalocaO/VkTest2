@@ -317,6 +317,7 @@ struct FPSOCache
 
 		VkPipelineInputAssemblyStateCreateInfo IAInfo;
 		ZeroVulkanMem(IAInfo, VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO);
+		IAInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		GfxPipelineInfo.pInputAssemblyState = &IAInfo;
 
 		VkPipelineVertexInputStateCreateInfo VertexInputInfo;
@@ -345,9 +346,17 @@ struct FPSOCache
 		VkPipelineRasterizationStateCreateInfo RasterizerInfo;
 		ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
 		RasterizerInfo.cullMode = VK_CULL_MODE_NONE;
-		RasterizerInfo.rasterizerDiscardEnable = VK_TRUE;
 		RasterizerInfo.lineWidth = 1.0f;
 		GfxPipelineInfo.pRasterizationState = &RasterizerInfo;
+
+		VkPipelineColorBlendAttachmentState BlendAttachState;
+		ZeroMem(BlendAttachState);
+		BlendAttachState.colorWriteMask = 0xf;
+		VkPipelineColorBlendStateCreateInfo BlendInfo;
+		ZeroVulkanMem(BlendInfo, VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO);
+		BlendInfo.attachmentCount = 1;
+		BlendInfo.pAttachments = &BlendAttachState;
+		GfxPipelineInfo.pColorBlendState = &BlendInfo;
 
 		VkViewport Viewport;
 		ZeroMem(Viewport);
@@ -363,6 +372,16 @@ struct FPSOCache
 		GfxPipelineInfo.pViewportState = &ViewportState;
 
 		GfxPipelineInfo.layout = PipelineLayout;
+
+		VkPipelineDepthStencilStateCreateInfo DepthStateInfo;
+		ZeroVulkanMem(DepthStateInfo, VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO);
+		DepthStateInfo.front = DepthStateInfo.back;
+		GfxPipelineInfo.pDepthStencilState = &DepthStateInfo;
+
+		VkPipelineMultisampleStateCreateInfo MSInfo;
+		ZeroVulkanMem(MSInfo, VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO);
+		MSInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+		GfxPipelineInfo.pMultisampleState = &MSInfo;
 
 		Callback(GfxPipelineInfo);
 
@@ -442,6 +461,7 @@ void Render(FApp& App)
 
 	CmdBuffer.BeginRenderPass(Framebuffer);
 	vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSResPSO);
+	vkCmdDraw(CmdBuffer.CmdBuffer, 3, 1, 0, 0);
 	CmdBuffer.EndRenderPass();
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
@@ -495,6 +515,15 @@ static GLFWwindow* Init(FApp& App)
 
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
 	check(Window);
+
+	if (RCUtils::FCmdLine::Get().Contains("-waitfordebugger"))
+	{
+		while (!::IsDebuggerPresent())
+		{
+			::Sleep(100);
+		}
+		__debugbreak();
+	}
 
 	GVulkan.Init(Window);
 	VkDevice Device = GVulkan.Devices[GVulkan.PhysicalDevice].Device;

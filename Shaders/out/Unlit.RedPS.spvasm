@@ -16,9 +16,9 @@ D:\GitHub\VkTest2\Shaders\Unlit.hlsl
                3:             TypeFunction 2
                6:             TypeFloat 32
                7:             TypeVector 6(float) 4
-              11:    6(float) Constant 0
-              12:    6(float) Constant 1065353216
-              13:    7(fvec4) ConstantComposite 11 11 12 12
+              11:    6(float) Constant 1065353216
+              12:    6(float) Constant 0
+              13:    7(fvec4) ConstantComposite 11 12 12 11
               16:             TypePointer Output 7(fvec4)
 17(@entryPointOutput):     16(ptr) Variable Output
         4(RedPS):           2 Function None 3
