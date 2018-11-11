@@ -441,7 +441,10 @@ static GLFWwindow* Init()
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-	GLFWwindow* Window = glfwCreateWindow(1280, 720, "VkTest2", 0, 0);
+	uint32 ResX = RCUtils::FCmdLine::Get().TryGetIntPrefix("-resx=", 1920);
+	uint32 ResY = RCUtils::FCmdLine::Get().TryGetIntPrefix("-resy=", 1080);
+
+	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
 	check(Window);
 
 	GVulkan.Init(Window);
@@ -460,13 +463,13 @@ static GLFWwindow* Init()
 
 static void Deinit(GLFWwindow* Window)
 {
-	glfwDestroyWindow(Window);
-
 	GPSOCache.Destroy();
 	GShaderLibrary.Destroy();
 	GRenderPassCache.Destroy();
 
 	GVulkan.Deinit();
+
+	glfwDestroyWindow(Window);
 }
 
 int main()
