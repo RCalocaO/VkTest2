@@ -709,17 +709,30 @@ struct SVulkan
 		{
 			Device = InDevice;
 
-			//VkAttachmentReference2KHR ColorAttachment;
+			VkAttachmentReference ColorAttachment;
+			ZeroMem(ColorAttachment);
+			ColorAttachment.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 			VkSubpassDescription SubPassDesc;
 			ZeroMem(SubPassDesc);
-			//SubPassDesc.colorAttachmentCount = 1;
-			//SubPassDesc.pColorAttachments = &ColorAttachment;
+			SubPassDesc.colorAttachmentCount = 1;
+			SubPassDesc.pColorAttachments = &ColorAttachment;
+
+			VkAttachmentDescription Attachments;
+			ZeroMem(Attachments);
+			Attachments.format = VK_FORMAT_R8G8B8A8_UNORM;
+			Attachments.samples = VK_SAMPLE_COUNT_1_BIT;
+			Attachments.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+			Attachments.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			Attachments.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			Attachments.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 			VkRenderPassCreateInfo CreateInfo;
 			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO);
 			CreateInfo.subpassCount = 1;
 			CreateInfo.pSubpasses = &SubPassDesc;
+			CreateInfo.attachmentCount = 1;
+			CreateInfo.pAttachments = &Attachments;
 
 			VERIFY_VKRESULT(vkCreateRenderPass(Device, &CreateInfo, nullptr, &RenderPass));
 		}
