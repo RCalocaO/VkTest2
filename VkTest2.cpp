@@ -393,6 +393,11 @@ struct FPSOCache
 };
 static FPSOCache GPSOCache;
 
+struct FApp
+{
+	VkPipeline NoVBClipVSResPSO = VK_NULL_HANDLE;
+};
+
 static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 {
 	VkClearColorValue ClearColors;
@@ -409,7 +414,7 @@ static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 	vkCmdClearColorImage(CmdBuffer, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &ClearColors, 1, &Range);
 }
 
-void Render()
+void Render(FApp& App)
 {
 	SVulkan::SDevice& Device = GVulkan.Devices[GVulkan.PhysicalDevice];
 	GVulkan.Swapchain.AcquireBackbuffer();
@@ -434,7 +439,9 @@ void Render()
 		VK_IMAGE_ASPECT_COLOR_BIT);
 
 	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(&GVulkan.Swapchain, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
+
 	CmdBuffer.BeginRenderPass(Framebuffer);
+	vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSResPSO);
 	CmdBuffer.EndRenderPass();
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
@@ -455,7 +462,7 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 {
 }
 
-static void SetupShaders()
+static void SetupShaders(FApp& App)
 {
 	auto* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
 	auto* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
@@ -466,7 +473,7 @@ static void SetupShaders()
 	VkViewport Viewport = GVulkan.Swapchain.GetViewport();
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();
 
-	GPSOCache.CreatePSO(NoVBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	App.NoVBClipVSResPSO = GPSOCache.CreatePSO(NoVBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
 		ViewportInfo->viewportCount = 1;
@@ -476,7 +483,7 @@ static void SetupShaders()
 	});
 }
 
-static GLFWwindow* Init()
+static GLFWwindow* Init(FApp& App)
 {
 	int RC = glfwInit();
 	check(RC != 0);
@@ -498,7 +505,7 @@ static GLFWwindow* Init()
 
 	glfwSetKeyCallback(Window, KeyCallback);
 
-	SetupShaders();
+	SetupShaders(App);
 
 	return Window;
 }
@@ -518,14 +525,15 @@ static void Deinit(GLFWwindow* Window)
 
 int main()
 {
-	GLFWwindow* Window = Init();
+	FApp App;
+	GLFWwindow* Window = Init(App);
 	while (!glfwWindowShouldClose(Window))
 	{
 		double CpuBegin = glfwGetTime() * 1000.0;
 
 		glfwPollEvents();
 
-		Render();
+		Render(App);
 
 		double CpuEnd = glfwGetTime() * 1000.0;
 

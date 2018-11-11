@@ -621,7 +621,7 @@ struct SVulkan
 			VkSwapchainCreateInfoKHR CreateInfo;
 			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
 			CreateInfo.surface = Surface;
-			CreateInfo.minImageCount = Min(2u, SurfaceCaps.minImageCount);
+			CreateInfo.minImageCount = 3;
 			//CreateInfo.maxImageCount = std::max(3u, SurfaceCaps.maxImageCount);
 			CreateInfo.imageFormat = Format;
 			CreateInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
