@@ -202,14 +202,15 @@ struct FShaderLibrary
 		{
 			delete Info;
 		}
-		ShaderInfos.resize(0);
+		ShaderInfos.clear();
 	}
 };
 static FShaderLibrary GShaderLibrary;
 
-struct FRenderPassCache
+struct FRenderTargetCache
 {
-	std::vector<SVulkan::FRenderPass*> RenderPasses;
+	std::map<uint64, SVulkan::FRenderPass*> RenderPasses;
+	std::vector<SVulkan::FFramebuffer*> Framebuffers;
 
 	VkDevice Device =  VK_NULL_HANDLE;
 	void Init(VkDevice InDevice)
@@ -217,25 +218,57 @@ struct FRenderPassCache
 		Device = InDevice;
 	}
 
-	SVulkan::FRenderPass* Create()
+	SVulkan::FRenderPass* GetOrCreateRenderPass(VkFormat Format, VkAttachmentLoadOp LoadOp, VkAttachmentStoreOp StoreOp)
 	{
+		uint64 Key = (uint64)Format << (uint64)32;
+		Key = Key | ((uint64)LoadOp << 24);
+		Key = Key | ((uint64)StoreOp << 16);
+		auto Found = RenderPasses.find(Key);
+		if (Found != RenderPasses.end())
+		{
+			return Found->second;
+		}
+
 		SVulkan::FRenderPass* RenderPass = new SVulkan::FRenderPass();
-		RenderPass->Create(Device);
-		RenderPasses.push_back(RenderPass);
+		RenderPass->Create(Device, Format, LoadOp, StoreOp);
+		RenderPasses[Key] = RenderPass;
 		return RenderPass;
+	}
+
+	SVulkan::FFramebuffer* GetOrCreateFrameBuffer(SVulkan::FSwapchain* Swapchain, VkAttachmentLoadOp LoadOp, VkAttachmentStoreOp StoreOp)
+	{
+		if (Swapchain->ImageIndex < Framebuffers.size())
+		{
+			return Framebuffers[Swapchain->ImageIndex];
+		}
+
+		SVulkan::FRenderPass* RenderPass = GetOrCreateRenderPass(Swapchain->Format, LoadOp, StoreOp);
+
+		SVulkan::FFramebuffer* FB = new SVulkan::FFramebuffer();
+		VkViewport Viewport = Swapchain->GetViewport();
+		FB->Create(Device, Swapchain->ImageViews[Swapchain->ImageIndex], (uint32)Viewport.width, (uint32)Viewport.height, RenderPass);
+		Framebuffers.push_back(FB);
+		return FB;
 	}
 
 	void Destroy()
 	{
-		for (auto* RenderPass : RenderPasses)
+		for (auto* FB : Framebuffers)
 		{
-			RenderPass->Destroy();
-			delete RenderPass;
+			FB->Destroy();
+			delete FB;
 		}
-		RenderPasses.resize(0);
+		Framebuffers.clear();
+
+		for (auto Pair : RenderPasses)
+		{
+			Pair.second->Destroy();
+			delete Pair.second;
+		}
+		RenderPasses.clear();
 	}
 };
-static FRenderPassCache GRenderPassCache;
+static FRenderTargetCache GRenderTargetCache;
 
 struct FPSOCache
 {
@@ -397,6 +430,15 @@ void Render()
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+		VK_IMAGE_ASPECT_COLOR_BIT);
+
+	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(&GVulkan.Swapchain, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
+	CmdBuffer.BeginRenderPass(Framebuffer);
+	CmdBuffer.EndRenderPass();
+
+	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
+		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0,
 		VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -419,7 +461,7 @@ static void SetupShaders()
 	auto* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
 	GShaderLibrary.RecompileShaders();
 
-	SVulkan::FRenderPass* RenderPass = GRenderPassCache.Create();
+	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
 
 	VkViewport Viewport = GVulkan.Swapchain.GetViewport();
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();
@@ -450,7 +492,7 @@ static GLFWwindow* Init()
 	GVulkan.Init(Window);
 	VkDevice Device = GVulkan.Devices[GVulkan.PhysicalDevice].Device;
 
-	GRenderPassCache.Init(Device);
+	GRenderTargetCache.Init(Device);
 	GShaderLibrary.Init(Device);
 	GPSOCache.Init(Device);
 
@@ -463,9 +505,11 @@ static GLFWwindow* Init()
 
 static void Deinit(GLFWwindow* Window)
 {
+	GVulkan.DeinitPre();
+
 	GPSOCache.Destroy();
 	GShaderLibrary.Destroy();
-	GRenderPassCache.Destroy();
+	GRenderTargetCache.Destroy();
 
 	GVulkan.Deinit();
 

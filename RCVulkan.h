@@ -178,6 +178,7 @@ struct SVulkan
 		}
 	};
 
+	struct FFramebuffer;
 	struct FCmdBuffer
 	{
 		FFence Fence;
@@ -248,6 +249,15 @@ struct SVulkan
 			State = EState::Ended;
 		}
 
+		void BeginRenderPass(FFramebuffer* Framebuffer);
+
+		void EndRenderPass()
+		{
+			check(State == EState::InRenderPass);
+			vkCmdEndRenderPass(CmdBuffer);
+			State = EState::Begun;
+		}
+
 		void Reset()
 		{
 			check(State == EState::Submitted);
@@ -284,7 +294,7 @@ struct SVulkan
 			{
 				CmdBuffer.Destroy();
 			}
-			CmdBuffers.resize(0);
+			CmdBuffers.clear();
 
 			vkDestroyCommandPool(Device, CmdPool, nullptr);
 			CmdPool = VK_NULL_HANDLE;
@@ -446,7 +456,7 @@ struct SVulkan
 			}
 		}
 
-		void Destroy()
+		void DestroyPre()
 		{
 			CmdPools[GfxQueueIndex].Destroy();
 			if (GfxQueueIndex != ComputeQueueIndex)
@@ -457,6 +467,10 @@ struct SVulkan
 			{
 				CmdPools[TransferQueueIndex].Destroy();
 			}
+		}
+
+		void Destroy()
+		{
 			vkDestroyDevice(Device, nullptr);
 			Device = VK_NULL_HANDLE;
 		}
@@ -705,7 +719,7 @@ struct SVulkan
 		VkRenderPass RenderPass = VK_NULL_HANDLE;
 		VkDevice Device = VK_NULL_HANDLE;
 
-		void Create(VkDevice InDevice)
+		void Create(VkDevice InDevice, VkFormat Format, VkAttachmentLoadOp LoadOp, VkAttachmentStoreOp StoreOp)
 		{
 			Device = InDevice;
 
@@ -720,10 +734,10 @@ struct SVulkan
 
 			VkAttachmentDescription Attachments;
 			ZeroMem(Attachments);
-			Attachments.format = VK_FORMAT_R8G8B8A8_UNORM;
+			Attachments.format = Format;
 			Attachments.samples = VK_SAMPLE_COUNT_1_BIT;
-			Attachments.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-			Attachments.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			Attachments.loadOp = LoadOp;
+			Attachments.storeOp = StoreOp;
 			Attachments.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 			Attachments.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
@@ -743,6 +757,41 @@ struct SVulkan
 			RenderPass = VK_NULL_HANDLE;
 		}
 	};
+
+	struct FFramebuffer
+	{
+		VkFramebuffer Framebuffer = VK_NULL_HANDLE;
+		uint32 Width = 0;
+		uint32 Height = 0;
+		FRenderPass* RenderPass = nullptr;
+		VkDevice Device = VK_NULL_HANDLE;
+
+		void Create(VkDevice InDevice, VkImageView ImageView, uint32 InWidth, uint32 InHeight, FRenderPass* InRenderPass)
+		{
+			Device = InDevice;
+			Width = InWidth;
+			Height = InHeight;
+			RenderPass = InRenderPass;
+
+			VkFramebufferCreateInfo CreateInfo;
+			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
+			CreateInfo.renderPass = RenderPass->RenderPass;
+			CreateInfo.attachmentCount = 1;
+			CreateInfo.pAttachments = &ImageView;
+			CreateInfo.width = Width;
+			CreateInfo.height = Height;
+			CreateInfo.layers = 1;
+
+			VERIFY_VKRESULT(vkCreateFramebuffer(Device, &CreateInfo, nullptr, &Framebuffer));
+		}
+
+		void Destroy()
+		{
+			vkDestroyFramebuffer(Device, Framebuffer, nullptr);
+			Framebuffer = VK_NULL_HANDLE;
+		}
+	};
+
 
 	std::map<VkPhysicalDevice, SDevice> Devices;
 
@@ -1125,9 +1174,14 @@ struct SVulkan
 		Devices[PhysicalDevice].Destroy();
 	}
 
-	void Deinit()
+	void DeinitPre()
 	{
 		vkDeviceWaitIdle(Devices[PhysicalDevice].Device);
+		Devices[PhysicalDevice].DestroyPre();
+	}
+
+	void Deinit()
+	{
 		Swapchain.Destroy();
 		DestroyDevices();
 		if (DebugReportCallback != VK_NULL_HANDLE)
@@ -1140,3 +1194,16 @@ struct SVulkan
 		Instance = VK_NULL_HANDLE;
 	}
 };
+
+inline void SVulkan::FCmdBuffer::BeginRenderPass(FFramebuffer* Framebuffer)
+{
+	check(State == EState::Begun);
+	VkRenderPassBeginInfo Info;
+	ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO);
+	Info.renderPass = Framebuffer->RenderPass->RenderPass;
+	Info.renderArea.extent.width = Framebuffer->Width;
+	Info.renderArea.extent.height = Framebuffer->Height;
+	Info.framebuffer = Framebuffer->Framebuffer;
+	vkCmdBeginRenderPass(CmdBuffer, &Info, VK_SUBPASS_CONTENTS_INLINE);
+	State = EState::InRenderPass;
+}
