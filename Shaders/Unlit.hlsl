@@ -30,6 +30,12 @@ float4 MainNoVBClipVS(in uint VertexID : SV_VertexID) : SV_Position
 	return float4(Pos[VertexID % 3], 1);
 }
 
+Buffer<float4> Pos;
+float4 MainBufferClipVS(in uint VertexID : SV_VertexID) : SV_Position
+{
+	return Pos[VertexID % 3];
+}
+
 float4 RedPS() : SV_Target0
 {
 	return float4(1, 0, 0, 1);

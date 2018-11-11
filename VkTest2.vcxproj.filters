@@ -16,6 +16,9 @@
     <Filter Include="Shaders">
       <UniqueIdentifier>{8baea639-4326-4409-ad26-606170575c9f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="External">
+      <UniqueIdentifier>{4bd9805a-b733-495b-9dc2-d029a571620e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -23,6 +26,9 @@
     </ClInclude>
     <ClInclude Include="RCVulkan.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SPIRV-Reflect\spirv_reflect.h">
+      <Filter>External</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -33,7 +39,10 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\volk\volk.c">
-      <Filter>Source Files</Filter>
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SPIRV-Reflect\spirv_reflect.c">
+      <Filter>External</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -41,6 +50,9 @@
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="Shaders\PassThroughVS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\TestCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

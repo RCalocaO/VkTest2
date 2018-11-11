@@ -24,6 +24,8 @@ static FPSOCache GPSOCache;
 struct FApp
 {
 	VkPipeline NoVBClipVSResPSO = VK_NULL_HANDLE;
+	VkPipeline DataClipVSResPSO = VK_NULL_HANDLE;
+	FShaderInfo* TestCS = nullptr;
 };
 
 static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
@@ -93,7 +95,9 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 
 static void SetupShaders(FApp& App)
 {
+	App.TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "WriteTriCS", FShaderInfo::EStage::Compute);
 	auto* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
+	auto* DataClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipVS", FShaderInfo::EStage::Vertex);
 	auto* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
 	GShaderLibrary.RecompileShaders();
 
@@ -103,6 +107,14 @@ static void SetupShaders(FApp& App)
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();
 
 	App.NoVBClipVSResPSO = GPSOCache.CreatePSO(NoVBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	{
+		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
+		ViewportInfo->viewportCount = 1;
+		ViewportInfo->pViewports = &Viewport;
+		ViewportInfo->scissorCount = 1;
+		ViewportInfo->pScissors = &Scissor;
+	});
+	App.DataClipVSResPSO = GPSOCache.CreatePSO(DataClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
 		ViewportInfo->viewportCount = 1;

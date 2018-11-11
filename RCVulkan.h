@@ -14,6 +14,11 @@
 
 #include "../RCUtils/RCUtilsFile.h"
 
+extern "C"
+{
+#include "../SPIRV-Reflect/spirv_reflect.h"
+}
+
 /*
 
 #define VK_NO_PROTOTYPES
@@ -61,10 +66,14 @@ struct SVulkan
 	struct FShader
 	{
 		VkShaderModule ShaderModule;
+		std::vector<VkDescriptorSetLayout> SetLayouts;
+
 		std::vector<char> SpirV;
 		VkDevice Device;
+		SpvReflectShaderModule Module;
+		std::vector<SpvReflectDescriptorSet*> DescSetInfo;
 
-		bool Create(VkDevice InDevice)
+		bool Create(VkDevice InDevice, VkShaderStageFlagBits Stage)
 		{
 			Device = InDevice;
 
@@ -78,11 +87,55 @@ struct SVulkan
 
 			VERIFY_VKRESULT(vkCreateShaderModule(Device, &CreateInfo, nullptr, &ShaderModule));
 
+			GenerateReflectionAndCreateLayout(Stage);
+
 			return true;
+		}
+
+		void GenerateReflectionAndCreateLayout(VkShaderStageFlagBits Stage)
+		{
+			SpvReflectResult Result = spvReflectCreateShaderModule(SpirV.size(), SpirV.data(), &Module);
+			check(Result == SPV_REFLECT_RESULT_SUCCESS);
+			uint32 NumDescSets = 0;
+			spvReflectEnumerateDescriptorSets(&Module, &NumDescSets, nullptr);
+			DescSetInfo.resize(NumDescSets);
+			spvReflectEnumerateDescriptorSets(&Module, &NumDescSets, DescSetInfo.data());
+
+			for (auto& SetInfo : DescSetInfo)
+			{
+				std::vector<VkDescriptorSetLayoutBinding> InfoBindings;
+				for (uint32 Index = 0; Index < SetInfo->binding_count; ++Index)
+				{
+					SpvReflectDescriptorBinding* SrcBinding = SetInfo->bindings[Index];
+					VkDescriptorSetLayoutBinding Binding;
+					ZeroMem(Binding);
+					Binding.binding = SrcBinding->binding;
+					Binding.descriptorType = (VkDescriptorType)SrcBinding->descriptor_type;
+					Binding.descriptorCount = SrcBinding->count;
+					Binding.stageFlags = Stage;
+					InfoBindings.push_back(Binding);
+				}
+
+				VkDescriptorSetLayoutCreateInfo DSCreateInfo;
+				ZeroVulkanMem(DSCreateInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+				DSCreateInfo.bindingCount = (uint32)InfoBindings.size();
+				DSCreateInfo.pBindings = InfoBindings.data();
+				VkDescriptorSetLayout Layout = VK_NULL_HANDLE;
+				VERIFY_VKRESULT(vkCreateDescriptorSetLayout(Device, &DSCreateInfo, nullptr, &Layout));
+				SetLayouts.push_back(Layout);
+			}
 		}
 
 		~FShader()
 		{
+			for (auto Layout : SetLayouts)
+			{
+				vkDestroyDescriptorSetLayout(Device, Layout, nullptr);
+			}
+			SetLayouts.clear();
+
+			spvReflectDestroyShaderModule(&Module);
+
 			vkDestroyShaderModule(Device, ShaderModule, nullptr);
 			ShaderModule = VK_NULL_HANDLE;
 		}
@@ -1301,11 +1354,25 @@ struct FShaderLibrary
 		return "INVALID";
 	}
 
+	static VkShaderStageFlagBits GetVulkanStage(FShaderInfo::EStage Stage)
+	{
+		switch (Stage)
+		{
+		case FShaderInfo::EStage::Compute:	return VK_SHADER_STAGE_COMPUTE_BIT;
+		case FShaderInfo::EStage::Vertex:	return VK_SHADER_STAGE_VERTEX_BIT;
+		case FShaderInfo::EStage::Pixel:	return VK_SHADER_STAGE_FRAGMENT_BIT;
+		default:
+			break;
+		}
+
+		return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
+	}
+
 	bool CreateShader(FShaderInfo* Info, std::vector<char>& Data)
 	{
 		Info->Shader = new SVulkan::FShader;
 		Info->Shader->SpirV = Data;
-		return Info->Shader->Create(Device);
+		return Info->Shader->Create(Device, GetVulkanStage(Info->Stage));
 	}
 
 	bool DoCompileFromBinary(FShaderInfo* Info)
@@ -1474,6 +1541,15 @@ struct FPSOCache
 
 		VkPipelineLayoutCreateInfo Info;
 		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
+		std::vector<VkDescriptorSetLayout> DSLayouts;
+		DSLayouts = VS->SetLayouts;
+		if (PS)
+		{
+			DSLayouts.insert(DSLayouts.end(), PS->SetLayouts.begin(), PS->SetLayouts.end());
+		}
+
+		Info.setLayoutCount = (uint32)DSLayouts.size();
+		Info.pSetLayouts = DSLayouts.data();
 
 		VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
 		VERIFY_VKRESULT(vkCreatePipelineLayout(Device, &Info, nullptr, &PipelineLayout));
