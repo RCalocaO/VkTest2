@@ -88,11 +88,19 @@ struct SVulkan
 		VkFence Fence = VK_NULL_HANDLE;
 		/*std::atomic<*/uint64 Counter = 0;
 		VkDevice Device = VK_NULL_HANDLE;
+		enum class EState
+		{
+			Reset,
+			WaitingSignal,
+			Signaled,
+		};
+		EState State = EState::Reset;
 
 		void Create(VkDevice InDevice)
 		{
 			Device = InDevice;
 			check(Fence == VK_NULL_HANDLE);
+			check(State == EState::Reset);
 			VkFenceCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
 			VERIFY_VKRESULT(vkCreateFence(Device, &Info, nullptr, &Fence));
@@ -109,15 +117,61 @@ struct SVulkan
 			return Fence;
 		}
 
+		void Reset()
+		{
+			check(State == EState::Signaled);
+			VERIFY_VKRESULT(vkResetFences(Device, 1, &Fence));
+			State = EState::Reset;
+		}
+
 		void Refresh()
 		{
-			VkResult Result = vkGetFenceStatus(Device, Fence);
-			if (Result == VK_SUCCESS)
+			check(State != EState::Reset);
+			if (State == EState::WaitingSignal)
 			{
-				++Counter;
-				vkResetFences(Device, 1, &Fence);
+				VkResult Result = vkGetFenceStatus(Device, Fence);
+				if (Result == VK_SUCCESS)
+				{
+					++Counter;
+					vkResetFences(Device, 1, &Fence);
+					State = EState::Signaled;
+				}
+				else if (Result != VK_NOT_READY)
+				{
+					check(0);
+				}
 			}
-			else if (Result != VK_NOT_READY)
+		}
+
+		inline bool IsSignaled() const
+		{
+			if (State == EState::Signaled)
+			{
+				return true;
+			}
+			else if (State != EState::WaitingSignal)
+			{
+				check(0);
+			}
+
+			return false;
+		}
+
+		void Wait(uint64 TimeOutInNanoseconds)
+		{
+			if (State == EState::WaitingSignal)
+			{
+				VkResult Result = vkWaitForFences(Device, 1, &Fence, VK_TRUE, TimeOutInNanoseconds);
+				if (Result == VK_SUCCESS)
+				{
+					Refresh();
+				}
+				else
+				{
+					check(0);
+				}
+			}
+			else if (State != EState::Signaled)
 			{
 				check(0);
 			}
@@ -127,6 +181,7 @@ struct SVulkan
 	struct FCmdBuffer
 	{
 		FFence Fence;
+		/*std::atomic<*/uint64 LastSubmittedFence = 0;
 		VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
 
 		enum class EState
@@ -142,6 +197,11 @@ struct SVulkan
 		inline bool IsOutsideRenderPass() const
 		{
 			return State == EState::Begun;
+		}
+
+		inline bool IsSubmitted() const
+		{
+			return State == EState::Submitted;
 		}
 
 		void Create(VkDevice Device, VkCommandPool CmdPool)
@@ -187,11 +247,23 @@ struct SVulkan
 			vkEndCommandBuffer(CmdBuffer);
 			State = EState::Ended;
 		}
+
+		void Reset()
+		{
+			check(State == EState::Submitted);
+			Fence.Refresh();
+			check(Fence.IsSignaled());
+			State = EState::Available;
+			Fence.Reset();
+			VERIFY_VKRESULT(vkResetCommandBuffer(CmdBuffer, 0));
+		}
 	};
 
 	struct FCommandPool
 	{
 		VkCommandPool CmdPool = VK_NULL_HANDLE;
+		std::vector<FCmdBuffer> CmdBuffers;
+		uint32 QueueIndex  = ~0;
 		VkDevice Device = VK_NULL_HANDLE;
 
 		void Create(VkDevice InDevice, uint32 InQueueIndex)
@@ -202,6 +274,7 @@ struct SVulkan
 			VkCommandPoolCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO);
 			Info.queueFamilyIndex = QueueIndex;
+			Info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 			vkCreateCommandPool(Device, &Info, nullptr, &CmdPool);
 		}
 
@@ -236,13 +309,22 @@ struct SVulkan
 
 		FCmdBuffer& Begin()
 		{
+			Refresh();
 			FCmdBuffer& CmdBuffer = GetOrAddCmdBuffer();
 			CmdBuffer.Begin();
 			return CmdBuffer;
 		}
 
-		std::vector<FCmdBuffer> CmdBuffers;
-		uint32 QueueIndex  = ~0;
+		void Refresh()
+		{
+			for (auto& CmdBuffer : CmdBuffers)
+			{
+				if (CmdBuffer.IsSubmitted())
+				{
+					CmdBuffer.Reset();
+				}
+			}
+		}
 	};
 
 	struct SDevice
@@ -395,16 +477,16 @@ struct SVulkan
 			vkCmdPipelineBarrier(CmdBuffer.CmdBuffer, SrcStageMask, DestStageMask, 0, 0, nullptr, 0, nullptr, 1, &ImageBarrier);
 		}
 
-		void ResetCommandPools()
+		void RefreshCommandBuffers()
 		{
-			vkResetCommandPool(Device, CmdPools[GfxQueueIndex].CmdPool, 0);
+			CmdPools[GfxQueueIndex].Refresh();
 			if (GfxQueueIndex != ComputeQueueIndex)
 			{
-				vkResetCommandPool(Device, CmdPools[ComputeQueueIndex].CmdPool, 0);
+				CmdPools[ComputeQueueIndex].Refresh();
 			}
 			if (GfxQueueIndex != TransferQueueIndex)
 			{
-				vkResetCommandPool(Device, CmdPools[TransferQueueIndex].CmdPool, 0);
+				CmdPools[TransferQueueIndex].Refresh();
 			}
 		}
 
@@ -413,7 +495,7 @@ struct SVulkan
 			return CmdPools[QueueIndex].Begin();
 		}
 
-		void Submit(VkQueue Queue, FCmdBuffer& CmdBuffer, VkPipelineStageFlags WaitFlags, VkSemaphore WaitSemaphore, VkSemaphore SignalSemaphore, VkFence Fence)
+		void Submit(VkQueue Queue, FCmdBuffer& CmdBuffer, VkPipelineStageFlags WaitFlags, VkSemaphore WaitSemaphore, VkSemaphore SignalSemaphore)
 		{
 			check(CmdBuffer.State == FCmdBuffer::EState::Ended);
 
@@ -432,28 +514,18 @@ struct SVulkan
 				Info.signalSemaphoreCount = 1;
 				Info.pSignalSemaphores = &SignalSemaphore;
 			}
-			vkQueueSubmit(Queue, 1, &Info, Fence);
+			vkQueueSubmit(Queue, 1, &Info, CmdBuffer.Fence.Fence);
 
+			check(CmdBuffer.Fence.State == FFence::EState::Reset);
+			CmdBuffer.Fence.State = FFence::EState::WaitingSignal;
 			CmdBuffer.State = FCmdBuffer::EState::Submitted;
 		}
 
-		void WaitForFence(FFence& Fence, uint64 TimeOutInNanoseconds = 5 * 1000 * 1000)
+		void WaitForFence(FFence& Fence, uint64 FenceCounter, uint64 TimeOutInNanoseconds = 5 * 1000 * 1000)
 		{
-			VkResult Result = vkWaitForFences(Device, 1, &Fence.Fence, VK_TRUE, TimeOutInNanoseconds);
-			if (Result == VK_SUCCESS)
+			if (Fence.Counter == FenceCounter)
 			{
-				Fence.Refresh();
-			}
-			else
-			{
-				if (Result == VK_TIMEOUT)
-				{
-					check(0);
-				}
-				else
-				{
-					check(0);
-				}
+				Fence.Wait(TimeOutInNanoseconds);
 			}
 		}
 	};
@@ -890,6 +962,7 @@ struct SVulkan
 		VkDebugUtilsMessengerCreateInfoEXT Info;
 		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
 		Info.messageSeverity =
+			//VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
 			VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
 			VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 		Info.messageType =
@@ -1041,6 +1114,7 @@ struct SVulkan
 
 	void Deinit()
 	{
+		vkDeviceWaitIdle(Devices[PhysicalDevice].Device);
 		Swapchain.Destroy();
 		DestroyDevices();
 		if (DebugReportCallback != VK_NULL_HANDLE)

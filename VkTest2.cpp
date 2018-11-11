@@ -5,6 +5,9 @@
 #include <iostream>
 #include <GLFW/glfw3.h>
 
+// Fix Windows warning
+#undef APIENTRY
+
 #include "RCVulkan.h"
 #include "../RCUtils/RCUtilsFile.h"
 #include <direct.h>
@@ -378,7 +381,7 @@ void Render()
 	SVulkan::SDevice& Device = GVulkan.Devices[GVulkan.PhysicalDevice];
 	GVulkan.Swapchain.AcquireBackbuffer();
 
-	Device.ResetCommandPools();
+	Device.RefreshCommandBuffers();
 
 	SVulkan::FCmdBuffer& CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
@@ -399,11 +402,10 @@ void Render()
 
 	CmdBuffer.End();
 
-	uint64 FenceCounter = CmdBuffer.Fence.Counter;
-	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore, CmdBuffer.Fence);
+	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore);
 
 	GVulkan.Swapchain.Present(Device.PresentQueue, GVulkan.Swapchain.FinalSemaphore);
-	Device.WaitForFence(CmdBuffer.Fence);
+	Device.WaitForFence(CmdBuffer.Fence, CmdBuffer.LastSubmittedFence);
 }
 
 
