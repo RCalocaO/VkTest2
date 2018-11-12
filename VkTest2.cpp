@@ -23,13 +23,15 @@ static FPSOCache GPSOCache;
 
 struct FApp
 {
-	SVulkan::FGfxPSO NoVBClipVSResPSO;
-	SVulkan::FGfxPSO DataClipVSResPSO;
-	SVulkan::FGfxPSO VBClipVSResPSO;
+	SVulkan::FGfxPSO NoVBClipVSRedPSO;
+	SVulkan::FGfxPSO DataClipVSRedPSO;
+	SVulkan::FGfxPSO DataClipVSColorPSO;
+	SVulkan::FGfxPSO VBClipVSRedPSO;
 	FBufferWithMem ClipVB;
 	VkBufferView ClipVBView;
 	FBufferWithMem StagingClipVB;
 	FShaderInfo* TestCS = nullptr;
+	FBufferWithMem ColorUB;
 
 	void Create(SVulkan::SDevice& Device)
 	{
@@ -40,19 +42,23 @@ struct FApp
 		{
 			StagingClipVB.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ClipVBSize);
 			float* Data = (float*)StagingClipVB.Lock();
-			//float3 Pos[3] ={float3(0, -0.5, 1), float3(-0.5, 0.5, 1), float3(0.5, 0.5, 1)};
 			*Data++ = 0;		*Data++ = -0.5f;	*Data++ = 1; *Data++ = 1;
 			*Data++ = -0.5f;	*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
 			*Data++ = 0.5f;		*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
 			StagingClipVB.Unlock();
 		}
 
-		VkBufferViewCreateInfo Info;
-		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO);
-		Info.buffer = ClipVB.Buffer.Buffer;
-		Info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-		Info.range = ClipVB.Size;
-		VERIFY_VKRESULT(vkCreateBufferView(Device.Device, &Info, nullptr, &ClipVBView));
+		ClipVBView = Device.CreateBufferView(ClipVB.Buffer.Buffer, VK_FORMAT_R32G32B32A32_SFLOAT, ClipVBSize);
+
+		ColorUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(float));
+		{
+			float* Data = (float*)ColorUB.Lock();
+			*Data++ = 0.0f;
+			*Data++ = 1.0f;
+			*Data++ = 0.0f;
+			*Data++ = 1.0f;
+			ColorUB.Unlock();
+		}
 	}
 
 	void Destroy()
@@ -61,6 +67,7 @@ struct FApp
 		ClipVBView = VK_NULL_HANDLE;
 		StagingClipVB.Destroy();
 		ClipVB.Destroy();
+		ColorUB.Destroy();
 	}
 };
 
@@ -119,28 +126,52 @@ void Render(FApp& App)
 	CmdBuffer.BeginRenderPass(Framebuffer);
 	if (0)
 	{
-		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSResPSO.Pipeline);
+		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSRedPSO.Pipeline);
 	}
 	else if (1)
 	{
-		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSResPSO.Pipeline);
+		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSColorPSO.Pipeline);
+
+		VkWriteDescriptorSet DescriptorWrites[2];
+		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+		DescriptorWrites[0].descriptorCount = 1;
+		DescriptorWrites[0].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.VS[0]->bindings[0]->descriptor_type;
+		DescriptorWrites[0].pTexelBufferView = &App.ClipVBView;
+		//DescriptorWrites.pBufferInfo = &info.uniform_data.buffer_info;  // populated by init_uniform_buffer()
+		DescriptorWrites[0].dstBinding = App.DataClipVSRedPSO.VS[0]->bindings[0]->binding;
+
+		ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+		DescriptorWrites[1].descriptorCount = 1;
+		DescriptorWrites[1].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.PS[0]->bindings[0]->descriptor_type;
+		VkDescriptorBufferInfo BufferInfo;
+		ZeroMem(BufferInfo);
+		BufferInfo.buffer = App.ColorUB.Buffer.Buffer;
+		BufferInfo.range =  App.ColorUB.Size;
+		DescriptorWrites[1].pBufferInfo = &BufferInfo;
+		DescriptorWrites[1].dstBinding = App.DataClipVSColorPSO.PS[0]->bindings[0]->binding;
+
+		vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSColorPSO.Layout, 0, 2, DescriptorWrites);
+	}
+	else if (1)
+	{
+		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Pipeline);
 
 		VkWriteDescriptorSet DescriptorWrites;
 		ZeroVulkanMem(DescriptorWrites, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 		//DescriptorWrites.pNext = NULL;
 		//DescriptorWrites.dstSet = 0;  // dstSet is ignored by the extension
 		DescriptorWrites.descriptorCount = 1;
-		DescriptorWrites.descriptorType = (VkDescriptorType)App.DataClipVSResPSO.VS[0]->bindings[0]->descriptor_type;
+		DescriptorWrites.descriptorType = (VkDescriptorType)App.DataClipVSRedPSO.VS[0]->bindings[0]->descriptor_type;
 		DescriptorWrites.pTexelBufferView = &App.ClipVBView;
 		//DescriptorWrites.pBufferInfo = &info.uniform_data.buffer_info;  // populated by init_uniform_buffer()
 		//DescriptorWrites.dstArrayElement = 0;
-		DescriptorWrites.dstBinding = App.DataClipVSResPSO.VS[0]->bindings[0]->binding;
+		DescriptorWrites.dstBinding = App.DataClipVSRedPSO.VS[0]->bindings[0]->binding;
 
-		vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSResPSO.Layout, 0, 1, &DescriptorWrites);
+		vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Layout, 0, 1, &DescriptorWrites);
 	}
 	else if (1)
 	{
-		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.VBClipVSResPSO.Pipeline);
+		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.VBClipVSRedPSO.Pipeline);
 		VkDeviceSize Offsets = 0;
 		vkCmdBindVertexBuffers(CmdBuffer.CmdBuffer, 0, 1, &App.ClipVB.Buffer.Buffer, &Offsets);
 	}
@@ -173,6 +204,7 @@ static void SetupShaders(FApp& App)
 	auto* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
 	auto* DataClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipVS", FShaderInfo::EStage::Vertex);
 	auto* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
+	auto* ColorPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ColorPS", FShaderInfo::EStage::Pixel);
 	GShaderLibrary.RecompileShaders();
 
 	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
@@ -180,7 +212,7 @@ static void SetupShaders(FApp& App)
 	VkViewport Viewport = GVulkan.Swapchain.GetViewport();
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();
 
-	App.NoVBClipVSResPSO = GPSOCache.CreateGfxPSO(NoVBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	App.DataClipVSColorPSO = GPSOCache.CreateGfxPSO(DataClipVS, ColorPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
 		ViewportInfo->viewportCount = 1;
@@ -189,7 +221,16 @@ static void SetupShaders(FApp& App)
 		ViewportInfo->pScissors = &Scissor;
 	});
 
-	App.DataClipVSResPSO = GPSOCache.CreateGfxPSO(DataClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	App.NoVBClipVSRedPSO = GPSOCache.CreateGfxPSO(NoVBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	{
+		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
+		ViewportInfo->viewportCount = 1;
+		ViewportInfo->pViewports = &Viewport;
+		ViewportInfo->scissorCount = 1;
+		ViewportInfo->pScissors = &Scissor;
+	});
+
+	App.DataClipVSRedPSO = GPSOCache.CreateGfxPSO(DataClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
 		ViewportInfo->viewportCount = 1;
@@ -204,7 +245,7 @@ static void SetupShaders(FApp& App)
 	VkVertexInputBindingDescription VertexBindDesc;
 	ZeroMem(VertexBindDesc);
 	VertexBindDesc.stride = 4 * sizeof(float);
-	App.VBClipVSResPSO = GPSOCache.CreateGfxPSO(VBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO(VBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
 		ViewportInfo->viewportCount = 1;

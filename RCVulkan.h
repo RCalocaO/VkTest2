@@ -66,7 +66,7 @@ struct SVulkan
 	struct FShader
 	{
 		VkShaderModule ShaderModule;
-		std::vector<VkDescriptorSetLayout> SetLayouts;
+		std::map<uint32, std::vector<VkDescriptorSetLayoutBinding>> SetInfoBindings;
 
 		std::vector<char> SpirV;
 		VkDevice Device;
@@ -103,7 +103,7 @@ struct SVulkan
 
 			for (auto& SetInfo : DescSetInfo)
 			{
-				std::vector<VkDescriptorSetLayoutBinding> InfoBindings;
+				std::vector<VkDescriptorSetLayoutBinding>& InfoBindings = SetInfoBindings[SetInfo->set];
 				for (uint32 Index = 0; Index < SetInfo->binding_count; ++Index)
 				{
 					SpvReflectDescriptorBinding* SrcBinding = SetInfo->bindings[Index];
@@ -116,24 +116,27 @@ struct SVulkan
 					InfoBindings.push_back(Binding);
 				}
 
-				VkDescriptorSetLayoutCreateInfo DSCreateInfo;
-				ZeroVulkanMem(DSCreateInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
-				DSCreateInfo.bindingCount = (uint32)InfoBindings.size();
-				DSCreateInfo.pBindings = InfoBindings.data();
-				DSCreateInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-				VkDescriptorSetLayout Layout = VK_NULL_HANDLE;
-				VERIFY_VKRESULT(vkCreateDescriptorSetLayout(Device, &DSCreateInfo, nullptr, &Layout));
-				SetLayouts.push_back(Layout);
+				//VkDescriptorSetLayoutCreateInfo DSCreateInfo;
+				//ZeroVulkanMem(DSCreateInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+				//DSCreateInfo.bindingCount = (uint32)InfoBindings.size();
+				//DSCreateInfo.pBindings = InfoBindings.data();
+				//DSCreateInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+				//VkDescriptorSetLayout Layout = VK_NULL_HANDLE;
+				//VERIFY_VKRESULT(vkCreateDescriptorSetLayout(Device, &DSCreateInfo, nullptr, &Layout));
+				//SetLayouts.push_back(Layout);
 			}
 		}
 
 		~FShader()
 		{
+/*
 			for (auto Layout : SetLayouts)
 			{
 				vkDestroyDescriptorSetLayout(Device, Layout, nullptr);
 			}
 			SetLayouts.clear();
+*/
+			SetInfoBindings.clear();
 
 			spvReflectDestroyShaderModule(&Module);
 
@@ -462,6 +465,19 @@ struct SVulkan
 			return MemAlloc;
 		}
 
+		VkBufferView CreateBufferView(VkBuffer Buffer, VkFormat Format, VkDeviceSize Size, VkDeviceSize Offset = 0)
+		{
+			VkBufferViewCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO);
+			Info.buffer = Buffer;
+			Info.format = Format;
+			Info.range = Size;
+			Info.offset = Offset;
+			VkBufferView View = VK_NULL_HANDLE;
+			VERIFY_VKRESULT(vkCreateBufferView(Device, &Info, nullptr, &View));
+			return View;
+		}
+
 		VkImageView CreateImageView(VkImage Image, VkFormat Format, VkImageAspectFlags Aspect, VkImageViewType ViewType)
 		{
 			VkImageViewCreateInfo Info;
@@ -509,10 +525,10 @@ struct SVulkan
 				VK_KHR_MAINTENANCE2_EXTENSION_NAME,
 				//VK_KHR_MULTIVIEW_EXTENSION_NAME,
 				VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+				//VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME,
+				//VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
+				//VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
 			};
-			//DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
-			//DeviceExtensions.push_back(VK_KHR_16BIT_STORAGE_EXTENSION_NAME);
-			//DeviceExtensions.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
 
 			VerifyExtensions(ExtensionProperties, DeviceExtensions);
 
@@ -1643,7 +1659,24 @@ struct FRenderTargetCache
 
 struct FPSOCache
 {
-	std::map<SVulkan::FShader*, std::map<SVulkan::FShader*, VkPipelineLayout>> PipelineLayouts;
+	struct FLayout
+	{
+		VkPipelineLayout PipelneLayout = VK_NULL_HANDLE;
+		std::vector<VkDescriptorSetLayout> DSLayouts;
+
+		void Destroy(VkDevice Device)
+		{
+			for (auto Layout : DSLayouts)
+			{
+				vkDestroyDescriptorSetLayout(Device, Layout, nullptr);
+			}
+			vkDestroyPipelineLayout(Device, PipelneLayout, nullptr);
+
+			PipelneLayout = VK_NULL_HANDLE;
+			DSLayouts.clear();
+		}
+	};
+	std::map<SVulkan::FShader*, std::map<SVulkan::FShader*, FLayout>> PipelineLayouts;
 	std::vector<SVulkan::FPSO> PSOs;
 
 	VkDevice Device =  VK_NULL_HANDLE;
@@ -1658,27 +1691,40 @@ struct FPSOCache
 		auto Found = VSList.find(PS);
 		if (Found != VSList.end())
 		{
-			return Found->second;
+			return Found->second.PipelneLayout;
 		}
 
 		VkPipelineLayoutCreateInfo Info;
 		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
-		std::vector<VkDescriptorSetLayout> DSLayouts;
-		DSLayouts = VS->SetLayouts;
+		std::map<uint32, std::vector<VkDescriptorSetLayoutBinding>> LayoutBindings = VS->SetInfoBindings;
 		if (PS)
 		{
-			DSLayouts.insert(DSLayouts.end(), PS->SetLayouts.begin(), PS->SetLayouts.end());
+			for (auto Pair : PS->SetInfoBindings)
+			{
+				auto& SetBindings = LayoutBindings[Pair.first];
+				SetBindings.insert(SetBindings.end(), Pair.second.begin(), Pair.second.end());
+			}
 		}
 
-		Info.setLayoutCount = (uint32)DSLayouts.size();
-		Info.pSetLayouts = DSLayouts.data();
+		auto& Layout = VSList[PS];
 
-		VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
-		VERIFY_VKRESULT(vkCreatePipelineLayout(Device, &Info, nullptr, &PipelineLayout));
+		for (auto Pair : LayoutBindings)
+		{
+			VkDescriptorSetLayoutCreateInfo DSInfo;
+			ZeroVulkanMem(DSInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+			DSInfo.bindingCount = (uint32)Pair.second.size();
+			DSInfo.pBindings = Pair.second.data();
+			DSInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+			VkDescriptorSetLayout DSLayout = VK_NULL_HANDLE;
+			VERIFY_VKRESULT(vkCreateDescriptorSetLayout(Device, &DSInfo, nullptr, &DSLayout));
+			Layout.DSLayouts.push_back(DSLayout);
+		}
 
-		VSList[PS] = PipelineLayout;
+		Info.setLayoutCount = (uint32)Layout.DSLayouts.size();
+		Info.pSetLayouts = Layout.DSLayouts.data();
 
-		return PipelineLayout;
+		VERIFY_VKRESULT(vkCreatePipelineLayout(Device, &Info, nullptr, &Layout.PipelneLayout));
+		return Layout.PipelneLayout;
 	}
 
 	template <typename TFunction>
@@ -1782,7 +1828,7 @@ struct FPSOCache
 		{
 			for (auto PSPair : VSPair.second)
 			{
-				vkDestroyPipelineLayout(Device, PSPair.second, nullptr);
+				PSPair.second.Destroy(Device);
 			}
 		}
 
