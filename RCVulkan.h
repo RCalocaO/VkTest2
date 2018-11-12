@@ -120,6 +120,7 @@ struct SVulkan
 				ZeroVulkanMem(DSCreateInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
 				DSCreateInfo.bindingCount = (uint32)InfoBindings.size();
 				DSCreateInfo.pBindings = InfoBindings.data();
+				DSCreateInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
 				VkDescriptorSetLayout Layout = VK_NULL_HANDLE;
 				VERIFY_VKRESULT(vkCreateDescriptorSetLayout(Device, &DSCreateInfo, nullptr, &Layout));
 				SetLayouts.push_back(Layout);
@@ -139,6 +140,18 @@ struct SVulkan
 			vkDestroyShaderModule(Device, ShaderModule, nullptr);
 			ShaderModule = VK_NULL_HANDLE;
 		}
+	};
+
+	struct FPSO
+	{
+		VkPipeline Pipeline = VK_NULL_HANDLE;
+		VkPipelineLayout Layout = VK_NULL_HANDLE;
+	};
+
+	struct FGfxPSO : public FPSO
+	{
+		std::vector<SpvReflectDescriptorSet*> VS;
+		std::vector<SpvReflectDescriptorSet*> PS;
 	};
 
 	struct FFence
@@ -495,6 +508,7 @@ struct SVulkan
 				VK_KHR_MAINTENANCE1_EXTENSION_NAME,
 				VK_KHR_MAINTENANCE2_EXTENSION_NAME,
 				//VK_KHR_MULTIVIEW_EXTENSION_NAME,
+				VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
 			};
 			//DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
 			//DeviceExtensions.push_back(VK_KHR_16BIT_STORAGE_EXTENSION_NAME);
@@ -1630,7 +1644,7 @@ struct FRenderTargetCache
 struct FPSOCache
 {
 	std::map<SVulkan::FShader*, std::map<SVulkan::FShader*, VkPipelineLayout>> PipelineLayouts;
-	std::vector<VkPipeline> PSOs;
+	std::vector<SVulkan::FPSO> PSOs;
 
 	VkDevice Device =  VK_NULL_HANDLE;
 	void Init(VkDevice InDevice)
@@ -1668,7 +1682,7 @@ struct FPSOCache
 	}
 
 	template <typename TFunction>
-	VkPipeline CreatePSO(FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
+	SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
 	{
 		check(VS->Shader && VS->Shader->ShaderModule);
 		if (PS)
@@ -1707,7 +1721,13 @@ struct FPSOCache
 		}
 		GfxPipelineInfo.pStages = StageInfos;
 
-		VkPipelineLayout PipelineLayout = GetOrCreatePipelineLayout(VS->Shader, PS ? PS->Shader : nullptr);
+		SVulkan::FGfxPSO PSO;
+		PSO.VS = VS->Shader->DescSetInfo;
+		if (PS)
+		{
+			PSO.PS = PS->Shader->DescSetInfo;
+		}
+		PSO.Layout = GetOrCreatePipelineLayout(VS->Shader, PS ? PS->Shader : nullptr);
 
 		VkPipelineRasterizationStateCreateInfo RasterizerInfo;
 		ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
@@ -1737,7 +1757,7 @@ struct FPSOCache
 		ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
 		GfxPipelineInfo.pViewportState = &ViewportState;
 
-		GfxPipelineInfo.layout = PipelineLayout;
+		GfxPipelineInfo.layout = PSO.Layout;
 
 		VkPipelineDepthStencilStateCreateInfo DepthStateInfo;
 		ZeroVulkanMem(DepthStateInfo, VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO);
@@ -1751,10 +1771,9 @@ struct FPSOCache
 
 		Callback(GfxPipelineInfo);
 
-		VkPipeline Pipeline;
-		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &Pipeline));
-		PSOs.push_back(Pipeline);
-		return Pipeline;
+		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &PSO.Pipeline));
+		PSOs.push_back(PSO);
+		return PSO;
 	}
 
 	void Destroy()
@@ -1769,9 +1788,9 @@ struct FPSOCache
 
 		PipelineLayouts.clear();
 
-		for (auto* PSO : PSOs)
+		for (auto& PSO : PSOs)
 		{
-			vkDestroyPipeline(Device, PSO, nullptr);
+			vkDestroyPipeline(Device, PSO.Pipeline, nullptr);
 		}
 		PSOs.clear();
 	}
