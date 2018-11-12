@@ -25,7 +25,33 @@ struct FApp
 {
 	VkPipeline NoVBClipVSResPSO = VK_NULL_HANDLE;
 	VkPipeline DataClipVSResPSO = VK_NULL_HANDLE;
+	VkPipeline VBClipVSResPSO = VK_NULL_HANDLE;
+	FBufferWithMem ClipVB;
+	FBufferWithMem StagingClipVB;
 	FShaderInfo* TestCS = nullptr;
+
+	void Create(SVulkan::SDevice& Device)
+	{
+		// Dummy stuff
+		uint32 ClipVBSize = 3 * 4 * sizeof(float);
+		ClipVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, ClipVBSize);
+
+		{
+			StagingClipVB.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ClipVBSize);
+			float* Data = (float*)StagingClipVB.Lock();
+			//float3 Pos[3] ={float3(0, -0.5, 1), float3(-0.5, 0.5, 1), float3(0.5, 0.5, 1)};
+			*Data++ = 0;		*Data++ = -0.5f;	*Data++ = 1; *Data++ = 1;
+			*Data++ = -0.5f;	*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
+			*Data++ = 0.5f;		*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
+			StagingClipVB.Unlock();
+		}
+	}
+
+	void Destroy()
+	{
+		StagingClipVB.Destroy();
+		ClipVB.Destroy();
+	}
 };
 
 static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
@@ -53,6 +79,16 @@ void Render(FApp& App)
 
 	SVulkan::FCmdBuffer& CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
+	static bool bFirst = true;
+	if (bFirst)
+	{
+		VkBufferCopy Region;
+		ZeroMem(Region);
+		Region.size = App.ClipVB.Size;
+		vkCmdCopyBuffer(CmdBuffer.CmdBuffer, App.StagingClipVB.Buffer.Buffer, App.ClipVB.Buffer.Buffer, 1, &Region);
+		bFirst = false;
+	}
+
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0, 
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -71,8 +107,13 @@ void Render(FApp& App)
 	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(&GVulkan.Swapchain, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
 
 	CmdBuffer.BeginRenderPass(Framebuffer);
-	vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSResPSO);
+	//vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSResPSO);
+	//vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSResPSO);
+	vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.VBClipVSResPSO);
+	VkDeviceSize Offsets = 0;
+	vkCmdBindVertexBuffers(CmdBuffer.CmdBuffer, 0, 1, &App.ClipVB.Buffer.Buffer, &Offsets);
 	vkCmdDraw(CmdBuffer.CmdBuffer, 3, 1, 0, 0);
+
 	CmdBuffer.EndRenderPass();
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
@@ -96,6 +137,7 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 static void SetupShaders(FApp& App)
 {
 	App.TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "WriteTriCS", FShaderInfo::EStage::Compute);
+	auto* VBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "VBClipVS", FShaderInfo::EStage::Vertex);
 	auto* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
 	auto* DataClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipVS", FShaderInfo::EStage::Vertex);
 	auto* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
@@ -122,6 +164,26 @@ static void SetupShaders(FApp& App)
 		ViewportInfo->scissorCount = 1;
 		ViewportInfo->pScissors = &Scissor;
 	});
+	VkVertexInputAttributeDescription VertexAttrDesc;
+	ZeroMem(VertexAttrDesc);
+	VertexAttrDesc.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+	VkVertexInputBindingDescription VertexBindDesc;
+	ZeroMem(VertexBindDesc);
+	VertexBindDesc.stride = 4 * sizeof(float);
+	App.VBClipVSResPSO = GPSOCache.CreatePSO(VBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	{
+		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
+		ViewportInfo->viewportCount = 1;
+		ViewportInfo->pViewports = &Viewport;
+		ViewportInfo->scissorCount = 1;
+		ViewportInfo->pScissors = &Scissor;
+
+		VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
+		VertexInputInfo->vertexAttributeDescriptionCount = 1;
+		VertexInputInfo->pVertexAttributeDescriptions = &VertexAttrDesc;
+		VertexInputInfo->vertexBindingDescriptionCount = 1;
+		VertexInputInfo->pVertexBindingDescriptions = &VertexBindDesc;
+	});
 }
 
 static GLFWwindow* Init(FApp& App)
@@ -147,22 +209,26 @@ static GLFWwindow* Init(FApp& App)
 	}
 
 	GVulkan.Init(Window);
-	VkDevice Device = GVulkan.Devices[GVulkan.PhysicalDevice].Device;
+	SVulkan::SDevice& Device = GVulkan.Devices[GVulkan.PhysicalDevice];
 
-	GRenderTargetCache.Init(Device);
-	GShaderLibrary.Init(Device);
-	GPSOCache.Init(Device);
+	GRenderTargetCache.Init(Device.Device);
+	GShaderLibrary.Init(Device.Device);
+	GPSOCache.Init(Device.Device);
 
 	glfwSetKeyCallback(Window, KeyCallback);
 
 	SetupShaders(App);
 
+	App.Create(Device);
+
 	return Window;
 }
 
-static void Deinit(GLFWwindow* Window)
+static void Deinit(FApp& App, GLFWwindow* Window)
 {
 	GVulkan.DeinitPre();
+
+	App.Destroy();
 
 	GPSOCache.Destroy();
 	GShaderLibrary.Destroy();
@@ -190,7 +256,7 @@ int main()
 		double CpuDelta = CpuEnd - CpuBegin;
 	}
 
-	Deinit(Window);
+	Deinit(App, Window);
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu

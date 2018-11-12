@@ -395,6 +395,13 @@ struct SVulkan
 		}
 	};
 
+	struct FMemAlloc
+	{
+		VkDeviceMemory Memory = VK_NULL_HANDLE;
+		VkDeviceSize Offset = 0;
+		VkDeviceSize Size = 0;
+	};
+
 	struct SDevice
 	{
 		VkDevice Device = VK_NULL_HANDLE;
@@ -409,6 +416,38 @@ struct SVulkan
 		uint32 ComputeQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 TransferQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
+		VkPhysicalDeviceMemoryProperties MemProperties;
+
+		std::vector<FMemAlloc*> MemAllocs;
+		inline uint32 FindMemoryTypeIndex(VkMemoryPropertyFlags MemProps, uint32 Type) const
+		{
+			for (uint32 Index = 0; Index < MemProperties.memoryTypeCount; ++Index)
+			{
+				if (Type & (1 << Index))
+				{
+					if ((MemProperties.memoryTypes[Index].propertyFlags & MemProps) == MemProps)
+					{
+						return Index;
+					}
+				}
+			}
+
+			check(0);
+			return ~0;
+		}
+
+		FMemAlloc* AllocMemory(VkDeviceSize Size, VkMemoryPropertyFlags MemPropFlags, uint32 Type)
+		{
+			FMemAlloc* MemAlloc = new FMemAlloc();
+			VkMemoryAllocateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
+			Info.allocationSize = Size;
+			Info.memoryTypeIndex = FindMemoryTypeIndex(MemPropFlags, Type);
+			VERIFY_VKRESULT(vkAllocateMemory(Device, &Info, nullptr, &MemAlloc->Memory));
+			MemAlloc->Size = Size;
+			MemAllocs.push_back(MemAlloc);
+			return MemAlloc;
+		}
 
 		VkImageView CreateImageView(VkImage Image, VkFormat Format, VkImageAspectFlags Aspect, VkImageViewType ViewType)
 		{
@@ -512,6 +551,8 @@ struct SVulkan
 			{
 				CmdPools[TransferQueueIndex].Create(Device, TransferQueueIndex);
 			}
+
+			vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &MemProperties);
 		}
 
 		void DestroyPre()
@@ -529,6 +570,13 @@ struct SVulkan
 
 		void Destroy()
 		{
+			for (FMemAlloc* Alloc : MemAllocs)
+			{
+				vkFreeMemory(Device, Alloc->Memory, nullptr);
+				delete Alloc;
+			}
+			MemAllocs.clear();
+
 			vkDestroyDevice(Device, nullptr);
 			Device = VK_NULL_HANDLE;
 		}
@@ -1250,6 +1298,66 @@ struct SVulkan
 
 		vkDestroyInstance(Instance, nullptr);
 		Instance = VK_NULL_HANDLE;
+	}
+
+	struct FBuffer
+	{
+		VkBuffer Buffer = VK_NULL_HANDLE;
+		VkDevice Device = VK_NULL_HANDLE;
+
+		void Create(VkDevice InDevice, VkBufferUsageFlags UsageFlags, uint32 Size)
+		{
+			Device = InDevice;
+
+			VkBufferCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+			Info.size = Size;
+			Info.usage = UsageFlags;
+			VERIFY_VKRESULT(vkCreateBuffer(Device, &Info, nullptr, &Buffer));
+		}
+
+		void Destroy()
+		{
+			vkDestroyBuffer(Device, Buffer, nullptr);
+		}
+	};
+};
+
+struct FBufferWithMem
+{
+	SVulkan::FBuffer Buffer;
+	SVulkan::FMemAlloc* Mem = nullptr;
+	uint32 Size = 0;
+
+	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 InSize)
+	{
+		Size = InSize;
+
+		Buffer.Create(InDevice.Device, UsageFlags, Size);
+
+		VkMemoryRequirements MemReqs;
+		vkGetBufferMemoryRequirements(InDevice.Device, Buffer.Buffer, &MemReqs);
+
+		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits);
+		VERIFY_VKRESULT(vkBindBufferMemory(InDevice.Device, Buffer.Buffer, Mem->Memory, Mem->Offset));
+	}
+
+	void Destroy()
+	{
+		Buffer.Destroy();
+		Mem = nullptr;
+	}
+
+	void* Lock()
+	{
+		void* Data = nullptr;
+		VERIFY_VKRESULT(vkMapMemory(Buffer.Device, Mem->Memory, Mem->Offset, Mem->Size, 0, &Data));
+		return Data;
+	}
+
+	void Unlock()
+	{
+		vkUnmapMemory(Buffer.Device, Mem->Memory);
 	}
 };
 

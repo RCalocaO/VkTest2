@@ -24,6 +24,11 @@ struct FVSOut
 	float2 UVs : TEXCOORD0;
 };
 
+float4 VBClipVS(in uint VertexID : SV_VertexID, in float4 Pos : POSITION) : SV_Position
+{
+	return Pos;
+}
+
 float4 MainNoVBClipVS(in uint VertexID : SV_VertexID) : SV_Position
 {
 	float3 Pos[3] = { float3(0, -0.5, 1), float3(-0.5, 0.5, 1), float3(0.5, 0.5, 1)};
