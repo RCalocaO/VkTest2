@@ -63,6 +63,28 @@ struct SVulkan
 	std::vector<VkPhysicalDevice> DiscreteDevices;
 	std::vector<VkPhysicalDevice> IntegratedDevices;
 
+	struct FBuffer
+	{
+		VkBuffer Buffer = VK_NULL_HANDLE;
+		VkDevice Device = VK_NULL_HANDLE;
+
+		void Create(VkDevice InDevice, VkBufferUsageFlags UsageFlags, uint32 Size)
+		{
+			Device = InDevice;
+
+			VkBufferCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+			Info.size = Size;
+			Info.usage = UsageFlags;
+			VERIFY_VKRESULT(vkCreateBuffer(Device, &Info, nullptr, &Buffer));
+		}
+
+		void Destroy()
+		{
+			vkDestroyBuffer(Device, Buffer, nullptr);
+		}
+	};
+
 	struct FShader
 	{
 		VkShaderModule ShaderModule;
@@ -434,6 +456,8 @@ struct SVulkan
 		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		VkPhysicalDeviceMemoryProperties MemProperties;
 		VkQueryPool QueryPool = VK_NULL_HANDLE;
+		SVulkan::FBuffer QueryResultsBuffer;
+		SVulkan::FMemAlloc* QueryResultsMem = nullptr;
 
 		std::vector<FMemAlloc*> MemAllocs;
 		inline uint32 FindMemoryTypeIndex(VkMemoryPropertyFlags MemProps, uint32 Type) const
@@ -591,10 +615,22 @@ struct SVulkan
 			PoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
 			PoolCreateInfo.queryCount = 2;
 			VERIFY_VKRESULT(vkCreateQueryPool(Device, &PoolCreateInfo, nullptr, &QueryPool));
+
+			QueryResultsBuffer.Create(Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 2 * sizeof(uint64));
+
+			{
+				VkMemoryRequirements MemReqs;
+				vkGetBufferMemoryRequirements(Device, QueryResultsBuffer.Buffer, &MemReqs);
+
+				QueryResultsMem = AllocMemory(MemReqs.size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, MemReqs.memoryTypeBits);
+				VERIFY_VKRESULT(vkBindBufferMemory(Device, QueryResultsBuffer.Buffer, QueryResultsMem->Memory, QueryResultsMem->Offset));
+			}
 		}
 
 		void DestroyPre()
 		{
+			QueryResultsBuffer.Destroy();
+
 			vkDestroyQueryPool(Device, QueryPool, nullptr);
 
 			CmdPools[GfxQueueIndex].Destroy();
@@ -697,13 +733,20 @@ struct SVulkan
 		void EndTimestamp(FCmdBuffer& CmdBuffer)
 		{
 			vkCmdWriteTimestamp(CmdBuffer.CmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QueryPool, 1);
+			vkCmdCopyQueryPoolResults(CmdBuffer.CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkCmdResetQueryPool(CmdBuffer.CmdBuffer, QueryPool, 0, 2);
 		}
 
 		double ReadTimestamp()
 		{
-			uint64 Values[2] = {0, 0};
+			uint64* Values;
+/*
+			uint64 Values[2] ={0, 0};
 			VERIFY_VKRESULT(vkGetQueryPoolResults(Device, QueryPool, 0, 2, 2 * sizeof(uint64), &Values, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
+*/
+			VERIFY_VKRESULT(vkMapMemory(Device, QueryResultsMem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
 			double Delta = (Values[1] - Values[0]) / Props.limits.timestampPeriod / 1000.0;
+			vkUnmapMemory(Device, QueryResultsMem->Memory);
 			return Delta;
 		}
 	};
@@ -1357,28 +1400,6 @@ struct SVulkan
 		vkDestroyInstance(Instance, nullptr);
 		Instance = VK_NULL_HANDLE;
 	}
-
-	struct FBuffer
-	{
-		VkBuffer Buffer = VK_NULL_HANDLE;
-		VkDevice Device = VK_NULL_HANDLE;
-
-		void Create(VkDevice InDevice, VkBufferUsageFlags UsageFlags, uint32 Size)
-		{
-			Device = InDevice;
-
-			VkBufferCreateInfo Info;
-			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
-			Info.size = Size;
-			Info.usage = UsageFlags;
-			VERIFY_VKRESULT(vkCreateBuffer(Device, &Info, nullptr, &Buffer));
-		}
-
-		void Destroy()
-		{
-			vkDestroyBuffer(Device, Buffer, nullptr);
-		}
-	};
 };
 
 struct FBufferWithMem
