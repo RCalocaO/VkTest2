@@ -87,7 +87,7 @@ static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 	vkCmdClearColorImage(CmdBuffer, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &ClearColors, 1, &Range);
 }
 
-void Render(FApp& App)
+static double Render(FApp& App)
 {
 	SVulkan::SDevice& Device = GVulkan.Devices[GVulkan.PhysicalDevice];
 	GVulkan.Swapchain.AcquireBackbuffer();
@@ -95,6 +95,7 @@ void Render(FApp& App)
 	Device.RefreshCommandBuffers();
 
 	SVulkan::FCmdBuffer& CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
+	Device.BeginTimestamp(CmdBuffer);
 
 	static bool bFirst = true;
 	if (bFirst)
@@ -184,12 +185,17 @@ void Render(FApp& App)
 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0,
 		VK_IMAGE_ASPECT_COLOR_BIT);
 
+	Device.EndTimestamp(CmdBuffer);
+
 	CmdBuffer.End();
 
 	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore);
 
 	GVulkan.Swapchain.Present(Device.PresentQueue, GVulkan.Swapchain.FinalSemaphore);
 	Device.WaitForFence(CmdBuffer.Fence, CmdBuffer.LastSubmittedFence);
+
+	double GpuTimeMS = Device.ReadTimestamp();
+	return GpuTimeMS;
 }
 
 
@@ -324,11 +330,18 @@ int main()
 
 		glfwPollEvents();
 
-		Render(App);
+		double GpuDelta = Render(App);
 
 		double CpuEnd = glfwGetTime() * 1000.0;
 
 		double CpuDelta = CpuEnd - CpuBegin;
+
+		{
+			std::stringstream ss;
+			ss << "VkTest2 CPU: " << CpuDelta << " ms,  GPU: " << GpuDelta << " ms";
+			ss.flush();
+			::glfwSetWindowTitle(Window, ss.str().c_str());
+		}
 	}
 
 	Deinit(App, Window);

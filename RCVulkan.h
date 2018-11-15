@@ -433,6 +433,7 @@ struct SVulkan
 		uint32 TransferQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		VkPhysicalDeviceMemoryProperties MemProperties;
+		VkQueryPool QueryPool = VK_NULL_HANDLE;
 
 		std::vector<FMemAlloc*> MemAllocs;
 		inline uint32 FindMemoryTypeIndex(VkMemoryPropertyFlags MemProps, uint32 Type) const
@@ -583,10 +584,19 @@ struct SVulkan
 			}
 
 			vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &MemProperties);
+
+
+			VkQueryPoolCreateInfo PoolCreateInfo;
+			ZeroVulkanMem(PoolCreateInfo, VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
+			PoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+			PoolCreateInfo.queryCount = 2;
+			VERIFY_VKRESULT(vkCreateQueryPool(Device, &PoolCreateInfo, nullptr, &QueryPool));
 		}
 
 		void DestroyPre()
 		{
+			vkDestroyQueryPool(Device, QueryPool, nullptr);
+
 			CmdPools[GfxQueueIndex].Destroy();
 			if (GfxQueueIndex != ComputeQueueIndex)
 			{
@@ -677,6 +687,24 @@ struct SVulkan
 			{
 				Fence.Wait(TimeOutInNanoseconds);
 			}
+		}
+
+		void BeginTimestamp(FCmdBuffer& CmdBuffer)
+		{
+			vkCmdWriteTimestamp(CmdBuffer.CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, QueryPool, 0);
+		}
+
+		void EndTimestamp(FCmdBuffer& CmdBuffer)
+		{
+			vkCmdWriteTimestamp(CmdBuffer.CmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QueryPool, 1);
+		}
+
+		double ReadTimestamp()
+		{
+			uint64 Values[2] = {0, 0};
+			VERIFY_VKRESULT(vkGetQueryPoolResults(Device, QueryPool, 0, 2, 2 * sizeof(uint64), &Values, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
+			double Delta = (Values[1] - Values[0]) / Props.limits.timestampPeriod / 1000.0;
+			return Delta;
 		}
 	};
 
