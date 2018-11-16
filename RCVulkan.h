@@ -173,6 +173,11 @@ struct SVulkan
 		VkPipelineLayout Layout = VK_NULL_HANDLE;
 	};
 
+	struct FComputePSO : public FPSO
+	{
+		std::vector<SpvReflectDescriptorSet*> CS;
+	};
+
 	struct FGfxPSO : public FPSO
 	{
 		std::vector<SpvReflectDescriptorSet*> VS;
@@ -490,11 +495,11 @@ struct SVulkan
 			return MemAlloc;
 		}
 
-		VkBufferView CreateBufferView(VkBuffer Buffer, VkFormat Format, VkDeviceSize Size, VkDeviceSize Offset = 0)
+		VkBufferView CreateBufferView(FBuffer& Buffer, VkFormat Format, VkDeviceSize Size, VkDeviceSize Offset = 0)
 		{
 			VkBufferViewCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO);
-			Info.buffer = Buffer;
+			Info.buffer = Buffer.Buffer;
 			Info.format = Format;
 			Info.range = Size;
 			Info.offset = Offset;
@@ -717,7 +722,7 @@ struct SVulkan
 			CmdBuffer.State = FCmdBuffer::EState::Submitted;
 		}
 
-		void WaitForFence(FFence& Fence, uint64 FenceCounter, uint64 TimeOutInNanoseconds = 5 * 1000 * 1000)
+		void WaitForFence(FFence& Fence, uint64 FenceCounter, uint64 TimeOutInNanoseconds = 500000000ull)
 		{
 			if (Fence.Counter == FenceCounter)
 			{
@@ -745,9 +750,9 @@ struct SVulkan
 			VERIFY_VKRESULT(vkGetQueryPoolResults(Device, QueryPool, 0, 2, 2 * sizeof(uint64), &Values, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
 */
 			VERIFY_VKRESULT(vkMapMemory(Device, QueryResultsMem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
-			double Delta = (Values[1] - Values[0]) / Props.limits.timestampPeriod / 1000.0;
+			double DeltaMs = (Values[1] - Values[0]) * (Props.limits.timestampPeriod * 1e-6);
 			vkUnmapMemory(Device, QueryResultsMem->Memory);
-			return Delta;
+			return DeltaMs;
 		}
 	};
 
@@ -1710,7 +1715,7 @@ struct FPSOCache
 {
 	struct FLayout
 	{
-		VkPipelineLayout PipelneLayout = VK_NULL_HANDLE;
+		VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
 		std::vector<VkDescriptorSetLayout> DSLayouts;
 
 		void Destroy(VkDevice Device)
@@ -1719,9 +1724,9 @@ struct FPSOCache
 			{
 				vkDestroyDescriptorSetLayout(Device, Layout, nullptr);
 			}
-			vkDestroyPipelineLayout(Device, PipelneLayout, nullptr);
+			vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
 
-			PipelneLayout = VK_NULL_HANDLE;
+			PipelineLayout = VK_NULL_HANDLE;
 			DSLayouts.clear();
 		}
 	};
@@ -1740,7 +1745,7 @@ struct FPSOCache
 		auto Found = VSList.find(PS);
 		if (Found != VSList.end())
 		{
-			return Found->second.PipelneLayout;
+			return Found->second.PipelineLayout;
 		}
 
 		VkPipelineLayoutCreateInfo Info;
@@ -1772,8 +1777,8 @@ struct FPSOCache
 		Info.setLayoutCount = (uint32)Layout.DSLayouts.size();
 		Info.pSetLayouts = Layout.DSLayouts.data();
 
-		VERIFY_VKRESULT(vkCreatePipelineLayout(Device, &Info, nullptr, &Layout.PipelneLayout));
-		return Layout.PipelneLayout;
+		VERIFY_VKRESULT(vkCreatePipelineLayout(Device, &Info, nullptr, &Layout.PipelineLayout));
+		return Layout.PipelineLayout;
 	}
 
 	template <typename TFunction>
@@ -1867,6 +1872,28 @@ struct FPSOCache
 		Callback(GfxPipelineInfo);
 
 		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &PSO.Pipeline));
+		PSOs.push_back(PSO);
+		return PSO;
+	}
+
+	SVulkan::FComputePSO CreateComputePSO(FShaderInfo* CS)
+	{
+		check(CS->Shader && CS->Shader->ShaderModule);
+
+		VkComputePipelineCreateInfo PipelineInfo;
+		ZeroVulkanMem(PipelineInfo, VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO);
+		ZeroVulkanMem(PipelineInfo.stage, VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
+		PipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		PipelineInfo.stage.module = CS->Shader->ShaderModule;
+		PipelineInfo.stage.pName = CS->EntryPoint.c_str();
+
+		SVulkan::FComputePSO PSO;
+		PSO.CS = CS->Shader->DescSetInfo;
+		PSO.Layout = GetOrCreatePipelineLayout(CS->Shader, nullptr);
+
+		PipelineInfo.layout = PSO.Layout;
+
+		VERIFY_VKRESULT(vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &PipelineInfo, nullptr, &PSO.Pipeline));
 		PSOs.push_back(PSO);
 		return PSO;
 	}

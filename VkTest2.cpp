@@ -31,7 +31,11 @@ struct FApp
 	VkBufferView ClipVBView;
 	FBufferWithMem StagingClipVB;
 	FShaderInfo* TestCS = nullptr;
+	SVulkan::FComputePSO TestCSPSO;
+	FBufferWithMem TestCSBuffer;
+	FBufferWithMem TestCSUB;
 	FBufferWithMem ColorUB;
+	VkBufferView TestCSBufferView;
 
 	void Create(SVulkan::SDevice& Device)
 	{
@@ -48,7 +52,7 @@ struct FApp
 			StagingClipVB.Unlock();
 		}
 
-		ClipVBView = Device.CreateBufferView(ClipVB.Buffer.Buffer, VK_FORMAT_R32G32B32A32_SFLOAT, ClipVBSize);
+		ClipVBView = Device.CreateBufferView(ClipVB.Buffer, VK_FORMAT_R32G32B32A32_SFLOAT, ClipVBSize);
 
 		ColorUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(float));
 		{
@@ -59,10 +63,28 @@ struct FApp
 			*Data++ = 1.0f;
 			ColorUB.Unlock();
 		}
+
+		TestCSBuffer.Create(Device, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 256 * 256 * 4 * sizeof(float));
+		TestCSBufferView = Device.CreateBufferView(TestCSBuffer.Buffer, VK_FORMAT_R32G32B32A32_SFLOAT, TestCSBuffer.Size / 4);
+
+		TestCSUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(uint32) + 16 * 1024);
+		{
+			uint32* Data = (uint32*)TestCSUB.Lock();
+			*Data++ = 0xffffffff;
+			*Data++ = 0xffffffff;
+			*Data++ = 0xffffffff;
+			*Data++ = 0xffffffff;
+			memset(Data, 0x33, 16384);
+			TestCSUB.Unlock();
+		}
 	}
 
 	void Destroy()
 	{
+		TestCSUB.Destroy();
+		vkDestroyBufferView(TestCSBuffer.Buffer.Device, TestCSBufferView, nullptr);
+		TestCSBufferView = VK_NULL_HANDLE;
+		TestCSBuffer.Destroy();
 		vkDestroyBufferView(ClipVB.Buffer.Device, ClipVBView, nullptr);
 		ClipVBView = VK_NULL_HANDLE;
 		StagingClipVB.Destroy();
@@ -164,8 +186,6 @@ static double Render(FApp& App)
 		DescriptorWrites.descriptorCount = 1;
 		DescriptorWrites.descriptorType = (VkDescriptorType)App.DataClipVSRedPSO.VS[0]->bindings[0]->descriptor_type;
 		DescriptorWrites.pTexelBufferView = &App.ClipVBView;
-		//DescriptorWrites.pBufferInfo = &info.uniform_data.buffer_info;  // populated by init_uniform_buffer()
-		//DescriptorWrites.dstArrayElement = 0;
 		DescriptorWrites.dstBinding = App.DataClipVSRedPSO.VS[0]->bindings[0]->binding;
 
 		vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Layout, 0, 1, &DescriptorWrites);
@@ -179,6 +199,34 @@ static double Render(FApp& App)
 	vkCmdDraw(CmdBuffer.CmdBuffer, 3, 1, 0, 0);
 
 	CmdBuffer.EndRenderPass();
+
+	{
+		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, App.TestCSPSO.Pipeline);
+
+		VkWriteDescriptorSet DescriptorWrites[2];
+		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+		DescriptorWrites[0].descriptorCount = 1;
+		DescriptorWrites[0].descriptorType = (VkDescriptorType)App.TestCSPSO.CS[0]->bindings[0]->descriptor_type;
+		DescriptorWrites[0].pTexelBufferView = &App.TestCSBufferView;
+		DescriptorWrites[0].dstBinding = App.TestCSPSO.CS[0]->bindings[0]->binding;
+
+		ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+		DescriptorWrites[1].descriptorCount = 1;
+		DescriptorWrites[1].descriptorType = (VkDescriptorType)App.TestCSPSO.CS[0]->bindings[1]->descriptor_type;
+		VkDescriptorBufferInfo BufferInfo;
+		ZeroMem(BufferInfo);
+		BufferInfo.buffer = App.TestCSUB.Buffer.Buffer;
+		BufferInfo.range =  App.TestCSUB.Size;
+		DescriptorWrites[1].pBufferInfo = &BufferInfo;
+		DescriptorWrites[1].dstBinding = App.TestCSPSO.CS[0]->bindings[1]->binding;
+
+		vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, App.TestCSPSO.Layout, 0, 2, DescriptorWrites);
+
+		for (int32 Index = 0; Index < 32; ++Index)
+		{
+			vkCmdDispatch(CmdBuffer.CmdBuffer, 256, 1, 1);
+		}
+	}
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -205,13 +253,15 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 
 static void SetupShaders(FApp& App)
 {
-	App.TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "WriteTriCS", FShaderInfo::EStage::Compute);
+	App.TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "TestCS", FShaderInfo::EStage::Compute);
 	auto* VBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "VBClipVS", FShaderInfo::EStage::Vertex);
 	auto* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
 	auto* DataClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipVS", FShaderInfo::EStage::Vertex);
 	auto* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
 	auto* ColorPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ColorPS", FShaderInfo::EStage::Pixel);
 	GShaderLibrary.RecompileShaders();
+
+	App.TestCSPSO = GPSOCache.CreateComputePSO(App.TestCS);
 
 	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
 
