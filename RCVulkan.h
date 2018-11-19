@@ -823,6 +823,18 @@ struct SVulkan
 			std::vector<VkPresentModeKHR> Modes(NumModes);
 			VERIFY_VKRESULT(vkGetPhysicalDeviceSurfacePresentModesKHR(PhysicalDevice, Surface, &NumModes, Modes.data()));
 
+			uint32 RequestedPresent = RCUtils::FCmdLine::Get().TryGetIntPrefix("-present=", ~0);
+			if (RequestedPresent != ~0)
+			{
+				for (auto Mode : Modes)
+				{
+					if (Mode == RequestedPresent)
+					{
+						return Mode;
+					}
+				}
+			}
+
 			check(!Modes.empty());
 			return Modes.front();
 		}
