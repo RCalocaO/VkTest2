@@ -359,14 +359,18 @@ struct SVulkan
 			State = EState::Begun;
 		}
 
-		void Reset()
+		void Refresh()
 		{
-			check(State == EState::Submitted);
-			Fence.Refresh();
-			check(Fence.IsSignaled());
-			State = EState::Available;
-			Fence.Reset();
-			VERIFY_VKRESULT(vkResetCommandBuffer(CmdBuffer, 0));
+			if (State == EState::Submitted)
+			{
+				Fence.Refresh();
+				if (Fence.IsSignaled())
+				{
+					State = EState::Available;
+					Fence.Reset();
+					VERIFY_VKRESULT(vkResetCommandBuffer(CmdBuffer, 0));
+				}
+			}
 		}
 	};
 
@@ -430,10 +434,7 @@ struct SVulkan
 		{
 			for (auto& CmdBuffer : CmdBuffers)
 			{
-				if (CmdBuffer.IsSubmitted())
-				{
-					CmdBuffer.Reset();
-				}
+				CmdBuffer.Refresh();
 			}
 		}
 	};

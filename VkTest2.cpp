@@ -222,7 +222,7 @@ static double Render(FApp& App)
 
 		vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, App.TestCSPSO.Layout, 0, 2, DescriptorWrites);
 
-		for (int32 Index = 0; Index < 32; ++Index)
+		for (int32 Index = 0; Index < 256; ++Index)
 		{
 			vkCmdDispatch(CmdBuffer.CmdBuffer, 256, 1, 1);
 		}
@@ -240,7 +240,7 @@ static double Render(FApp& App)
 	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore);
 
 	GVulkan.Swapchain.Present(Device.PresentQueue, GVulkan.Swapchain.FinalSemaphore);
-	Device.WaitForFence(CmdBuffer.Fence, CmdBuffer.LastSubmittedFence);
+	//Device.WaitForFence(CmdBuffer.Fence, CmdBuffer.LastSubmittedFence);
 
 	double GpuTimeMS = Device.ReadTimestamp();
 	return GpuTimeMS;
