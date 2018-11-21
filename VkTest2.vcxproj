@@ -163,6 +163,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\SPIRV-Reflect\spirv_reflect.h" />
+    <ClInclude Include="..\volk\volk.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="RCVulkan.h" />
   </ItemGroup>

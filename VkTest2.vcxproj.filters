@@ -19,6 +19,12 @@
     <Filter Include="External">
       <UniqueIdentifier>{4bd9805a-b733-495b-9dc2-d029a571620e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="External\spirv-reflect">
+      <UniqueIdentifier>{4f8b2db7-bcd0-433f-918e-418548415fc3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="External\volk">
+      <UniqueIdentifier>{d3ba5784-0a28-44cb-bd15-e027eeb54b15}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -28,7 +34,10 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\SPIRV-Reflect\spirv_reflect.h">
-      <Filter>External</Filter>
+      <Filter>External\spirv-reflect</Filter>
+    </ClInclude>
+    <ClInclude Include="..\volk\volk.h">
+      <Filter>External\volk</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -38,11 +47,11 @@
     <ClCompile Include="VkTest2.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\volk\volk.c">
-      <Filter>External</Filter>
-    </ClCompile>
     <ClCompile Include="..\SPIRV-Reflect\spirv_reflect.c">
-      <Filter>External</Filter>
+      <Filter>External\spirv-reflect</Filter>
+    </ClCompile>
+    <ClCompile Include="..\volk\volk.c">
+      <Filter>External\volk</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

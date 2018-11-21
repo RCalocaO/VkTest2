@@ -317,8 +317,14 @@ static void SetupShaders(FApp& App)
 	});
 }
 
+static void ErrorCallback(int Error, const char* Msg)
+{
+	fprintf(stderr, "Glfw Error %d: %s\n", Error, Msg);
+}
+
 static GLFWwindow* Init(FApp& App)
 {
+	glfwSetErrorCallback(ErrorCallback);
 	int RC = glfwInit();
 	check(RC != 0);
 
