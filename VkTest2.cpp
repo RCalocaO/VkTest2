@@ -21,6 +21,8 @@ static FRenderTargetCache GRenderTargetCache;
 
 static FPSOCache GPSOCache;
 
+static FDescriptorCache GDescriptorCache;
+
 struct FApp
 {
 	SVulkan::FGfxPSO NoVBClipVSRedPSO;
@@ -173,7 +175,7 @@ static double Render(FApp& App)
 		DescriptorWrites[1].pBufferInfo = &BufferInfo;
 		DescriptorWrites[1].dstBinding = App.DataClipVSColorPSO.PS[0]->bindings[0]->binding;
 
-		Device.UpdateDescriptors(CmdBuffer, DescriptorWrites, 2, App.DataClipVSColorPSO);
+		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, App.DataClipVSColorPSO);
 	}
 	else if (1)
 	{
@@ -188,7 +190,7 @@ static double Render(FApp& App)
 		DescriptorWrites.pTexelBufferView = &App.ClipVBView;
 		DescriptorWrites.dstBinding = App.DataClipVSRedPSO.VS[0]->bindings[0]->binding;
 
-		Device.UpdateDescriptors(CmdBuffer, &DescriptorWrites, 1, App.DataClipVSRedPSO);
+		GDescriptorCache.UpdateDescriptors(CmdBuffer, 1, &DescriptorWrites, App.DataClipVSRedPSO);
 	}
 	else if (1)
 	{
@@ -220,7 +222,7 @@ static double Render(FApp& App)
 		DescriptorWrites[1].pBufferInfo = &BufferInfo;
 		DescriptorWrites[1].dstBinding = App.TestCSPSO.CS[0]->bindings[1]->binding;
 
-		Device.UpdateDescriptors(CmdBuffer, DescriptorWrites, 2, App.TestCSPSO);
+		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, App.TestCSPSO);
 
 		for (int32 Index = 0; Index < 256; ++Index)
 		{
@@ -351,6 +353,7 @@ static GLFWwindow* Init(FApp& App)
 	GRenderTargetCache.Init(Device.Device);
 	GShaderLibrary.Init(Device.Device);
 	GPSOCache.Init(&Device);
+	GDescriptorCache.Init(&Device);
 
 	glfwSetKeyCallback(Window, KeyCallback);
 
@@ -367,6 +370,7 @@ static void Deinit(FApp& App, GLFWwindow* Window)
 
 	App.Destroy();
 
+	GDescriptorCache.Destroy();
 	GPSOCache.Destroy();
 	GShaderLibrary.Destroy();
 	GRenderTargetCache.Destroy();

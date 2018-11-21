@@ -171,6 +171,9 @@ struct SVulkan
 	{
 		VkPipeline Pipeline = VK_NULL_HANDLE;
 		VkPipelineLayout Layout = VK_NULL_HANDLE;
+
+		std::vector<VkDescriptorSetLayout> SetLayouts;
+		std::vector<SVulkan::FShader*> Shaders;
 	};
 
 	struct FComputePSO : public FPSO
@@ -762,22 +765,6 @@ struct SVulkan
 			double DeltaMs = (Values[1] - Values[0]) * (Props.limits.timestampPeriod * 1e-6);
 			vkUnmapMemory(Device, QueryResultsMem->Memory);
 			return DeltaMs;
-		}
-
-		void UpdateDescriptors(FCmdBuffer& CmdBuffer, VkWriteDescriptorSet* DescriptorWrites, uint32 NumWrites, SVulkan::FGfxPSO& PSO)
-		{
-			if (bPushDescriptor)
-			{
-				vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO.Layout, 0, NumWrites, DescriptorWrites);
-			}
-		}
-
-		void UpdateDescriptors(FCmdBuffer& CmdBuffer, VkWriteDescriptorSet* DescriptorWrites, uint32 NumWrites, SVulkan::FComputePSO& PSO)
-		{
-			if (bPushDescriptor)
-			{
-				vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, PSO.Layout, 0, NumWrites, DescriptorWrites);
-			}
 		}
 	};
 
@@ -1789,12 +1776,13 @@ struct FPSOCache
 		Device = InDevice;
 	}
 
-	VkPipelineLayout GetOrCreatePipelineLayout(SVulkan::FShader* VS, SVulkan::FShader* PS)
+	VkPipelineLayout GetOrCreatePipelineLayout(SVulkan::FShader* VS, SVulkan::FShader* PS, std::vector<VkDescriptorSetLayout>& OutLayouts)
 	{
 		auto& VSList = PipelineLayouts[VS];
 		auto Found = VSList.find(PS);
 		if (Found != VSList.end())
 		{
+			OutLayouts = Found->second.DSLayouts;
 			return Found->second.PipelineLayout;
 		}
 
@@ -1826,6 +1814,8 @@ struct FPSOCache
 
 		Info.setLayoutCount = (uint32)Layout.DSLayouts.size();
 		Info.pSetLayouts = Layout.DSLayouts.data();
+
+		OutLayouts = Layout.DSLayouts;
 
 		VERIFY_VKRESULT(vkCreatePipelineLayout(Device->Device, &Info, nullptr, &Layout.PipelineLayout));
 		return Layout.PipelineLayout;
@@ -1877,7 +1867,12 @@ struct FPSOCache
 		{
 			PSO.PS = PS->Shader->DescSetInfo;
 		}
-		PSO.Layout = GetOrCreatePipelineLayout(VS->Shader, PS ? PS->Shader : nullptr);
+		PSO.Layout = GetOrCreatePipelineLayout(VS->Shader, PS ? PS->Shader : nullptr, PSO.SetLayouts);
+		PSO.Shaders.push_back(VS->Shader);
+		if (PS)
+		{
+			PSO.Shaders.push_back(PS->Shader);
+		}
 
 		VkPipelineRasterizationStateCreateInfo RasterizerInfo;
 		ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
@@ -1939,7 +1934,8 @@ struct FPSOCache
 
 		SVulkan::FComputePSO PSO;
 		PSO.CS = CS->Shader->DescSetInfo;
-		PSO.Layout = GetOrCreatePipelineLayout(CS->Shader, nullptr);
+		PSO.Layout = GetOrCreatePipelineLayout(CS->Shader, nullptr, PSO.SetLayouts);
+		PSO.Shaders.push_back(CS->Shader);
 
 		PipelineInfo.layout = PSO.Layout;
 
@@ -1965,6 +1961,169 @@ struct FPSOCache
 			vkDestroyPipeline(Device->Device, PSO.Pipeline, nullptr);
 		}
 		PSOs.clear();
+	}
+};
+
+struct FDescriptorCache
+{
+	SVulkan::SDevice* Device = nullptr;
+
+	struct FDescriptorSets
+	{
+		std::vector<VkDescriptorSet> Sets;
+
+		void UpdateDescriptorWrites(uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, const std::vector<uint32>& NumDescriptorsPerSet)
+		{
+			VkWriteDescriptorSet* Write = DescriptorWrites;
+			check(NumDescriptorsPerSet.size() == Sets.size());
+			uint32 SetIndex = 0;
+			for (uint32 NumDescriptors : NumDescriptorsPerSet)
+			{
+				check(Write < DescriptorWrites + NumWrites);
+				for (uint32 Index = 0; Index < NumDescriptors; ++Index)
+				{
+					Write->dstSet = Sets[SetIndex];
+					++Write;
+				}
+
+				++SetIndex;
+			}
+		}
+	};
+
+	struct FDescriptorData
+	{
+		VkDescriptorPool Pool = VK_NULL_HANDLE;
+		VkDevice Device = VK_NULL_HANDLE;
+		std::vector<VkDescriptorSetLayout> Layouts;
+		std::vector<FDescriptorSets> FreeSets;
+		std::vector<uint32> NumDescriptorsPerSet;
+		struct FUsedSets
+		{
+			SVulkan::FCmdBuffer* CmdBuffer = nullptr;
+			uint64 FenceCounter = 0;
+			FDescriptorSets Sets;
+		};
+		std::vector<FUsedSets> UsedSets;
+
+		void Init(VkDevice InDevice, SVulkan::FPSO& PSO)
+		{
+			Device = InDevice;
+
+			Layouts = PSO.SetLayouts;
+
+			std::vector<VkDescriptorPoolSize> PoolSizes;
+			{
+				std::map<VkDescriptorType, uint32> TypeCounts;
+				NumDescriptorsPerSet.push_back(0);
+				for (auto* Shader : PSO.Shaders)
+				{
+					for (auto Pair : Shader->SetInfoBindings)
+					{
+						for (VkDescriptorSetLayoutBinding Binding : Pair.second)
+						{
+							TypeCounts[Binding.descriptorType] += Binding.descriptorCount;
+						}
+						NumDescriptorsPerSet[0] += (uint32)Pair.second.size();
+					}
+				}
+
+				for (auto Pair : TypeCounts)
+				{
+					VkDescriptorPoolSize Size;
+					ZeroMem(Size);
+					Size.type = Pair.first;
+					Size.descriptorCount = Pair.second;
+					PoolSizes.push_back(Size);
+				}
+			}
+
+			VkDescriptorPoolCreateInfo PoolInfo;
+			ZeroVulkanMem(PoolInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
+			PoolInfo.maxSets = 1024 * (uint32)Layouts.size();
+			PoolInfo.poolSizeCount = (uint32)PoolSizes.size();
+			PoolInfo.pPoolSizes = PoolSizes.data();
+
+			VERIFY_VKRESULT(vkCreateDescriptorPool(Device, &PoolInfo, nullptr, &Pool))
+		}
+
+		FDescriptorSets AllocSets()
+		{
+			FDescriptorSets Sets;
+			Sets.Sets.resize(Layouts.size());
+
+			VkDescriptorSetAllocateInfo AllocInfo;
+			ZeroVulkanMem(AllocInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
+			AllocInfo.descriptorPool = Pool;
+			AllocInfo.descriptorSetCount = (uint32)Layouts.size();
+			AllocInfo.pSetLayouts = Layouts.data();
+			VERIFY_VKRESULT(vkAllocateDescriptorSets(Device, &AllocInfo, Sets.Sets.data()));
+
+			return Sets;
+		}
+
+		void Destroy()
+		{
+			check(0);
+		}
+	};
+
+	std::map<SVulkan::FPSO*, FDescriptorData> PSODescriptors;
+
+	void Init(SVulkan::SDevice* InDevice)
+	{
+		Device = InDevice;
+	}
+
+	void Destroy()
+	{
+		for (auto Pair : PSODescriptors)
+		{
+			Pair.second.Destroy();
+		}
+		PSODescriptors.clear();
+	}
+
+	void UpdateDescriptors(SVulkan::FCmdBuffer& CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FGfxPSO& InPSO)
+	{
+		if (Device->bPushDescriptor)
+		{
+			vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO.Layout, 0, NumWrites, DescriptorWrites);
+		}
+		else
+		{
+			SVulkan::FPSO* PSO = &InPSO;
+			if (PSODescriptors.find(PSO) == PSODescriptors.end())
+			{
+				PSODescriptors[PSO].Init(Device->Device, InPSO);
+			}
+
+			auto Sets = PSODescriptors[PSO].AllocSets();
+			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[PSO].NumDescriptorsPerSet);
+			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
+			vkCmdBindDescriptorSets(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
+		}
+	}
+
+	void UpdateDescriptors(SVulkan::FCmdBuffer& CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FComputePSO& InPSO)
+	{
+		if (Device->bPushDescriptor)
+		{
+			vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, NumWrites, DescriptorWrites);
+		}
+		else
+		{
+			SVulkan::FPSO* PSO = &InPSO;
+			if (PSODescriptors.find(PSO) == PSODescriptors.end())
+			{
+				PSODescriptors[PSO].Init(Device->Device, InPSO);
+			}
+
+			auto Sets = PSODescriptors[PSO].AllocSets();
+			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[PSO].NumDescriptorsPerSet);
+			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
+			vkCmdBindDescriptorSets(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
+		}
 	}
 };
 
