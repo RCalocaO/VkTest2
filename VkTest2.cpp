@@ -173,7 +173,7 @@ static double Render(FApp& App)
 		DescriptorWrites[1].pBufferInfo = &BufferInfo;
 		DescriptorWrites[1].dstBinding = App.DataClipVSColorPSO.PS[0]->bindings[0]->binding;
 
-		vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSColorPSO.Layout, 0, 2, DescriptorWrites);
+		Device.UpdateDescriptors(CmdBuffer, DescriptorWrites, 2, App.DataClipVSColorPSO);
 	}
 	else if (1)
 	{
@@ -188,7 +188,7 @@ static double Render(FApp& App)
 		DescriptorWrites.pTexelBufferView = &App.ClipVBView;
 		DescriptorWrites.dstBinding = App.DataClipVSRedPSO.VS[0]->bindings[0]->binding;
 
-		vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Layout, 0, 1, &DescriptorWrites);
+		Device.UpdateDescriptors(CmdBuffer, &DescriptorWrites, 1, App.DataClipVSRedPSO);
 	}
 	else if (1)
 	{
@@ -220,7 +220,7 @@ static double Render(FApp& App)
 		DescriptorWrites[1].pBufferInfo = &BufferInfo;
 		DescriptorWrites[1].dstBinding = App.TestCSPSO.CS[0]->bindings[1]->binding;
 
-		vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, App.TestCSPSO.Layout, 0, 2, DescriptorWrites);
+		Device.UpdateDescriptors(CmdBuffer, DescriptorWrites, 2, App.TestCSPSO);
 
 		for (int32 Index = 0; Index < 256; ++Index)
 		{
@@ -350,7 +350,7 @@ static GLFWwindow* Init(FApp& App)
 
 	GRenderTargetCache.Init(Device.Device);
 	GShaderLibrary.Init(Device.Device);
-	GPSOCache.Init(Device.Device);
+	GPSOCache.Init(&Device);
 
 	glfwSetKeyCallback(Window, KeyCallback);
 

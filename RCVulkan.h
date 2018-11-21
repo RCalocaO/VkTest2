@@ -466,6 +466,9 @@ struct SVulkan
 		SVulkan::FMemAlloc* QueryResultsMem = nullptr;
 
 		std::vector<FMemAlloc*> MemAllocs;
+
+		bool bPushDescriptor = false;
+
 		inline uint32 FindMemoryTypeIndex(VkMemoryPropertyFlags MemProps, uint32 Type) const
 		{
 			for (uint32 Index = 0; Index < MemProperties.memoryTypeCount; ++Index)
@@ -555,13 +558,18 @@ struct SVulkan
 				VK_KHR_MAINTENANCE1_EXTENSION_NAME,
 				VK_KHR_MAINTENANCE2_EXTENSION_NAME,
 				//VK_KHR_MULTIVIEW_EXTENSION_NAME,
-				VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
 				//VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME,
 				//VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
 				//VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
 			};
 
 			VerifyExtensions(ExtensionProperties, DeviceExtensions);
+
+			bPushDescriptor = OptionalExtension(ExtensionProperties, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+			if (bPushDescriptor)
+			{
+				DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+			}
 
 			std::vector<VkDeviceQueueCreateInfo> QueueInfos(1);
 			ZeroVulkanMem(QueueInfos[0], VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
@@ -754,6 +762,22 @@ struct SVulkan
 			double DeltaMs = (Values[1] - Values[0]) * (Props.limits.timestampPeriod * 1e-6);
 			vkUnmapMemory(Device, QueryResultsMem->Memory);
 			return DeltaMs;
+		}
+
+		void UpdateDescriptors(FCmdBuffer& CmdBuffer, VkWriteDescriptorSet* DescriptorWrites, uint32 NumWrites, SVulkan::FGfxPSO& PSO)
+		{
+			if (bPushDescriptor)
+			{
+				vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO.Layout, 0, NumWrites, DescriptorWrites);
+			}
+		}
+
+		void UpdateDescriptors(FCmdBuffer& CmdBuffer, VkWriteDescriptorSet* DescriptorWrites, uint32 NumWrites, SVulkan::FComputePSO& PSO)
+		{
+			if (bPushDescriptor)
+			{
+				vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, PSO.Layout, 0, NumWrites, DescriptorWrites);
+			}
 		}
 	};
 
@@ -1303,6 +1327,19 @@ struct SVulkan
 		}
 	}
 
+	static bool OptionalExtension(const std::vector<VkExtensionProperties>& ExtensionProperties, const char* Name)
+	{
+		for (const auto& Entry : ExtensionProperties)
+		{
+			if (!strcmp(Entry.extensionName, Name))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	static void PrintLayers(const std::vector<VkLayerProperties>& List)
 	{
 		for (const auto& Entry : List)
@@ -1746,8 +1783,8 @@ struct FPSOCache
 	std::map<SVulkan::FShader*, std::map<SVulkan::FShader*, FLayout>> PipelineLayouts;
 	std::vector<SVulkan::FPSO> PSOs;
 
-	VkDevice Device =  VK_NULL_HANDLE;
-	void Init(VkDevice InDevice)
+	SVulkan::SDevice* Device =  nullptr;
+	void Init(SVulkan::SDevice* InDevice)
 	{
 		Device = InDevice;
 	}
@@ -1781,16 +1818,16 @@ struct FPSOCache
 			ZeroVulkanMem(DSInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
 			DSInfo.bindingCount = (uint32)Pair.second.size();
 			DSInfo.pBindings = Pair.second.data();
-			DSInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+			DSInfo.flags = Device->bPushDescriptor ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR : 0;
 			VkDescriptorSetLayout DSLayout = VK_NULL_HANDLE;
-			VERIFY_VKRESULT(vkCreateDescriptorSetLayout(Device, &DSInfo, nullptr, &DSLayout));
+			VERIFY_VKRESULT(vkCreateDescriptorSetLayout(Device->Device, &DSInfo, nullptr, &DSLayout));
 			Layout.DSLayouts.push_back(DSLayout);
 		}
 
 		Info.setLayoutCount = (uint32)Layout.DSLayouts.size();
 		Info.pSetLayouts = Layout.DSLayouts.data();
 
-		VERIFY_VKRESULT(vkCreatePipelineLayout(Device, &Info, nullptr, &Layout.PipelineLayout));
+		VERIFY_VKRESULT(vkCreatePipelineLayout(Device->Device, &Info, nullptr, &Layout.PipelineLayout));
 		return Layout.PipelineLayout;
 	}
 
@@ -1884,7 +1921,7 @@ struct FPSOCache
 
 		Callback(GfxPipelineInfo);
 
-		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &PSO.Pipeline));
+		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &PSO.Pipeline));
 		PSOs.push_back(PSO);
 		return PSO;
 	}
@@ -1906,7 +1943,7 @@ struct FPSOCache
 
 		PipelineInfo.layout = PSO.Layout;
 
-		VERIFY_VKRESULT(vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &PipelineInfo, nullptr, &PSO.Pipeline));
+		VERIFY_VKRESULT(vkCreateComputePipelines(Device->Device, VK_NULL_HANDLE, 1, &PipelineInfo, nullptr, &PSO.Pipeline));
 		PSOs.push_back(PSO);
 		return PSO;
 	}
@@ -1917,7 +1954,7 @@ struct FPSOCache
 		{
 			for (auto PSPair : VSPair.second)
 			{
-				PSPair.second.Destroy(Device);
+				PSPair.second.Destroy(Device->Device);
 			}
 		}
 
@@ -1925,7 +1962,7 @@ struct FPSOCache
 
 		for (auto& PSO : PSOs)
 		{
-			vkDestroyPipeline(Device, PSO.Pipeline, nullptr);
+			vkDestroyPipeline(Device->Device, PSO.Pipeline, nullptr);
 		}
 		PSOs.clear();
 	}
