@@ -10,6 +10,9 @@
 
 #include "RCVulkan.h"
 
+#include "imgui.h"
+
+
 #pragma comment(lib, "glfw3.lib")
 
 static SVulkan GVulkan;
@@ -38,6 +41,9 @@ struct FApp
 	FBufferWithMem TestCSUB;
 	FBufferWithMem ColorUB;
 	VkBufferView TestCSBufferView;
+	FImageWithMem ImGuiFont;
+
+	float LastDelta = 1.0f / 60.0f;
 
 	void Create(SVulkan::SDevice& Device)
 	{
@@ -93,6 +99,50 @@ struct FApp
 		ClipVB.Destroy();
 		ColorUB.Destroy();
 	}
+
+	void SetupImGuiFont(SVulkan::SDevice& Device)
+	{
+		ImGuiIO& IO = ImGui::GetIO();
+
+		int32 Width = 0, Height = 0;
+		unsigned char* Pixels = nullptr;
+		IO.Fonts->GetTexDataAsAlpha8(&Pixels, &Width, &Height);
+
+		FBufferWithMem FontBuffer;
+		FontBuffer.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, Width * Height * sizeof(uint32));
+
+		uint8* Data = (uint8*)FontBuffer.Lock();
+		for (int32 Index = 0; Index < Width * Height; ++Index)
+		{
+			*Data++ = *Pixels;
+			*Data++ = *Pixels;
+			*Data++ = *Pixels;
+			*Data++ = *Pixels;
+			++Pixels;
+		}
+		FontBuffer.Unlock();
+
+		ImGuiFont.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Width, Height);
+
+		SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
+
+		Device.TransitionImage(CmdBuffer, ImGuiFont.Image.Image,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+			VK_IMAGE_ASPECT_COLOR_BIT);
+
+		VkBufferImageCopy Region;
+		ZeroMem(Region);
+		Region.imageExtent.width = Width;
+		Region.imageExtent.height = Height;
+		Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		Region.imageSubresource.layerCount = 1;
+		vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, FontBuffer.Buffer.Buffer, ImGuiFont.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+
+		CmdBuffer->End();
+		Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
+		CmdBuffer->Fence.Wait(20 * 1000);
+	}
 };
 
 static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
@@ -118,8 +168,13 @@ static double Render(FApp& App)
 
 	Device.RefreshCommandBuffers();
 
-	SVulkan::FCmdBuffer& CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
+	SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 	Device.BeginTimestamp(CmdBuffer);
+
+	ImGuiIO& IO = ImGui::GetIO();
+	IO.DisplaySize.x = GVulkan.Swapchain.GetViewport().width;
+	IO.DisplaySize.y = GVulkan.Swapchain.GetViewport().height;
+	IO.DeltaTime = App.LastDelta;
 
 	static bool bFirst = true;
 	if (bFirst)
@@ -127,9 +182,13 @@ static double Render(FApp& App)
 		VkBufferCopy Region;
 		ZeroMem(Region);
 		Region.size = App.ClipVB.Size;
-		vkCmdCopyBuffer(CmdBuffer.CmdBuffer, App.StagingClipVB.Buffer.Buffer, App.ClipVB.Buffer.Buffer, 1, &Region);
+		vkCmdCopyBuffer(CmdBuffer->CmdBuffer, App.StagingClipVB.Buffer.Buffer, App.ClipVB.Buffer.Buffer, 1, &Region);
 		bFirst = false;
+
+		App.SetupImGuiFont(Device);
 	}
+
+	ImGui::NewFrame();
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0, 
@@ -139,7 +198,7 @@ static double Render(FApp& App)
 	static float F = 0;
 	F += 0.025f;
 	float ClearColor[4] = {0.0f, abs(sin(F)), abs(cos(F)), 0.0f};
-	ClearImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
+	ClearImage(CmdBuffer->CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -148,14 +207,14 @@ static double Render(FApp& App)
 
 	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(&GVulkan.Swapchain, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
 
-	CmdBuffer.BeginRenderPass(Framebuffer);
+	CmdBuffer->BeginRenderPass(Framebuffer);
 	if (0)
 	{
-		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSRedPSO.Pipeline);
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSRedPSO.Pipeline);
 	}
 	else if (1)
 	{
-		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSColorPSO.Pipeline);
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSColorPSO.Pipeline);
 
 		VkWriteDescriptorSet DescriptorWrites[2];
 		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -179,7 +238,7 @@ static double Render(FApp& App)
 	}
 	else if (1)
 	{
-		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Pipeline);
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Pipeline);
 
 		VkWriteDescriptorSet DescriptorWrites;
 		ZeroVulkanMem(DescriptorWrites, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -194,16 +253,16 @@ static double Render(FApp& App)
 	}
 	else if (1)
 	{
-		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.VBClipVSRedPSO.Pipeline);
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.VBClipVSRedPSO.Pipeline);
 		VkDeviceSize Offsets = 0;
-		vkCmdBindVertexBuffers(CmdBuffer.CmdBuffer, 0, 1, &App.ClipVB.Buffer.Buffer, &Offsets);
+		vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &App.ClipVB.Buffer.Buffer, &Offsets);
 	}
-	vkCmdDraw(CmdBuffer.CmdBuffer, 3, 1, 0, 0);
+	vkCmdDraw(CmdBuffer->CmdBuffer, 3, 1, 0, 0);
 
-	CmdBuffer.EndRenderPass();
+	CmdBuffer->EndRenderPass();
 
 	{
-		vkCmdBindPipeline(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, App.TestCSPSO.Pipeline);
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, App.TestCSPSO.Pipeline);
 
 		VkWriteDescriptorSet DescriptorWrites[2];
 		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -226,18 +285,26 @@ static double Render(FApp& App)
 
 		for (int32 Index = 0; Index < 256; ++Index)
 		{
-			vkCmdDispatch(CmdBuffer.CmdBuffer, 256, 1, 1);
+			vkCmdDispatch(CmdBuffer->CmdBuffer, 256, 1, 1);
 		}
 	}
+
+	Device.EndTimestamp(CmdBuffer);
+
+	if (ImGui::Begin("Hello, world!"))
+	{
+		ImGui::Text("test...");
+		ImGui::End();
+	}
+
+	ImGui::Render();
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0,
 		VK_IMAGE_ASPECT_COLOR_BIT);
+	CmdBuffer->End();
 
-	Device.EndTimestamp(CmdBuffer);
-
-	CmdBuffer.End();
 
 	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore);
 
@@ -361,12 +428,21 @@ static GLFWwindow* Init(FApp& App)
 
 	App.Create(Device);
 
+
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGui::StyleColorsDark();
+	ImGuiIO& IO = ImGui::GetIO();
+//	IO.ImeWindowHandle = ::Gethand;
+
 	return Window;
 }
 
 static void Deinit(FApp& App, GLFWwindow* Window)
 {
 	GVulkan.DeinitPre();
+
+	ImGui::DestroyContext();
 
 	App.Destroy();
 
@@ -402,6 +478,7 @@ int main()
 			ss.flush();
 			::glfwSetWindowTitle(Window, ss.str().c_str());
 		}
+		App.LastDelta = (float)CpuDelta;
 	}
 
 	Deinit(App, Window);

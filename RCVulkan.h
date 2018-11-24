@@ -85,6 +85,35 @@ struct SVulkan
 		}
 	};
 
+	struct FImage
+	{
+		VkImage Image = VK_NULL_HANDLE;
+		VkDevice Device = VK_NULL_HANDLE;
+
+		void Create(VkDevice InDevice, VkImageUsageFlags UsageFlags, VkFormat Format, uint32 Width, uint32 Height)
+		{
+			Device = InDevice;
+
+			VkImageCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO);
+			Info.format = Format;
+			Info.extent.width = Width;
+			Info.extent.height = Height;
+			Info.extent.depth = 1;
+			Info.imageType = VK_IMAGE_TYPE_2D;
+			Info.mipLevels = 1;
+			Info.usage = UsageFlags;
+			Info.samples = VK_SAMPLE_COUNT_1_BIT;
+			Info.arrayLayers = 1;
+			VERIFY_VKRESULT(vkCreateImage(Device, &Info, nullptr, &Image));
+		}
+
+		void Destroy()
+		{
+			vkDestroyImage(Device, Image, nullptr);
+		}
+	};
+
 	struct FShader
 	{
 		VkShaderModule ShaderModule;
@@ -309,7 +338,7 @@ struct SVulkan
 			return State == EState::Submitted;
 		}
 
-		void Create(VkDevice Device, VkCommandPool CmdPool)
+		FCmdBuffer(VkDevice Device, VkCommandPool CmdPool)
 		{
 			VkCommandBufferAllocateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
@@ -380,7 +409,7 @@ struct SVulkan
 	struct FCommandPool
 	{
 		VkCommandPool CmdPool = VK_NULL_HANDLE;
-		std::vector<FCmdBuffer> CmdBuffers;
+		std::vector<FCmdBuffer*> CmdBuffers;
 		uint32 QueueIndex  = ~0;
 		VkDevice Device = VK_NULL_HANDLE;
 
@@ -398,9 +427,9 @@ struct SVulkan
 
 		void Destroy()
 		{
-			for (auto& CmdBuffer : CmdBuffers)
+			for (auto* CmdBuffer : CmdBuffers)
 			{
-				CmdBuffer.Destroy();
+				CmdBuffer->Destroy();
 			}
 			CmdBuffers.clear();
 
@@ -408,36 +437,34 @@ struct SVulkan
 			CmdPool = VK_NULL_HANDLE;
 		}
 
-		FCmdBuffer& GetOrAddCmdBuffer()
+		FCmdBuffer* GetOrAddCmdBuffer()
 		{
-			for (auto& CmdBuffer : CmdBuffers)
+			for (auto* CmdBuffer : CmdBuffers)
 			{
-				if (CmdBuffer.IsAvailable())
+				if (CmdBuffer->IsAvailable())
 				{
 					return CmdBuffer;
 				}
 			}
 
-			FCmdBuffer CmdBuffer;
-			CmdBuffer.Create(Device, CmdPool);
+			FCmdBuffer* CmdBuffer =  new FCmdBuffer(Device, CmdPool);
 			CmdBuffers.push_back(CmdBuffer);
-
-			return CmdBuffers.back();
+			return CmdBuffer;
 		}
 
-		FCmdBuffer& Begin()
+		FCmdBuffer* Begin()
 		{
 			Refresh();
-			FCmdBuffer& CmdBuffer = GetOrAddCmdBuffer();
-			CmdBuffer.Begin();
+			FCmdBuffer* CmdBuffer = GetOrAddCmdBuffer();
+			CmdBuffer->Begin();
 			return CmdBuffer;
 		}
 
 		void Refresh()
 		{
-			for (auto& CmdBuffer : CmdBuffers)
+			for (auto* CmdBuffer : CmdBuffers)
 			{
-				CmdBuffer.Refresh();
+				CmdBuffer->Refresh();
 			}
 		}
 	};
@@ -674,9 +701,9 @@ struct SVulkan
 			Device = VK_NULL_HANDLE;
 		}
 
-		void TransitionImage(FCmdBuffer& CmdBuffer, VkImage Image, VkPipelineStageFlags SrcStageMask, VkImageLayout SrcLayout, VkAccessFlags SrcAccessMask, VkPipelineStageFlags DestStageMask, VkImageLayout DestLayout, VkAccessFlags DestAccessMask, VkImageAspectFlags AspectMask)
+		void TransitionImage(FCmdBuffer* CmdBuffer, VkImage Image, VkPipelineStageFlags SrcStageMask, VkImageLayout SrcLayout, VkAccessFlags SrcAccessMask, VkPipelineStageFlags DestStageMask, VkImageLayout DestLayout, VkAccessFlags DestAccessMask, VkImageAspectFlags AspectMask)
 		{
-			check(CmdBuffer.IsOutsideRenderPass());
+			check(CmdBuffer->IsOutsideRenderPass());
 			VkImageMemoryBarrier ImageBarrier;
 			ZeroVulkanMem(ImageBarrier, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER);
 			ImageBarrier.srcAccessMask = SrcAccessMask;
@@ -687,7 +714,7 @@ struct SVulkan
 			ImageBarrier.subresourceRange.aspectMask = AspectMask;
 			ImageBarrier.subresourceRange.layerCount = 1;
 			ImageBarrier.subresourceRange.levelCount = 1;
-			vkCmdPipelineBarrier(CmdBuffer.CmdBuffer, SrcStageMask, DestStageMask, 0, 0, nullptr, 0, nullptr, 1, &ImageBarrier);
+			vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, SrcStageMask, DestStageMask, 0, 0, nullptr, 0, nullptr, 1, &ImageBarrier);
 		}
 
 		void RefreshCommandBuffers()
@@ -703,19 +730,19 @@ struct SVulkan
 			}
 		}
 
-		FCmdBuffer& BeginCommandBuffer(uint32 QueueIndex)
+		FCmdBuffer* BeginCommandBuffer(uint32 QueueIndex)
 		{
 			return CmdPools[QueueIndex].Begin();
 		}
 
-		void Submit(VkQueue Queue, FCmdBuffer& CmdBuffer, VkPipelineStageFlags WaitFlags, VkSemaphore WaitSemaphore, VkSemaphore SignalSemaphore)
+		void Submit(VkQueue Queue, FCmdBuffer* CmdBuffer, VkPipelineStageFlags WaitFlags, VkSemaphore WaitSemaphore, VkSemaphore SignalSemaphore)
 		{
-			check(CmdBuffer.State == FCmdBuffer::EState::Ended);
+			check(CmdBuffer->State == FCmdBuffer::EState::Ended);
 
 			VkSubmitInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_SUBMIT_INFO);
 			Info.commandBufferCount = 1;
-			Info.pCommandBuffers = &CmdBuffer.CmdBuffer;
+			Info.pCommandBuffers = &CmdBuffer->CmdBuffer;
 			if (WaitSemaphore != VK_NULL_HANDLE)
 			{
 				Info.waitSemaphoreCount = 1;
@@ -727,11 +754,11 @@ struct SVulkan
 				Info.signalSemaphoreCount = 1;
 				Info.pSignalSemaphores = &SignalSemaphore;
 			}
-			vkQueueSubmit(Queue, 1, &Info, CmdBuffer.Fence.Fence);
+			vkQueueSubmit(Queue, 1, &Info, CmdBuffer->Fence.Fence);
 
-			check(CmdBuffer.Fence.State == FFence::EState::Reset);
-			CmdBuffer.Fence.State = FFence::EState::WaitingSignal;
-			CmdBuffer.State = FCmdBuffer::EState::Submitted;
+			check(CmdBuffer->Fence.State == FFence::EState::Reset);
+			CmdBuffer->Fence.State = FFence::EState::WaitingSignal;
+			CmdBuffer->State = FCmdBuffer::EState::Submitted;
 		}
 
 		void WaitForFence(FFence& Fence, uint64 FenceCounter, uint64 TimeOutInNanoseconds = 500000000ull)
@@ -742,16 +769,16 @@ struct SVulkan
 			}
 		}
 
-		void BeginTimestamp(FCmdBuffer& CmdBuffer)
+		void BeginTimestamp(FCmdBuffer* CmdBuffer)
 		{
-			vkCmdWriteTimestamp(CmdBuffer.CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, QueryPool, 0);
+			vkCmdWriteTimestamp(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, QueryPool, 0);
 		}
 
-		void EndTimestamp(FCmdBuffer& CmdBuffer)
+		void EndTimestamp(FCmdBuffer* CmdBuffer)
 		{
-			vkCmdWriteTimestamp(CmdBuffer.CmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QueryPool, 1);
-			vkCmdCopyQueryPoolResults(CmdBuffer.CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-			vkCmdResetQueryPool(CmdBuffer.CmdBuffer, QueryPool, 0, 2);
+			vkCmdWriteTimestamp(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QueryPool, 1);
+			vkCmdCopyQueryPoolResults(CmdBuffer->CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+			vkCmdResetQueryPool(CmdBuffer->CmdBuffer, QueryPool, 0, 2);
 		}
 
 		double ReadTimestamp()
@@ -1482,6 +1509,29 @@ struct FBufferWithMem
 	}
 };
 
+struct FImageWithMem
+{
+	SVulkan::FImage Image;
+	SVulkan::FMemAlloc* Mem = nullptr;
+
+	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 Width, uint32 Height)
+	{
+		Image.Create(InDevice.Device, UsageFlags, Format, Width, Height);
+
+		VkMemoryRequirements MemReqs;
+		vkGetImageMemoryRequirements(InDevice.Device, Image.Image, &MemReqs);
+
+		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits);
+		VERIFY_VKRESULT(vkBindImageMemory(InDevice.Device, Image.Image, Mem->Memory, Mem->Offset));
+	}
+
+	void Destroy()
+	{
+		Image.Destroy();
+		Mem = nullptr;
+	}
+};
+
 struct FShaderInfo
 {
 	enum class EStage
@@ -2084,11 +2134,11 @@ struct FDescriptorCache
 		PSODescriptors.clear();
 	}
 
-	void UpdateDescriptors(SVulkan::FCmdBuffer& CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FGfxPSO& InPSO)
+	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FGfxPSO& InPSO)
 	{
 		if (Device->bPushDescriptor)
 		{
-			vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO.Layout, 0, NumWrites, DescriptorWrites);
+			vkCmdPushDescriptorSetKHR(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO.Layout, 0, NumWrites, DescriptorWrites);
 		}
 		else
 		{
@@ -2101,15 +2151,15 @@ struct FDescriptorCache
 			auto Sets = PSODescriptors[PSO].AllocSets();
 			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[PSO].NumDescriptorsPerSet);
 			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
-			vkCmdBindDescriptorSets(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
+			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
 		}
 	}
 
-	void UpdateDescriptors(SVulkan::FCmdBuffer& CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FComputePSO& InPSO)
+	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FComputePSO& InPSO)
 	{
 		if (Device->bPushDescriptor)
 		{
-			vkCmdPushDescriptorSetKHR(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, NumWrites, DescriptorWrites);
+			vkCmdPushDescriptorSetKHR(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, NumWrites, DescriptorWrites);
 		}
 		else
 		{
@@ -2122,7 +2172,7 @@ struct FDescriptorCache
 			auto Sets = PSODescriptors[PSO].AllocSets();
 			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[PSO].NumDescriptorsPerSet);
 			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
-			vkCmdBindDescriptorSets(CmdBuffer.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
+			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
 		}
 	}
 };

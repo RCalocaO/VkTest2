@@ -108,7 +108,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>../glfw-3.2.1.bin.WIN64/include/;$(VULKAN_SDK)\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../glfw-3.2.1.bin.WIN64/include/;$(VULKAN_SDK)\include;../imgui</AdditionalIncludeDirectories>
       <ExceptionHandling>false</ExceptionHandling>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -150,7 +150,7 @@
       <PreprocessorDefinitions>GLFW_EXPOSE_NATIVE_WIN32;VK_USE_PLATFORM_WIN32_KHR;_CRT_SECURE_NO_WARNINGS;_GLFW_WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>../glfw-3.2.1.bin.WIN64/include/;$(VULKAN_SDK)\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../glfw-3.2.1.bin.WIN64/include/;$(VULKAN_SDK)\include;../imgui</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -162,12 +162,22 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\imgui\imconfig.h" />
+    <ClInclude Include="..\imgui\imgui.h" />
+    <ClInclude Include="..\imgui\imgui_internal.h" />
+    <ClInclude Include="..\imgui\imstb_rectpack.h" />
+    <ClInclude Include="..\imgui\imstb_textedit.h" />
+    <ClInclude Include="..\imgui\imstb_truetype.h" />
     <ClInclude Include="..\SPIRV-Reflect\spirv_reflect.h" />
     <ClInclude Include="..\volk\volk.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="RCVulkan.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\imgui\imgui.cpp" />
+    <ClCompile Include="..\imgui\imgui_demo.cpp" />
+    <ClCompile Include="..\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\imgui\imgui_widgets.cpp" />
     <ClCompile Include="..\SPIRV-Reflect\spirv_reflect.c" />
     <ClCompile Include="..\volk\volk.c" />
     <ClCompile Include="pch.cpp">
