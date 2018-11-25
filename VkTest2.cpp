@@ -135,6 +135,7 @@ struct FApp
 		ZeroMem(Region);
 		Region.imageExtent.width = Width;
 		Region.imageExtent.height = Height;
+		Region.imageExtent.depth = 1;
 		Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		Region.imageSubresource.layerCount = 1;
 		vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, FontBuffer.Buffer.Buffer, ImGuiFont.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);

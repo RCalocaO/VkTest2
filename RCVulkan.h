@@ -401,6 +401,7 @@ struct SVulkan
 					State = EState::Available;
 					Fence.Reset();
 					VERIFY_VKRESULT(vkResetCommandBuffer(CmdBuffer, 0));
+					++LastSubmittedFence;
 				}
 			}
 		}
@@ -2043,18 +2044,47 @@ struct FDescriptorCache
 
 	struct FDescriptorData
 	{
-		VkDescriptorPool Pool = VK_NULL_HANDLE;
+		struct FPool
+		{
+			VkDescriptorPool Pool = VK_NULL_HANDLE;
+			std::vector<FDescriptorSets> FreeSets;
+			std::vector<VkDescriptorSetLayout>* Layouts = nullptr;
+
+			struct FUsedSets
+			{
+				SVulkan::FCmdBuffer* CmdBuffer = nullptr;
+				uint64 FenceCounter = 0;
+				FDescriptorSets Sets;
+			};
+
+			std::vector<FUsedSets> UsedSets;
+			uint32 NumAvailable = 0;
+
+			void Alloc(FDescriptorSets& OutSets, SVulkan::FCmdBuffer* CmdBuffer)
+			{
+				check(!FreeSets.empty());
+				OutSets = FreeSets.back();
+				FreeSets.resize(FreeSets.size() - 1);
+
+				FUsedSets Entry;
+				Entry.CmdBuffer = CmdBuffer;
+				Entry.FenceCounter = CmdBuffer->LastSubmittedFence;
+				Entry.Sets = OutSets;
+				UsedSets.push_back(Entry);
+
+				NumAvailable += (uint32)Layouts->size();
+
+			}
+		};
+		std::vector<FPool> Pools;
 		VkDevice Device = VK_NULL_HANDLE;
 		std::vector<VkDescriptorSetLayout> Layouts;
-		std::vector<FDescriptorSets> FreeSets;
 		std::vector<uint32> NumDescriptorsPerSet;
-		struct FUsedSets
-		{
-			SVulkan::FCmdBuffer* CmdBuffer = nullptr;
-			uint64 FenceCounter = 0;
-			FDescriptorSets Sets;
-		};
-		std::vector<FUsedSets> UsedSets;
+
+		uint32 MaxAvailable = 0;
+
+		const uint32 NumEntries = 32;
+		std::vector<VkDescriptorPoolSize> PoolSizes;
 
 		void Init(VkDevice InDevice, SVulkan::FPSO& PSO)
 		{
@@ -2062,7 +2092,6 @@ struct FDescriptorCache
 
 			Layouts = PSO.SetLayouts;
 
-			std::vector<VkDescriptorPoolSize> PoolSizes;
 			{
 				std::map<VkDescriptorType, uint32> TypeCounts;
 				NumDescriptorsPerSet.push_back(0);
@@ -2083,31 +2112,99 @@ struct FDescriptorCache
 					VkDescriptorPoolSize Size;
 					ZeroMem(Size);
 					Size.type = Pair.first;
-					Size.descriptorCount = Pair.second;
+					Size.descriptorCount = Pair.second * NumEntries;
 					PoolSizes.push_back(Size);
 				}
 			}
 
+			MaxAvailable = NumEntries * (uint32)Layouts.size();
+		}
+
+		FPool* CreatePool()
+		{
+			VkDescriptorPool Pool = VK_NULL_HANDLE;
+
 			VkDescriptorPoolCreateInfo PoolInfo;
 			ZeroVulkanMem(PoolInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
-			PoolInfo.maxSets = 1024 * (uint32)Layouts.size();
+			PoolInfo.maxSets = MaxAvailable;
 			PoolInfo.poolSizeCount = (uint32)PoolSizes.size();
 			PoolInfo.pPoolSizes = PoolSizes.data();
 
-			VERIFY_VKRESULT(vkCreateDescriptorPool(Device, &PoolInfo, nullptr, &Pool))
+			VERIFY_VKRESULT(vkCreateDescriptorPool(Device, &PoolInfo, nullptr, &Pool));
+
+			FPool NewPool;
+			NewPool.Layouts = &Layouts;
+			NewPool.Pool = Pool;
+			NewPool.FreeSets.resize(MaxAvailable);
+			for (uint32 Index = 0; Index < MaxAvailable; ++Index)
+			{
+				VkDescriptorSetAllocateInfo AllocInfo;
+				ZeroVulkanMem(AllocInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
+				AllocInfo.descriptorPool = Pool;
+				AllocInfo.descriptorSetCount = (uint32)Layouts.size();
+				AllocInfo.pSetLayouts = Layouts.data();
+
+				FDescriptorSets& Sets = NewPool.FreeSets[Index];
+				Sets.Sets.resize(Layouts.size());
+				VERIFY_VKRESULT(vkAllocateDescriptorSets(Device, &AllocInfo, Sets.Sets.data()));
+			}
+			Pools.push_back(NewPool);
+
+			return &Pools.back();
 		}
 
-		FDescriptorSets AllocSets()
+		bool CanAlloc(const FPool& Pool)
 		{
-			FDescriptorSets Sets;
-			Sets.Sets.resize(Layouts.size());
+			return Pool.NumAvailable + (uint32)Layouts.size() <= MaxAvailable;
+		}
 
-			VkDescriptorSetAllocateInfo AllocInfo;
-			ZeroVulkanMem(AllocInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
-			AllocInfo.descriptorPool = Pool;
-			AllocInfo.descriptorSetCount = (uint32)Layouts.size();
-			AllocInfo.pSetLayouts = Layouts.data();
-			VERIFY_VKRESULT(vkAllocateDescriptorSets(Device, &AllocInfo, Sets.Sets.data()));
+		void RefreshSets()
+		{
+			for (auto& Pool : Pools)
+			{
+				for (int32 Index = (int32)Pool.UsedSets.size() - 1; Index >= 0; --Index)
+				{
+					auto& Used = Pool.UsedSets[Index];
+					if (Used.FenceCounter < Used.CmdBuffer->LastSubmittedFence)
+					{
+						Pool.FreeSets.push_back(Used.Sets);
+
+						if (Index < Pool.UsedSets.size() - 1)
+						{
+							Pool.UsedSets[Index] = Pool.UsedSets[Pool.UsedSets.size() - 1];
+						}
+						Pool.UsedSets.resize(Pool.UsedSets.size() - 1);
+					}
+				}
+			}
+		}
+
+		FPool* FindFreePool()
+		{
+			for (auto& Pool : Pools)
+			{
+				if (!Pool.FreeSets.empty())
+				{
+					return &Pool;
+				}
+			}
+
+			return nullptr;
+		}
+
+
+		FDescriptorSets AllocSets(SVulkan::FCmdBuffer* CmdBuffer)
+		{
+			RefreshSets();
+			FPool* Pool = FindFreePool();
+			if (!Pool)
+			{
+				Pool = CreatePool();
+				check(Pool);
+			}
+
+			FDescriptorSets Sets;
+			Pool->Alloc(Sets, CmdBuffer);
 
 			return Sets;
 		}
@@ -2148,7 +2245,7 @@ struct FDescriptorCache
 				PSODescriptors[PSO].Init(Device->Device, InPSO);
 			}
 
-			auto Sets = PSODescriptors[PSO].AllocSets();
+			auto Sets = PSODescriptors[PSO].AllocSets(CmdBuffer);
 			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[PSO].NumDescriptorsPerSet);
 			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
 			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
@@ -2169,7 +2266,7 @@ struct FDescriptorCache
 				PSODescriptors[PSO].Init(Device->Device, InPSO);
 			}
 
-			auto Sets = PSODescriptors[PSO].AllocSets();
+			auto Sets = PSODescriptors[PSO].AllocSets(CmdBuffer);
 			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[PSO].NumDescriptorsPerSet);
 			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
 			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
