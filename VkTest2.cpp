@@ -41,7 +41,13 @@ struct FApp
 	FBufferWithMem TestCSUB;
 	FBufferWithMem ColorUB;
 	VkBufferView TestCSBufferView;
+
+	const uint32 ImGuiMaxVertices = 1024 * 3;
+	const uint32 ImGuiMaxIndices = 1024 * 3;
 	FImageWithMem ImGuiFont;
+	FBufferWithMem ImGuiVB;
+	FBufferWithMem ImGuiIB;
+	SVulkan::FGfxPSO ImGUIPSO;
 
 	float LastDelta = 1.0f / 60.0f;
 
@@ -100,7 +106,7 @@ struct FApp
 		ColorUB.Destroy();
 	}
 
-	void SetupImGuiFont(SVulkan::SDevice& Device)
+	void SetupImGui(SVulkan::SDevice& Device)
 	{
 		ImGuiIO& IO = ImGui::GetIO();
 
@@ -143,6 +149,69 @@ struct FApp
 		CmdBuffer->End();
 		Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
 		CmdBuffer->Fence.Wait(20 * 1000);
+
+		IO.Fonts->TexID = (void*)ImGuiFont.Image.Image;
+
+		FontBuffer.Destroy();
+
+		const uint32 ImGuiVertexSize = sizeof(ImDrawVert) * ImGuiMaxVertices;
+		ImGuiVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiVertexSize);
+
+		static_assert(sizeof(uint16) == sizeof(ImDrawIdx), "");
+		ImGuiIB.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiMaxIndices * sizeof(uint16));
+	}
+
+	void DrawDataImGui(ImDrawData* DrawData, SVulkan::FCmdBuffer* CmdBuffer, SVulkan::FFramebuffer* Framebuffer)
+	{
+		if (DrawData->CmdListsCount > 0)
+		{
+			uint32 NumVertices = 0;
+			uint32 NumIndices = 0;
+			ImDrawVert* DestVBData = (ImDrawVert*)ImGuiVB.Lock();
+			uint16* DestIBData = (uint16*)ImGuiIB.Lock();
+			for (int32 Index = 0; Index < DrawData->CmdListsCount; ++Index)
+			{
+				const ImDrawList* CmdList = DrawData->CmdLists[Index];
+				const ImDrawVert* SrcVB = CmdList->VtxBuffer.Data;
+				const ImDrawIdx* SrcIB = CmdList->IdxBuffer.Data;
+
+				check(NumVertices + CmdList->VtxBuffer.Size <= ImGuiMaxVertices);
+				check(NumIndices + CmdList->IdxBuffer.Size <= ImGuiMaxIndices);
+
+				memcpy(DestIBData, SrcIB, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
+				memcpy(DestVBData, SrcVB, CmdList->VtxBuffer.Size * sizeof(ImDrawVert));
+
+				DestIBData += CmdList->IdxBuffer.Size;
+				DestVBData += CmdList->VtxBuffer.Size;
+
+				NumVertices += CmdList->VtxBuffer.Size;
+				NumIndices += CmdList->IdxBuffer.Size;
+			}
+
+			ImGuiIB.Unlock();
+			ImGuiVB.Unlock();
+
+			CmdBuffer->BeginRenderPass(Framebuffer);
+			vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ImGUIPSO.Pipeline);
+			vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, ImGuiIB.Buffer.Buffer, 0, VK_INDEX_TYPE_UINT16);
+			VkDeviceSize Zero = 0;
+			vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &ImGuiVB.Buffer.Buffer, &Zero);
+
+			int VertexOffset = 0;
+			int IndexOffset = 0;
+			for (int n = 0; n < DrawData->CmdListsCount; n++)
+			{
+				const ImDrawList* CmdList = DrawData->CmdLists[n];
+				for (int Index = 0; Index < CmdList->CmdBuffer.Size; Index++)
+				{
+					const ImDrawCmd* Cmd = &CmdList->CmdBuffer[Index];
+					vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Cmd->ElemCount, 1, IndexOffset, VertexOffset, 0);
+					IndexOffset += Cmd->ElemCount;
+				}
+				VertexOffset += CmdList->VtxBuffer.Size;
+			}
+			CmdBuffer->EndRenderPass();
+		}
 	}
 };
 
@@ -177,6 +246,8 @@ static double Render(FApp& App)
 	IO.DisplaySize.y = GVulkan.Swapchain.GetViewport().height;
 	IO.DeltaTime = App.LastDelta;
 
+	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(&GVulkan.Swapchain, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
+
 	static bool bFirst = true;
 	if (bFirst)
 	{
@@ -186,7 +257,7 @@ static double Render(FApp& App)
 		vkCmdCopyBuffer(CmdBuffer->CmdBuffer, App.StagingClipVB.Buffer.Buffer, App.ClipVB.Buffer.Buffer, 1, &Region);
 		bFirst = false;
 
-		App.SetupImGuiFont(Device);
+		App.SetupImGui(Device);
 	}
 
 	ImGui::NewFrame();
@@ -205,8 +276,6 @@ static double Render(FApp& App)
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 		VK_IMAGE_ASPECT_COLOR_BIT);
-
-	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(&GVulkan.Swapchain, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
 
 	CmdBuffer->BeginRenderPass(Framebuffer);
 	if (0)
@@ -300,6 +369,9 @@ static double Render(FApp& App)
 
 	ImGui::Render();
 
+	ImDrawData* DrawData = ImGui::GetDrawData();
+	App.DrawDataImGui(DrawData, CmdBuffer, Framebuffer);
+
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0,
@@ -324,11 +396,13 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 static void SetupShaders(FApp& App)
 {
 	App.TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "TestCS", FShaderInfo::EStage::Compute);
-	auto* VBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "VBClipVS", FShaderInfo::EStage::Vertex);
-	auto* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
-	auto* DataClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipVS", FShaderInfo::EStage::Vertex);
-	auto* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
-	auto* ColorPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ColorPS", FShaderInfo::EStage::Pixel);
+	FShaderInfo* VBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "VBClipVS", FShaderInfo::EStage::Vertex);
+	FShaderInfo* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
+	FShaderInfo* DataClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipVS", FShaderInfo::EStage::Vertex);
+	FShaderInfo* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
+	FShaderInfo* ColorPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ColorPS", FShaderInfo::EStage::Pixel);
+	FShaderInfo* UIVS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainVS", FShaderInfo::EStage::Vertex);
+	FShaderInfo* UIPS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainPS", FShaderInfo::EStage::Pixel);
 	GShaderLibrary.RecompileShaders();
 
 	App.TestCSPSO = GPSOCache.CreateComputePSO(App.TestCS);
@@ -365,26 +439,59 @@ static void SetupShaders(FApp& App)
 		ViewportInfo->pScissors = &Scissor;
 	});
 
-	VkVertexInputAttributeDescription VertexAttrDesc;
-	ZeroMem(VertexAttrDesc);
-	VertexAttrDesc.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-	VkVertexInputBindingDescription VertexBindDesc;
-	ZeroMem(VertexBindDesc);
-	VertexBindDesc.stride = 4 * sizeof(float);
-	App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO(VBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
-		VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
-		ViewportInfo->viewportCount = 1;
-		ViewportInfo->pViewports = &Viewport;
-		ViewportInfo->scissorCount = 1;
-		ViewportInfo->pScissors = &Scissor;
+		VkVertexInputAttributeDescription VertexAttrDesc;
+		ZeroMem(VertexAttrDesc);
+		VertexAttrDesc.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+		VkVertexInputBindingDescription VertexBindDesc;
+		ZeroMem(VertexBindDesc);
+		VertexBindDesc.stride = 4 * sizeof(float);
+		App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO(VBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+		{
+			VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
+			ViewportInfo->viewportCount = 1;
+			ViewportInfo->pViewports = &Viewport;
+			ViewportInfo->scissorCount = 1;
+			ViewportInfo->pScissors = &Scissor;
 
-		VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
-		VertexInputInfo->vertexAttributeDescriptionCount = 1;
-		VertexInputInfo->pVertexAttributeDescriptions = &VertexAttrDesc;
-		VertexInputInfo->vertexBindingDescriptionCount = 1;
-		VertexInputInfo->pVertexBindingDescriptions = &VertexBindDesc;
-	});
+			VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
+			VertexInputInfo->vertexAttributeDescriptionCount = 1;
+			VertexInputInfo->pVertexAttributeDescriptions = &VertexAttrDesc;
+			VertexInputInfo->vertexBindingDescriptionCount = 1;
+			VertexInputInfo->pVertexBindingDescriptions = &VertexBindDesc;
+		});
+	}
+
+	{
+		VkVertexInputAttributeDescription VertexAttrDesc[3];
+		ZeroMem(VertexAttrDesc);
+		VertexAttrDesc[0].format = VK_FORMAT_R32G32_SFLOAT;
+		VertexAttrDesc[1].format = VK_FORMAT_R32G32_SFLOAT;
+		VertexAttrDesc[1].offset = 2 * sizeof(float);
+		VertexAttrDesc[1].location = 1;
+		VertexAttrDesc[2].format = VK_FORMAT_R32_UINT;
+		VertexAttrDesc[2].offset = VertexAttrDesc[1].offset + 2 * sizeof(float);
+		VertexAttrDesc[2].location = 2;
+
+		VkVertexInputBindingDescription VertexBindDesc[1];
+		ZeroMem(VertexBindDesc);
+		VertexBindDesc[0].stride = 2 * sizeof(float) + sizeof(uint32);
+
+		App.ImGUIPSO = GPSOCache.CreateGfxPSO(UIVS, UIPS, RenderPass, [&](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+		{
+			VkPipelineViewportStateCreateInfo* ViewportInfo = (VkPipelineViewportStateCreateInfo*)GfxPipelineInfo.pViewportState;
+			ViewportInfo->viewportCount = 1;
+			ViewportInfo->pViewports = &Viewport;
+			ViewportInfo->scissorCount = 1;
+			ViewportInfo->pScissors = &Scissor;
+
+			VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
+			VertexInputInfo->vertexAttributeDescriptionCount = 3;
+			VertexInputInfo->pVertexAttributeDescriptions = VertexAttrDesc;
+			VertexInputInfo->vertexBindingDescriptionCount = 1;
+			VertexInputInfo->pVertexBindingDescriptions = VertexBindDesc;
+		});
+	}
 }
 
 static void ErrorCallback(int Error, const char* Msg)

@@ -596,7 +596,7 @@ struct SVulkan
 
 			VerifyExtensions(ExtensionProperties, DeviceExtensions);
 
-			bPushDescriptor = OptionalExtension(ExtensionProperties, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+			bPushDescriptor = 0&&OptionalExtension(ExtensionProperties, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
 			if (bPushDescriptor)
 			{
 				DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
@@ -626,12 +626,16 @@ struct SVulkan
 				QueueInfos.push_back(Info);
 			}
 
+			VkPhysicalDeviceFeatures Features;
+			vkGetPhysicalDeviceFeatures(PhysicalDevice, &Features);
+
 			VkDeviceCreateInfo CreateInfo;
 			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
 			CreateInfo.queueCreateInfoCount = (uint32)QueueInfos.size();
 			CreateInfo.pQueueCreateInfos = QueueInfos.data();
 			CreateInfo.ppEnabledExtensionNames = DeviceExtensions.data();
 			CreateInfo.enabledExtensionCount = (uint32)DeviceExtensions.size();
+			CreateInfo.pEnabledFeatures = &Features;
 			::OutputDebugStringA("Enabled Device Extensions:\n");
 			PrintList(DeviceExtensions);
 
@@ -2151,11 +2155,6 @@ struct FDescriptorCache
 			Pools.push_back(NewPool);
 
 			return &Pools.back();
-		}
-
-		bool CanAlloc(const FPool& Pool)
-		{
-			return Pool.NumAvailable + (uint32)Layouts.size() <= MaxAvailable;
 		}
 
 		void RefreshSets()
