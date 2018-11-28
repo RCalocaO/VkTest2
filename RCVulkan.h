@@ -979,6 +979,14 @@ struct SVulkan
 
 			VERIFY_VKRESULT(vkQueuePresentKHR(Queue, &Info));
 		}
+
+		void SetViewportAndScissor(FCmdBuffer* CmdBuffer)
+		{
+			VkViewport Viewport = GetViewport();
+			vkCmdSetViewport(CmdBuffer->CmdBuffer, 0, 1, &Viewport);
+			VkRect2D Scissor = GetScissor();
+			vkCmdSetScissor(CmdBuffer->CmdBuffer, 0, 1, &Scissor);
+		}
 	};
 	FSwapchain Swapchain;
 
@@ -1514,6 +1522,23 @@ struct FBufferWithMem
 	}
 };
 
+
+struct FBufferWithMemAndView : public FBufferWithMem
+{
+	VkBufferView View = VK_NULL_HANDLE;
+	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 InSize, VkFormat Format)
+	{
+		FBufferWithMem::Create(InDevice, UsageFlags, MemPropFlags, InSize);
+		View = InDevice.CreateBufferView(Buffer, Format, InSize);
+	}
+
+	void Destroy()
+	{
+		vkDestroyBufferView(Buffer.Device, View, nullptr);
+		FBufferWithMem::Destroy();
+	}
+};
+
 struct FImageWithMem
 {
 	SVulkan::FImage Image;
@@ -1955,6 +1980,10 @@ struct FPSOCache
 
 		VkPipelineViewportStateCreateInfo ViewportState;
 		ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
+		ViewportState.scissorCount = 1;
+		ViewportState.viewportCount = 1;
+		ViewportState.pScissors = &Scissor;
+		ViewportState.pViewports = &Viewport;
 		GfxPipelineInfo.pViewportState = &ViewportState;
 
 		GfxPipelineInfo.layout = PSO.Layout;
@@ -1968,6 +1997,13 @@ struct FPSOCache
 		ZeroVulkanMem(MSInfo, VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO);
 		MSInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 		GfxPipelineInfo.pMultisampleState = &MSInfo;
+
+		VkDynamicState DynamicStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+		VkPipelineDynamicStateCreateInfo DynamicInfo;
+		ZeroVulkanMem(DynamicInfo, VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO);
+		DynamicInfo.dynamicStateCount = sizeof(DynamicStates) / sizeof(DynamicStates[0]);
+		DynamicInfo.pDynamicStates = DynamicStates;
+		GfxPipelineInfo.pDynamicState = &DynamicInfo;
 
 		Callback(GfxPipelineInfo);
 
