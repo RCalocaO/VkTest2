@@ -95,6 +95,10 @@ struct FApp
 
 	void Destroy()
 	{
+		ImGuiIB.Destroy();
+		ImGuiVB.Destroy();
+		ImGuiFont.Destroy();
+
 		TestCSUB.Destroy();
 		vkDestroyBufferView(TestCSBuffer.Buffer.Device, TestCSBufferView, nullptr);
 		TestCSBufferView = VK_NULL_HANDLE;

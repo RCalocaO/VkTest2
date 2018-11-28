@@ -2210,7 +2210,11 @@ struct FDescriptorCache
 
 		void Destroy()
 		{
-			check(0);
+			for (auto& Pool : Pools)
+			{
+				vkDestroyDescriptorPool(Device, Pool.Pool, nullptr);
+				Pool.Pool = VK_NULL_HANDLE;
+			}
 		}
 	};
 
