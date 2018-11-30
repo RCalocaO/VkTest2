@@ -29,6 +29,7 @@ static FDescriptorCache GDescriptorCache;
 
 struct FApp
 {
+	uint32 FrameIndex = 0;
 	SVulkan::FGfxPSO NoVBClipVSRedPSO;
 	SVulkan::FGfxPSO DataClipVSRedPSO;
 	SVulkan::FGfxPSO DataClipVSColorPSO;
@@ -45,9 +46,13 @@ struct FApp
 	uint32 ImGuiMaxIndices = 16384 * 3;
 	FImageWithMemAndView ImGuiFont;
 	VkSampler ImGuiFontSampler = VK_NULL_HANDLE;
-	FBufferWithMem ImGuiVB;
-	FBufferWithMem ImGuiIB;
-	FBufferWithMem ImGuiScaleTranslateUB;
+	enum
+	{
+		NUM_IMGUI_BUFFERS = 2,
+	};
+	FBufferWithMem ImGuiVB[NUM_IMGUI_BUFFERS];
+	FBufferWithMem ImGuiIB[NUM_IMGUI_BUFFERS];
+	FBufferWithMem ImGuiScaleTranslateUB[NUM_IMGUI_BUFFERS];
 	SVulkan::FGfxPSO ImGUIPSO;
 	double Time = 0;
 	bool MouseJustPressed[5] = {false, false, false, false, false};
@@ -99,10 +104,13 @@ struct FApp
 	void Destroy()
 	{
 		vkDestroySampler(ImGuiFont.Image.Device, ImGuiFontSampler, nullptr);
-		ImGuiIB.Destroy();
-		ImGuiVB.Destroy();
+		for (int32 Index = 0; Index < NUM_IMGUI_BUFFERS; ++Index)
+		{
+			ImGuiIB[Index].Destroy();
+			ImGuiVB[Index].Destroy();
+			ImGuiScaleTranslateUB[Index].Destroy();
+		}
 		ImGuiFont.Destroy();
-		ImGuiScaleTranslateUB.Destroy();
 
 		TestCSUB.Destroy();
 		TestCSBuffer.Destroy();
@@ -165,18 +173,26 @@ struct FApp
 		FontBuffer.Destroy();
 
 		const uint32 ImGuiVertexSize = sizeof(ImDrawVert) * ImGuiMaxVertices;
-		ImGuiVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiVertexSize);
+		for (int32 Index = 0; Index < NUM_IMGUI_BUFFERS; ++Index)
+		{
+			ImGuiVB[Index].Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiVertexSize);
 
-		static_assert(sizeof(uint16) == sizeof(ImDrawIdx), "");
-		ImGuiIB.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiMaxIndices * sizeof(uint16));
+			static_assert(sizeof(uint16) == sizeof(ImDrawIdx), "");
+			ImGuiIB[Index].Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiMaxIndices * sizeof(uint16));
 
-		ImGuiScaleTranslateUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(float));
+			ImGuiScaleTranslateUB[Index].Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(float));
+		}
 
 		{
 			VkSamplerCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO);
 			VERIFY_VKRESULT(vkCreateSampler(Device.Device, &Info, nullptr, &ImGuiFontSampler));
 		}
+	}
+
+	void Update()
+	{
+		++FrameIndex;
 	}
 
 	void ImGuiNewFrame()
@@ -274,8 +290,8 @@ struct FApp
 				//memcpy(DestIBData, SrcIB, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
 				//memcpy(DestVBData, SrcVB, CmdList->VtxBuffer.Size * sizeof(ImDrawVert));
 				
-				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB.Buffer.Buffer, 0, Align<uint32>(CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), 4), SrcIB);
-				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB.Buffer.Buffer, 0, Align<uint32>(CmdList->VtxBuffer.Size * sizeof(ImDrawVert), 4), SrcVB);
+				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, 0, Align<uint32>(CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), 4), SrcIB);
+				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, 0, Align<uint32>(CmdList->VtxBuffer.Size * sizeof(ImDrawVert), 4), SrcVB);
 
 				//DestIBData += CmdList->IdxBuffer.Size;
 				//DestVBData += CmdList->VtxBuffer.Size;
@@ -296,8 +312,8 @@ struct FApp
 				DescriptorWrites[0].descriptorType = (VkDescriptorType)ImGUIPSO.VS[0]->bindings[0]->descriptor_type;
 				VkDescriptorBufferInfo BInfo;
 				ZeroMem(BInfo);
-				BInfo.buffer = ImGuiScaleTranslateUB.Buffer.Buffer;
-				BInfo.range = ImGuiScaleTranslateUB.Size;
+				BInfo.buffer = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
+				BInfo.range = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Size;
 				DescriptorWrites[0].pBufferInfo = &BInfo;
 				DescriptorWrites[0].dstBinding = ImGUIPSO.VS[0]->bindings[0]->binding;
 
@@ -329,7 +345,7 @@ struct FApp
 					ScaleTranslate[2] = Translate.x;
 					ScaleTranslate[3] = Translate.y;
 					//ImGuiScaleTranslateUB.Unlock();
-					vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiScaleTranslateUB.Buffer.Buffer, 0, sizeof(ScaleTranslate), &ScaleTranslate);
+					vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, 0, sizeof(ScaleTranslate), &ScaleTranslate);
 				}
 				GDescriptorCache.UpdateDescriptors(CmdBuffer, 3, DescriptorWrites, ImGUIPSO);
 			}
@@ -348,9 +364,9 @@ struct FApp
 				vkCmdSetViewport(CmdBuffer->CmdBuffer, 0, 1, &Viewport);
 			}
 
-			vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, ImGuiIB.Buffer.Buffer, 0, VK_INDEX_TYPE_UINT16);
+			vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, 0, VK_INDEX_TYPE_UINT16);
 			VkDeviceSize Zero = 0;
-			vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &ImGuiVB.Buffer.Buffer, &Zero);
+			vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, &Zero);
 
 			int VertexOffset = 0;
 			int IndexOffset = 0;
