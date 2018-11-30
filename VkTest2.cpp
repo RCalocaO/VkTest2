@@ -41,9 +41,10 @@ struct FApp
 	FBufferWithMem TestCSUB;
 	FBufferWithMem ColorUB;
 	GLFWwindow* Window;
-	const uint32 ImGuiMaxVertices = 1024 * 3;
-	const uint32 ImGuiMaxIndices = 1024 * 3;
-	FImageWithMem ImGuiFont;
+	uint32 ImGuiMaxVertices = 16384 * 3;
+	uint32 ImGuiMaxIndices = 16384 * 3;
+	FImageWithMemAndView ImGuiFont;
+	VkSampler ImGuiFontSampler = VK_NULL_HANDLE;
 	FBufferWithMem ImGuiVB;
 	FBufferWithMem ImGuiIB;
 	FBufferWithMem ImGuiScaleTranslateUB;
@@ -97,6 +98,7 @@ struct FApp
 
 	void Destroy()
 	{
+		vkDestroySampler(ImGuiFont.Image.Device, ImGuiFontSampler, nullptr);
 		ImGuiIB.Destroy();
 		ImGuiVB.Destroy();
 		ImGuiFont.Destroy();
@@ -131,7 +133,7 @@ struct FApp
 		}
 		FontBuffer.Unlock();
 
-		ImGuiFont.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Width, Height);
+		ImGuiFont.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Width, Height, VK_FORMAT_R8G8B8A8_UNORM);
 
 		SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
@@ -149,6 +151,11 @@ struct FApp
 		Region.imageSubresource.layerCount = 1;
 		vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, FontBuffer.Buffer.Buffer, ImGuiFont.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
 
+		Device.TransitionImage(CmdBuffer, ImGuiFont.Image.Image,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
+			VK_IMAGE_ASPECT_COLOR_BIT);
+
 		CmdBuffer->End();
 		Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
 		CmdBuffer->Fence.Wait(20 * 1000);
@@ -164,6 +171,12 @@ struct FApp
 		ImGuiIB.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiMaxIndices * sizeof(uint16));
 
 		ImGuiScaleTranslateUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(float));
+
+		{
+			VkSamplerCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO);
+			VERIFY_VKRESULT(vkCreateSampler(Device.Device, &Info, nullptr, &ImGuiFontSampler));
+		}
 	}
 
 	void ImGuiNewFrame()
@@ -261,8 +274,8 @@ struct FApp
 				//memcpy(DestIBData, SrcIB, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
 				//memcpy(DestVBData, SrcVB, CmdList->VtxBuffer.Size * sizeof(ImDrawVert));
 				
-				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB.Buffer.Buffer, 0, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), SrcIB);
-				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB.Buffer.Buffer, 0, CmdList->VtxBuffer.Size * sizeof(ImDrawVert), SrcVB);
+				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB.Buffer.Buffer, 0, Align<uint32>(CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), 4), SrcIB);
+				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB.Buffer.Buffer, 0, Align<uint32>(CmdList->VtxBuffer.Size * sizeof(ImDrawVert), 4), SrcVB);
 
 				//DestIBData += CmdList->IdxBuffer.Size;
 				//DestVBData += CmdList->VtxBuffer.Size;
@@ -275,18 +288,36 @@ struct FApp
 			//ImGuiVB.Unlock();
 
 			{
-				VkWriteDescriptorSet DescriptorWrites;
-				ZeroVulkanMem(DescriptorWrites, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+				VkWriteDescriptorSet DescriptorWrites[3];
+				ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 				//DescriptorWrites.pNext = NULL;
 				//DescriptorWrites.dstSet = 0;  // dstSet is ignored by the extension
-				DescriptorWrites.descriptorCount = 1;
-				DescriptorWrites.descriptorType = (VkDescriptorType)ImGUIPSO.VS[0]->bindings[0]->descriptor_type;
-				VkDescriptorBufferInfo Info;
-				ZeroMem(Info);
-				Info.buffer = ImGuiScaleTranslateUB.Buffer.Buffer;
-				Info.range = ImGuiScaleTranslateUB.Size;
-				DescriptorWrites.pBufferInfo = &Info;
-				DescriptorWrites.dstBinding = ImGUIPSO.VS[0]->bindings[0]->binding;
+				DescriptorWrites[0].descriptorCount = 1;
+				DescriptorWrites[0].descriptorType = (VkDescriptorType)ImGUIPSO.VS[0]->bindings[0]->descriptor_type;
+				VkDescriptorBufferInfo BInfo;
+				ZeroMem(BInfo);
+				BInfo.buffer = ImGuiScaleTranslateUB.Buffer.Buffer;
+				BInfo.range = ImGuiScaleTranslateUB.Size;
+				DescriptorWrites[0].pBufferInfo = &BInfo;
+				DescriptorWrites[0].dstBinding = ImGUIPSO.VS[0]->bindings[0]->binding;
+
+				VkDescriptorImageInfo IInfo;
+				ZeroMem(IInfo);
+				IInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				IInfo.imageView = ImGuiFont.View;
+				IInfo.sampler = ImGuiFontSampler;
+
+				ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+				DescriptorWrites[1].descriptorCount = 1;
+				DescriptorWrites[1].descriptorType = (VkDescriptorType)ImGUIPSO.PS[0]->bindings[0]->descriptor_type;
+				DescriptorWrites[1].pImageInfo = &IInfo;
+				DescriptorWrites[1].dstBinding = ImGUIPSO.PS[0]->bindings[0]->binding;
+
+				ZeroVulkanMem(DescriptorWrites[2], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+				DescriptorWrites[2].descriptorCount = 1;
+				DescriptorWrites[2].descriptorType = (VkDescriptorType)ImGUIPSO.PS[0]->bindings[1]->descriptor_type;
+				DescriptorWrites[2].pImageInfo = &IInfo;
+				DescriptorWrites[2].dstBinding = ImGUIPSO.PS[0]->bindings[1]->binding;
 
 				{
 					//float* ScaleTranslate = (float*)ImGuiScaleTranslateUB.Lock();
@@ -300,7 +331,7 @@ struct FApp
 					//ImGuiScaleTranslateUB.Unlock();
 					vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiScaleTranslateUB.Buffer.Buffer, 0, sizeof(ScaleTranslate), &ScaleTranslate);
 				}
-				GDescriptorCache.UpdateDescriptors(CmdBuffer, 1, &DescriptorWrites, ImGUIPSO);
+				GDescriptorCache.UpdateDescriptors(CmdBuffer, 3, DescriptorWrites, ImGUIPSO);
 			}
 
 			CmdBuffer->BeginRenderPass(Framebuffer);

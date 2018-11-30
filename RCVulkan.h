@@ -1547,6 +1547,7 @@ struct FBufferWithMemAndView : public FBufferWithMem
 	void Destroy()
 	{
 		vkDestroyBufferView(Buffer.Device, View, nullptr);
+		View = VK_NULL_HANDLE;
 		FBufferWithMem::Destroy();
 	}
 };
@@ -1571,6 +1572,24 @@ struct FImageWithMem
 	{
 		Image.Destroy();
 		Mem = nullptr;
+	}
+};
+
+struct FImageWithMemAndView : public FImageWithMem
+{
+	VkImageView View = VK_NULL_HANDLE;
+
+	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 Width, uint32 Height, VkFormat ViewFormat)
+	{
+		FImageWithMem::Create(InDevice, Format, UsageFlags, MemPropFlags, Width, Height);
+		View = InDevice.CreateImageView(Image.Image, ViewFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D);
+	}
+
+	void Destroy()
+	{
+		vkDestroyImageView(Image.Device, View, nullptr);
+		View = VK_NULL_HANDLE;
+		FImageWithMem::Destroy();
 	}
 };
 
@@ -1974,7 +1993,15 @@ struct FPSOCache
 
 		VkPipelineColorBlendAttachmentState BlendAttachState;
 		ZeroMem(BlendAttachState);
-		BlendAttachState.colorWriteMask = 0xf;
+		BlendAttachState.blendEnable = VK_TRUE;
+		BlendAttachState.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		BlendAttachState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		BlendAttachState.colorBlendOp = VK_BLEND_OP_ADD;
+		BlendAttachState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		BlendAttachState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+		BlendAttachState.alphaBlendOp = VK_BLEND_OP_ADD;
+		BlendAttachState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
 		VkPipelineColorBlendStateCreateInfo BlendInfo;
 		ZeroVulkanMem(BlendInfo, VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO);
 		BlendInfo.attachmentCount = 1;

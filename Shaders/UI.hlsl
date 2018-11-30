@@ -13,11 +13,14 @@ struct FVSOut
 	float2 UVs : TEXCOORD0;
 };
 
-cbuffer CB
+cbuffer CB : register(b0)
 {
 	float2 Scale;
 	float2 Translate;
 }
+
+SamplerState Sampler : register(s1);
+Texture2D Font : register(t2);
 
 FVSOut UIMainVS(in FVSIn In) : SV_Position
 {
@@ -30,5 +33,5 @@ FVSOut UIMainVS(in FVSIn In) : SV_Position
 
 float4 UIMainPS(FVSOut In) : SV_Target0
 {
-	return In.Color;
+	return In.Color * Font.Sample(Sampler, In.UVs);
 }
