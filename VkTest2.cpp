@@ -48,7 +48,7 @@ struct FApp
 	VkSampler ImGuiFontSampler = VK_NULL_HANDLE;
 	enum
 	{
-		NUM_IMGUI_BUFFERS = 2,
+		NUM_IMGUI_BUFFERS = 3,
 	};
 	FBufferWithMem ImGuiVB[NUM_IMGUI_BUFFERS];
 	FBufferWithMem ImGuiIB[NUM_IMGUI_BUFFERS];
@@ -166,7 +166,7 @@ struct FApp
 
 		CmdBuffer->End();
 		Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
-		CmdBuffer->Fence.Wait(20 * 1000);
+		CmdBuffer->Fence.Wait(2 * 1000 * 1000);
 
 		IO.Fonts->TexID = (void*)ImGuiFont.Image.Image;
 
@@ -276,6 +276,8 @@ struct FApp
 		{
 			uint32 NumVertices = 0;
 			uint32 NumIndices = 0;
+			uint32 DestVBOffset = 0;
+			uint32 DestIBOffset = 0;
 			//ImDrawVert* DestVBData = (ImDrawVert*)ImGuiVB.Lock();
 			//uint16* DestIBData = (uint16*)ImGuiIB.Lock();
 			for (int32 Index = 0; Index < DrawData->CmdListsCount; ++Index)
@@ -290,11 +292,11 @@ struct FApp
 				//memcpy(DestIBData, SrcIB, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
 				//memcpy(DestVBData, SrcVB, CmdList->VtxBuffer.Size * sizeof(ImDrawVert));
 				
-				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, 0, Align<uint32>(CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), 4), SrcIB);
-				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, 0, Align<uint32>(CmdList->VtxBuffer.Size * sizeof(ImDrawVert), 4), SrcVB);
+				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, DestIBOffset, Align<uint32>(CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), 4), SrcIB);
+				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, DestVBOffset, Align<uint32>(CmdList->VtxBuffer.Size * sizeof(ImDrawVert), 4), SrcVB);
 
-				//DestIBData += CmdList->IdxBuffer.Size;
-				//DestVBData += CmdList->VtxBuffer.Size;
+				DestIBOffset += CmdList->IdxBuffer.Size;
+				DestVBOffset += CmdList->VtxBuffer.Size;
 
 				NumVertices += CmdList->VtxBuffer.Size;
 				NumIndices += CmdList->IdxBuffer.Size;
@@ -418,6 +420,7 @@ static double Render(FApp& App)
 	GVulkan.Swapchain.AcquireBackbuffer();
 
 	Device.RefreshCommandBuffers();
+	App.Update();
 
 	SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 	Device.BeginTimestamp(CmdBuffer);
@@ -565,11 +568,11 @@ static double Render(FApp& App)
 		VK_IMAGE_ASPECT_COLOR_BIT);
 	CmdBuffer->End();
 
-
 	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore);
 
 	GVulkan.Swapchain.Present(Device.PresentQueue, GVulkan.Swapchain.FinalSemaphore);
 	//Device.WaitForFence(CmdBuffer.Fence, CmdBuffer.LastSubmittedFence);
+	;vkDeviceWaitIdle(Device.Device);
 
 	double GpuTimeMS = Device.ReadTimestamp();
 	return GpuTimeMS;
