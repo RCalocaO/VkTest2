@@ -475,6 +475,16 @@ struct SVulkan
 		VkDeviceMemory Memory = VK_NULL_HANDLE;
 		VkDeviceSize Offset = 0;
 		VkDeviceSize Size = 0;
+
+		void Flush(VkDevice Device)
+		{
+			VkMappedMemoryRange Range;
+			ZeroVulkanMem(Range, VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE);
+			Range.memory = Memory;
+			Range.offset = Offset;
+			Range.size = Size;
+			VERIFY_VKRESULT(vkFlushMappedMemoryRanges(Device, 1, &Range));
+		}
 	};
 
 	struct SDevice
@@ -893,15 +903,16 @@ struct SVulkan
 			//CreateInfo.maxImageCount = std::max(3u, SurfaceCaps.maxImageCount);
 			CreateInfo.imageFormat = Format;
 			CreateInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-			CreateInfo.imageExtent.width = SurfaceCaps.currentExtent.width;
-			CreateInfo.imageExtent.height = SurfaceCaps.currentExtent.height;
 			CreateInfo.imageArrayLayers = 1;
 			CreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-			CreateInfo.queueFamilyIndexCount = 1;
-			CreateInfo.pQueueFamilyIndices = &Device.PresentQueueIndex;
 			CreateInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
 			CreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 			CreateInfo.presentMode = GetPresentMode(Device.PhysicalDevice, Surface);
+			CreateInfo.clipped = VK_TRUE;
+			CreateInfo.imageExtent.width = SurfaceCaps.currentExtent.width;
+			CreateInfo.imageExtent.height = SurfaceCaps.currentExtent.height;
+			CreateInfo.queueFamilyIndexCount = 1;
+			CreateInfo.pQueueFamilyIndices = &Device.PresentQueueIndex;
 			CreateInfo.oldSwapchain = Swapchain;
 
 			VERIFY_VKRESULT(vkCreateSwapchainKHR(Device.Device, &CreateInfo, nullptr, &Swapchain));
@@ -1518,6 +1529,7 @@ struct FBufferWithMem
 
 	void Unlock()
 	{
+		Mem->Flush(Buffer.Device);
 		vkUnmapMemory(Buffer.Device, Mem->Memory);
 	}
 };

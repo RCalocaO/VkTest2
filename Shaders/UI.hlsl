@@ -3,7 +3,7 @@ struct FVSIn
 {
 	float2 Pos : POSITION;
 	float2 UVs : TEXCOORD0;
-	uint Color : COLOR;
+	float4 Color : COLOR;
 };
 
 struct FVSOut
@@ -23,7 +23,7 @@ FVSOut UIMainVS(in FVSIn In) : SV_Position
 {
 	FVSOut Out;
 	Out.Pos = float4(In.Pos.xy * Scale + Translate, 0, 1);
-	Out.Color = float4(1, 0, 1, 1);
+	Out.Color = In.Color;
 	Out.UVs = In.UVs;
 	return Out;
 }

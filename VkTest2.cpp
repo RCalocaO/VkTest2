@@ -40,7 +40,7 @@ struct FApp
 	FBufferWithMemAndView TestCSBuffer;
 	FBufferWithMem TestCSUB;
 	FBufferWithMem ColorUB;
-
+	GLFWwindow* Window;
 	const uint32 ImGuiMaxVertices = 1024 * 3;
 	const uint32 ImGuiMaxIndices = 1024 * 3;
 	FImageWithMem ImGuiFont;
@@ -48,11 +48,16 @@ struct FApp
 	FBufferWithMem ImGuiIB;
 	FBufferWithMem ImGuiScaleTranslateUB;
 	SVulkan::FGfxPSO ImGUIPSO;
+	double Time = 0;
+	bool MouseJustPressed[5] = {false, false, false, false, false};
+	GLFWcursor* MouseCursors[ImGuiMouseCursor_COUNT] = {0};
 
 	float LastDelta = 1.0f / 60.0f;
 
-	void Create(SVulkan::SDevice& Device)
+	void Create(SVulkan::SDevice& Device, GLFWwindow* InWindow)
 	{
+		Window = InWindow;
+
 		// Dummy stuff
 		uint32 ClipVBSize = 3 * 4 * sizeof(float);
 		ClipVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, ClipVBSize, VK_FORMAT_R32G32B32A32_SFLOAT);
@@ -153,12 +158,87 @@ struct FApp
 		FontBuffer.Destroy();
 
 		const uint32 ImGuiVertexSize = sizeof(ImDrawVert) * ImGuiMaxVertices;
-		ImGuiVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiVertexSize);
+		ImGuiVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiVertexSize);
 
 		static_assert(sizeof(uint16) == sizeof(ImDrawIdx), "");
-		ImGuiIB.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiMaxIndices * sizeof(uint16));
+		ImGuiIB.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiMaxIndices * sizeof(uint16));
 
-		ImGuiScaleTranslateUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(float));
+		ImGuiScaleTranslateUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(float));
+	}
+
+	void ImGuiNewFrame()
+	{
+		ImGuiIO& io = ImGui::GetIO();
+		IM_ASSERT(io.Fonts->IsBuilt());     // Font atlas needs to be built, call renderer _NewFrame() function e.g. ImGui_ImplOpenGL3_NewFrame() 
+
+			// Setup display size
+		int w, h;
+		int display_w, display_h;
+		glfwGetWindowSize(Window, &w, &h);
+		glfwGetFramebufferSize(Window, &display_w, &display_h);
+		io.DisplaySize = ImVec2((float)w, (float)h);
+		io.DisplayFramebufferScale = ImVec2(w > 0 ? ((float)display_w / w) : 0, h > 0 ? ((float)display_h / h) : 0);
+
+		// Setup time step
+		double current_time = glfwGetTime();
+		io.DeltaTime = Time > 0.0 ? (float)(current_time - Time) : (float)(1.0f/60.0f);
+		Time = current_time;
+
+		UpdateMousePosAndButtons();
+		UpdateMouseCursor();
+
+		ImGui::NewFrame();
+	}
+
+
+	void UpdateMousePosAndButtons()
+	{
+		ImGuiIO& io = ImGui::GetIO();
+		for (int i = 0; i < IM_ARRAYSIZE(io.MouseDown); i++)
+		{
+			// If a mouse press event came, always pass it as "mouse held this frame", so we don't miss click-release events that are shorter than 1 frame.
+			io.MouseDown[i] = MouseJustPressed[i] || glfwGetMouseButton(Window, i) != 0;
+			MouseJustPressed[i] = false;
+		}
+
+		// Update mouse position
+		const ImVec2 mouse_pos_backup = io.MousePos;
+		io.MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
+		const bool focused = glfwGetWindowAttrib(Window, GLFW_FOCUSED) != 0;
+		if (focused)
+		{
+			if (io.WantSetMousePos)
+			{
+				glfwSetCursorPos(Window, (double)mouse_pos_backup.x, (double)mouse_pos_backup.y);
+			}
+			else
+			{
+				double mouse_x, mouse_y;
+				glfwGetCursorPos(Window, &mouse_x, &mouse_y);
+				io.MousePos = ImVec2((float)mouse_x, (float)mouse_y);
+			}
+		}
+	}
+
+	void UpdateMouseCursor()
+	{
+		ImGuiIO& io = ImGui::GetIO();
+		if ((io.ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange) || glfwGetInputMode(Window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
+			return;
+
+		ImGuiMouseCursor imgui_cursor = ImGui::GetMouseCursor();
+		if (imgui_cursor == ImGuiMouseCursor_None || io.MouseDrawCursor)
+		{
+			// Hide OS mouse cursor if imgui is drawing it or if it wants no cursor
+			glfwSetInputMode(Window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+		}
+		else
+		{
+			// Show OS mouse cursor
+			// FIXME-PLATFORM: Unfocused windows seems to fail changing the mouse cursor with GLFW 3.2, but 3.3 works here.
+			glfwSetCursor(Window, MouseCursors[imgui_cursor] ? MouseCursors[imgui_cursor] : MouseCursors[ImGuiMouseCursor_Arrow]);
+			glfwSetInputMode(Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+		}
 	}
 
 	void DrawDataImGui(ImDrawData* DrawData, SVulkan::FSwapchain& Swapchain, SVulkan::FCmdBuffer* CmdBuffer, SVulkan::FFramebuffer* Framebuffer)
@@ -167,8 +247,8 @@ struct FApp
 		{
 			uint32 NumVertices = 0;
 			uint32 NumIndices = 0;
-			ImDrawVert* DestVBData = (ImDrawVert*)ImGuiVB.Lock();
-			uint16* DestIBData = (uint16*)ImGuiIB.Lock();
+			//ImDrawVert* DestVBData = (ImDrawVert*)ImGuiVB.Lock();
+			//uint16* DestIBData = (uint16*)ImGuiIB.Lock();
 			for (int32 Index = 0; Index < DrawData->CmdListsCount; ++Index)
 			{
 				const ImDrawList* CmdList = DrawData->CmdLists[Index];
@@ -178,25 +258,21 @@ struct FApp
 				check(NumVertices + CmdList->VtxBuffer.Size <= ImGuiMaxVertices);
 				check(NumIndices + CmdList->IdxBuffer.Size <= ImGuiMaxIndices);
 
-				memcpy(DestIBData, SrcIB, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
-				memcpy(DestVBData, SrcVB, CmdList->VtxBuffer.Size * sizeof(ImDrawVert));
+				//memcpy(DestIBData, SrcIB, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
+				//memcpy(DestVBData, SrcVB, CmdList->VtxBuffer.Size * sizeof(ImDrawVert));
+				
+				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB.Buffer.Buffer, 0, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), SrcIB);
+				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB.Buffer.Buffer, 0, CmdList->VtxBuffer.Size * sizeof(ImDrawVert), SrcVB);
 
-				DestIBData += CmdList->IdxBuffer.Size;
-				DestVBData += CmdList->VtxBuffer.Size;
+				//DestIBData += CmdList->IdxBuffer.Size;
+				//DestVBData += CmdList->VtxBuffer.Size;
 
 				NumVertices += CmdList->VtxBuffer.Size;
 				NumIndices += CmdList->IdxBuffer.Size;
 			}
 
-			ImGuiIB.Unlock();
-			ImGuiVB.Unlock();
-
-			CmdBuffer->BeginRenderPass(Framebuffer);
-			vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ImGUIPSO.Pipeline);
-			Swapchain.SetViewportAndScissor(CmdBuffer);
-			vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, ImGuiIB.Buffer.Buffer, 0, VK_INDEX_TYPE_UINT16);
-			VkDeviceSize Zero = 0;
-			vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &ImGuiVB.Buffer.Buffer, &Zero);
+			//ImGuiIB.Unlock();
+			//ImGuiVB.Unlock();
 
 			{
 				VkWriteDescriptorSet DescriptorWrites;
@@ -213,27 +289,56 @@ struct FApp
 				DescriptorWrites.dstBinding = ImGUIPSO.VS[0]->bindings[0]->binding;
 
 				{
-					float* ScaleTranslate = (float*)ImGuiScaleTranslateUB.Lock();
+					//float* ScaleTranslate = (float*)ImGuiScaleTranslateUB.Lock();
 					FVector2 Scale = {2.0f / DrawData->DisplaySize.x, 2.0f / DrawData->DisplaySize.y};
-					FVector2 Translate = {-1.0f - DrawData->DisplaySize.x * Scale.x, -1.0f - DrawData->DisplaySize.y * Scale.y};
+					FVector2 Translate = { -1.0f - DrawData->DisplayPos.x * Scale.x, -1.0f - DrawData->DisplayPos.y * Scale.y};
+					float ScaleTranslate[4];
 					ScaleTranslate[0] = Scale.x;
 					ScaleTranslate[1] = Scale.y;
 					ScaleTranslate[2] = Translate.x;
 					ScaleTranslate[3] = Translate.y;
-					ImGuiScaleTranslateUB.Unlock();
+					//ImGuiScaleTranslateUB.Unlock();
+					vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiScaleTranslateUB.Buffer.Buffer, 0, sizeof(ScaleTranslate), &ScaleTranslate);
 				}
-
 				GDescriptorCache.UpdateDescriptors(CmdBuffer, 1, &DescriptorWrites, ImGUIPSO);
 			}
 
+			CmdBuffer->BeginRenderPass(Framebuffer);
+			vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ImGUIPSO.Pipeline);
+
+			{
+				VkViewport Viewport;
+				Viewport.x = 0;
+				Viewport.y = 0;
+				Viewport.width = DrawData->DisplaySize.x;
+				Viewport.height = DrawData->DisplaySize.y;
+				Viewport.minDepth = 0.0f;
+				Viewport.maxDepth = 1.0f;
+				vkCmdSetViewport(CmdBuffer->CmdBuffer, 0, 1, &Viewport);
+			}
+
+			vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, ImGuiIB.Buffer.Buffer, 0, VK_INDEX_TYPE_UINT16);
+			VkDeviceSize Zero = 0;
+			vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &ImGuiVB.Buffer.Buffer, &Zero);
+
 			int VertexOffset = 0;
 			int IndexOffset = 0;
+			ImVec2 DisplayPos = DrawData->DisplayPos;
 			for (int n = 0; n < DrawData->CmdListsCount; n++)
 			{
 				const ImDrawList* CmdList = DrawData->CmdLists[n];
 				for (int Index = 0; Index < CmdList->CmdBuffer.Size; Index++)
 				{
 					const ImDrawCmd* Cmd = &CmdList->CmdBuffer[Index];
+
+					VkRect2D Scissor;
+					ZeroMem(Scissor);
+					Scissor.offset.x = (int32)(Cmd->ClipRect.x - DisplayPos.x) > 0 ? (int32_t)(Cmd->ClipRect.x - DisplayPos.x) : 0;
+					Scissor.offset.y = (int32)(Cmd->ClipRect.y - DisplayPos.y) > 0 ? (int32_t)(Cmd->ClipRect.y - DisplayPos.y) : 0;
+					Scissor.extent.width = (uint32)(Cmd->ClipRect.z - Cmd->ClipRect.x);
+					Scissor.extent.height = (uint32)(Cmd->ClipRect.w - Cmd->ClipRect.y/* + 1*/);
+					vkCmdSetScissor(CmdBuffer->CmdBuffer, 0, 1, &Scissor);
+
 					vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Cmd->ElemCount, 1, IndexOffset, VertexOffset, 0);
 					IndexOffset += Cmd->ElemCount;
 				}
@@ -289,7 +394,7 @@ static double Render(FApp& App)
 		App.SetupImGui(Device);
 	}
 
-	ImGui::NewFrame();
+	App.ImGuiNewFrame();
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0, 
@@ -392,11 +497,15 @@ static double Render(FApp& App)
 
 	Device.EndTimestamp(CmdBuffer);
 
+/*
 	if (ImGui::Begin("Hello, world!"))
 	{
 		ImGui::Text("test...");
 		ImGui::End();
 	}
+
+*/
+	ImGui::ShowDemoWindow();
 
 	ImGui::Render();
 
@@ -476,16 +585,17 @@ static void SetupShaders(FApp& App)
 		VkVertexInputAttributeDescription VertexAttrDesc[3];
 		ZeroMem(VertexAttrDesc);
 		VertexAttrDesc[0].format = VK_FORMAT_R32G32_SFLOAT;
+		VertexAttrDesc[1].offset = IM_OFFSETOF(ImDrawVert, pos);
 		VertexAttrDesc[1].format = VK_FORMAT_R32G32_SFLOAT;
-		VertexAttrDesc[1].offset = 2 * sizeof(float);
+		VertexAttrDesc[1].offset = IM_OFFSETOF(ImDrawVert, uv);
 		VertexAttrDesc[1].location = 1;
-		VertexAttrDesc[2].format = VK_FORMAT_R32_UINT;
-		VertexAttrDesc[2].offset = VertexAttrDesc[1].offset + 2 * sizeof(float);
+		VertexAttrDesc[2].format = VK_FORMAT_R8G8B8A8_UNORM;
+		VertexAttrDesc[2].offset = IM_OFFSETOF(ImDrawVert, col);
 		VertexAttrDesc[2].location = 2;
 
 		VkVertexInputBindingDescription VertexBindDesc[1];
 		ZeroMem(VertexBindDesc);
-		VertexBindDesc[0].stride = 2 * sizeof(float) + sizeof(uint32);
+		VertexBindDesc[0].stride = sizeof(ImDrawVert);
 
 		App.ImGUIPSO = GPSOCache.CreateGfxPSO(UIVS, UIPS, RenderPass, [&](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 		{
@@ -523,7 +633,7 @@ static GLFWwindow* Init(FApp& App)
 		{
 			::Sleep(100);
 		}
-		__debugbreak();
+//		__debugbreak();
 	}
 
 	GVulkan.Init(Window);
@@ -538,7 +648,7 @@ static GLFWwindow* Init(FApp& App)
 
 	SetupShaders(App);
 
-	App.Create(Device);
+	App.Create(Device, Window);
 
 
 	IMGUI_CHECKVERSION();
