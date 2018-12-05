@@ -274,12 +274,12 @@ struct FApp
 	{
 		if (DrawData->CmdListsCount > 0)
 		{
-			uint32 NumVertices = 0;
-			uint32 NumIndices = 0;
+			uint32 NumVertices = DrawData->TotalVtxCount;
+			uint32 NumIndices = DrawData->TotalIdxCount;
 			uint32 DestVBOffset = 0;
 			uint32 DestIBOffset = 0;
-			//ImDrawVert* DestVBData = (ImDrawVert*)ImGuiVB.Lock();
-			//uint16* DestIBData = (uint16*)ImGuiIB.Lock();
+			ImDrawVert* DestVBData = (ImDrawVert*)ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Lock();
+			uint16* DestIBData = (uint16*)ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Lock();
 			for (int32 Index = 0; Index < DrawData->CmdListsCount; ++Index)
 			{
 				const ImDrawList* CmdList = DrawData->CmdLists[Index];
@@ -289,34 +289,33 @@ struct FApp
 				check(NumVertices + CmdList->VtxBuffer.Size <= ImGuiMaxVertices);
 				check(NumIndices + CmdList->IdxBuffer.Size <= ImGuiMaxIndices);
 
-				//memcpy(DestIBData, SrcIB, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
-				//memcpy(DestVBData, SrcVB, CmdList->VtxBuffer.Size * sizeof(ImDrawVert));
+				memcpy(DestIBData, SrcIB, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
+				memcpy(DestVBData, SrcVB, CmdList->VtxBuffer.Size * sizeof(ImDrawVert));
 				
-				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, DestIBOffset * sizeof(ImDrawIdx), Align<uint32>(CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), 4), SrcIB);
-				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, DestVBOffset * sizeof(ImDrawVert), Align<uint32>(CmdList->VtxBuffer.Size * sizeof(ImDrawVert), 4), SrcVB);
+				//vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, DestIBOffset * sizeof(ImDrawIdx), Align<uint32>(CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), 4), SrcIB);
+				//vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, DestVBOffset * sizeof(ImDrawVert), Align<uint32>(CmdList->VtxBuffer.Size * sizeof(ImDrawVert), 4), SrcVB);
 
-				DestIBOffset += CmdList->IdxBuffer.Size;
-				DestVBOffset += CmdList->VtxBuffer.Size;
-
-				NumVertices += CmdList->VtxBuffer.Size;
-				NumIndices += CmdList->IdxBuffer.Size;
+				//DestIBOffset += CmdList->IdxBuffer.Size;
+				//DestVBOffset += CmdList->VtxBuffer.Size;
+				DestIBData += CmdList->IdxBuffer.Size;
+				DestVBData += CmdList->VtxBuffer.Size;
 			}
 
-			VkBufferMemoryBarrier BufferBarriers[2];
-			ZeroVulkanMem(BufferBarriers[0], VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
-			BufferBarriers[0].buffer = ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
-			BufferBarriers[0].size = DestVBOffset * sizeof(ImDrawVert);
-			BufferBarriers[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			BufferBarriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			ZeroVulkanMem(BufferBarriers[1], VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
-			BufferBarriers[1].buffer = ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
-			BufferBarriers[1].size = DestIBOffset * sizeof(ImDrawIdx);
-			BufferBarriers[1].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			BufferBarriers[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, BufferBarriers, 0, nullptr);
+			//VkBufferMemoryBarrier BufferBarriers[2];
+			//ZeroVulkanMem(BufferBarriers[0], VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
+			//BufferBarriers[0].buffer = ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
+			//BufferBarriers[0].size = DestVBOffset * sizeof(ImDrawVert);
+			//BufferBarriers[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+			//BufferBarriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+			//ZeroVulkanMem(BufferBarriers[1], VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
+			//BufferBarriers[1].buffer = ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
+			//BufferBarriers[1].size = DestIBOffset * sizeof(ImDrawIdx);
+			//BufferBarriers[1].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+			//BufferBarriers[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+			//vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, BufferBarriers, 0, nullptr);
 
-			//ImGuiIB.Unlock();
-			//ImGuiVB.Unlock();
+			ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
+			ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 
 			{
 				VkWriteDescriptorSet DescriptorWrites[3];
@@ -351,24 +350,24 @@ struct FApp
 				DescriptorWrites[2].dstBinding = ImGUIPSO.PS[0]->bindings[1]->binding;
 
 				{
-					//float* ScaleTranslate = (float*)ImGuiScaleTranslateUB.Lock();
+					float* ScaleTranslate = (float*)ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Lock();
 					FVector2 Scale = {2.0f / DrawData->DisplaySize.x, 2.0f / DrawData->DisplaySize.y};
 					FVector2 Translate = { -1.0f - DrawData->DisplayPos.x * Scale.x, -1.0f - DrawData->DisplayPos.y * Scale.y};
-					float ScaleTranslate[4];
+					//float ScaleTranslate[4];
 					ScaleTranslate[0] = Scale.x;
 					ScaleTranslate[1] = Scale.y;
 					ScaleTranslate[2] = Translate.x;
 					ScaleTranslate[3] = Translate.y;
-					//ImGuiScaleTranslateUB.Unlock();
-					vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, 0, sizeof(ScaleTranslate), &ScaleTranslate);
+					ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
+					//vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, 0, sizeof(ScaleTranslate), &ScaleTranslate);
 
-					VkBufferMemoryBarrier BufferBarrier;
-					ZeroVulkanMem(BufferBarrier, VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
-					BufferBarrier.buffer = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
-					BufferBarrier.size = sizeof(ScaleTranslate);
-					BufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-					BufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-					vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &BufferBarrier, 0, nullptr);
+					//VkBufferMemoryBarrier BufferBarrier;
+					//ZeroVulkanMem(BufferBarrier, VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
+					//BufferBarrier.buffer = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
+					//BufferBarrier.size = sizeof(ScaleTranslate);
+					//BufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+					//BufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+					//vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &BufferBarrier, 0, nullptr);
 				}
 				GDescriptorCache.UpdateDescriptors(CmdBuffer, 3, DescriptorWrites, ImGUIPSO);
 			}
@@ -406,7 +405,7 @@ struct FApp
 					Scissor.offset.x = (int32)(Cmd->ClipRect.x - DisplayPos.x) > 0 ? (int32_t)(Cmd->ClipRect.x - DisplayPos.x) : 0;
 					Scissor.offset.y = (int32)(Cmd->ClipRect.y - DisplayPos.y) > 0 ? (int32_t)(Cmd->ClipRect.y - DisplayPos.y) : 0;
 					Scissor.extent.width = (uint32)(Cmd->ClipRect.z - Cmd->ClipRect.x);
-					Scissor.extent.height = (uint32)(Cmd->ClipRect.w - Cmd->ClipRect.y/* + 1*/);
+					Scissor.extent.height = (uint32)(Cmd->ClipRect.w - Cmd->ClipRect.y + 1);
 					vkCmdSetScissor(CmdBuffer->CmdBuffer, 0, 1, &Scissor);
 
 					vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Cmd->ElemCount, 1, IndexOffset, VertexOffset, 0);
