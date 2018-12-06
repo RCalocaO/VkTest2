@@ -1233,12 +1233,10 @@ struct SVulkan
 		{
 			return FindPhysicalDeviceByVendorID(0x8086);
 		}
-/*
 		else if (CmdLine.Contains("-preferAMD"))
 		{
-			return FindPhysicalDeviceByVendorID(0);
+			return FindPhysicalDeviceByVendorID(0x1002);
 		}
-*/
 		else if (CmdLine.Contains("-preferNVidia"))
 		{
 			return FindPhysicalDeviceByVendorID(0x10de);
