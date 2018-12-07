@@ -12,6 +12,11 @@
 
 #include "imgui.h"
 
+#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../tinygltf/tiny_gltf.h"
+
 #include "../RCUtils/RCUtilsMath.h"
 
 #pragma comment(lib, "glfw3.lib")
@@ -34,6 +39,7 @@ struct FApp
 	SVulkan::FGfxPSO DataClipVSRedPSO;
 	SVulkan::FGfxPSO DataClipVSColorPSO;
 	SVulkan::FGfxPSO VBClipVSRedPSO;
+	SVulkan::FGfxPSO TestGLTFPSO;
 	FBufferWithMemAndView ClipVB;
 	FBufferWithMem StagingClipVB;
 	FShaderInfo* TestCS = nullptr;
@@ -112,6 +118,7 @@ struct FApp
 		}
 		ImGuiFont.Destroy();
 
+		Scene.Destroy();
 		TestCSUB.Destroy();
 		TestCSBuffer.Destroy();
 		StagingClipVB.Destroy();
@@ -416,6 +423,259 @@ struct FApp
 			CmdBuffer->EndRenderPass();
 		}
 	}
+
+
+
+	struct FScene
+	{
+		std::vector<FBufferWithMem> Buffers;
+		//std::vector<VkVertexInputAttributeDescription> AttrDescs;
+		//std::vector<VkVertexInputBindingDescription> BindingDescs;
+
+		struct FPrim
+		{
+			VkDeviceSize IndexOffset;
+			uint32 NumIndices;
+			int IndexBuffer;
+			std::vector<int> VertexBuffers;
+			std::vector<VkDeviceSize> VertexOffsets;
+			VkIndexType IndexType;
+			VkPrimitiveTopology PrimType;
+			int Material;
+			int VertexDecl;
+		};
+
+		struct FMesh
+		{
+			std::vector<FPrim> Prims;
+		};
+
+		std::vector<FMesh> Meshes;
+
+		void Destroy()
+		{
+			for (auto& Buffer : Buffers)
+			{
+				Buffer.Destroy();
+			}
+		}
+	};
+	FScene Scene;
+
+	static VkFormat GetFormat(int GLTFComponentType, int GLTFType)
+	{
+		if (GLTFComponentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
+		{
+			switch (GLTFType)
+			{
+			case TINYGLTF_COMPONENT_TYPE_FLOAT:
+				return VK_FORMAT_R32_SFLOAT;
+			case TINYGLTF_TYPE_VEC2:
+				return VK_FORMAT_R32G32_SFLOAT;
+			case TINYGLTF_TYPE_VEC3:
+				return VK_FORMAT_R32G32B32_SFLOAT;
+			case TINYGLTF_TYPE_VEC4:
+				return VK_FORMAT_R32G32B32A32_SFLOAT;
+			default:
+				check(0);
+				break;
+			}
+		}
+		check(0);
+		return VK_FORMAT_UNDEFINED;
+	}
+
+	struct FVertexBindings
+	{
+		std::vector<VkVertexInputAttributeDescription> AttrDescs;
+		std::vector<VkVertexInputBindingDescription> BindingDescs;
+	};
+	std::vector<FVertexBindings> VertexDecls;
+
+	static uint32 GetShaderBinding(const std::string& Name)
+	{
+		if (Name == "POSITION")
+		{
+			return 0;
+		}
+		else if (Name == "NORMAL")
+		{
+			return 1;
+		}
+
+		check(0);
+		return (uint32)-1;
+	}
+
+	int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim)
+	{
+		FVertexBindings VertexDecl;
+		uint32 BindingIndex = 0;
+		for (auto Pair : GLTFPrim.attributes)
+		{
+			std::string Name = Pair.first;
+			tinygltf::Accessor& Accessor = Model.accessors[Pair.second];
+
+			tinygltf::BufferView& BufferView = Model.bufferViews[Accessor.bufferView];
+			OutPrim.VertexOffsets.push_back(BufferView.byteOffset + Accessor.byteOffset);
+			OutPrim.VertexBuffers.push_back(BufferView.buffer);
+
+			VkVertexInputAttributeDescription AttrDesc;
+			ZeroMem(AttrDesc);
+			AttrDesc.binding = BindingIndex;
+			AttrDesc.format = GetFormat(Accessor.componentType, Accessor.type);
+			AttrDesc.location = GetShaderBinding(Name);
+			AttrDesc.offset = 0;
+			VertexDecl.AttrDescs.push_back(AttrDesc);
+
+			VkVertexInputBindingDescription BindingDesc;
+			ZeroMem(BindingDesc);
+			BindingDesc.binding = BindingIndex;
+			BindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+			BindingDesc.stride = BufferView.byteStride;
+			VertexDecl.BindingDescs.push_back(BindingDesc);
+
+			++BindingIndex;
+		}
+
+		VertexDecls.push_back(VertexDecl);
+
+		return 0;
+	}
+
+	static inline VkIndexType GetIndexType(int GLTFComponentType)
+	{
+		if (GLTFComponentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+		{
+			return VK_INDEX_TYPE_UINT16;
+		}
+		else if (GLTFComponentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
+		{
+			return VK_INDEX_TYPE_UINT32;
+		}
+
+		check(0);
+		return VK_INDEX_TYPE_UINT32;
+	}
+
+	static inline uint32 GetSizeInBytes(int GLTFComponentType)
+	{
+		switch (GLTFComponentType)
+		{
+		case TINYGLTF_COMPONENT_TYPE_BYTE:
+		case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+			return 1;
+		case TINYGLTF_COMPONENT_TYPE_SHORT:
+		case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+			return 2;
+		case TINYGLTF_COMPONENT_TYPE_INT:
+		case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+		case TINYGLTF_COMPONENT_TYPE_FLOAT:
+			return 4;
+		case TINYGLTF_COMPONENT_TYPE_DOUBLE:
+			return 8;
+
+		default:
+			check(0);
+			break;
+		}
+
+		return 0;
+	}
+
+	static inline VkPrimitiveTopology GetPrimType(int GLTFMode)
+	{
+		switch (GLTFMode)
+		{
+		case TINYGLTF_MODE_POINTS:
+			return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+		case TINYGLTF_MODE_LINE:
+			return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+		case TINYGLTF_MODE_LINE_LOOP:
+			return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+		case TINYGLTF_MODE_TRIANGLES:
+			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		case TINYGLTF_MODE_TRIANGLE_STRIP:
+			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+		case TINYGLTF_MODE_TRIANGLE_FAN:
+			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
+		default:
+			check(0);
+			break;
+		}
+
+		return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	}
+
+	void TryLoadGLTF(SVulkan::SDevice& Device, const char* Filename)
+	{
+		tinygltf::TinyGLTF Loader;
+		tinygltf::Model Model;
+		std::string Error;
+		std::string Warnings;
+		if (Loader.LoadASCIIFromFile(&Model, &Error, &Warnings, Filename))
+		{
+			for (tinygltf::Mesh& GLTFMesh : Model.meshes)
+			{
+				FScene::FMesh Mesh;
+				for (tinygltf::Primitive& GLTFPrim : GLTFMesh.primitives)
+				{
+					FScene::FPrim Prim;
+
+					tinygltf::Accessor& Indices = Model.accessors[GLTFPrim.indices];
+					check(Indices.type == TINYGLTF_TYPE_SCALAR);
+
+					tinygltf::BufferView& IndicesBufferView = Model.bufferViews[Indices.bufferView];
+
+					Prim.VertexDecl = GetOrAddVertexDecl(Model, GLTFPrim, Prim);
+					Prim.Material = GLTFPrim.material;
+					Prim.PrimType = GetPrimType(GLTFPrim.mode);
+					Prim.IndexOffset = Indices.byteOffset + IndicesBufferView.byteOffset;
+					Prim.NumIndices = (uint32)IndicesBufferView.byteLength / GetSizeInBytes(Indices.componentType);
+					Prim.IndexBuffer = IndicesBufferView.buffer;
+					Prim.IndexType = GetIndexType(Indices.componentType);
+
+					Mesh.Prims.push_back(Prim);
+				}
+
+				Scene.Meshes.push_back(Mesh);
+			}
+
+			for (tinygltf::Buffer& GLTFBuffer : Model.buffers)
+			{
+				FBufferWithMem Buffer;
+				uint32 Size = (uint32)GLTFBuffer.data.size();
+				Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, Size);
+				float* Data = (float*)Buffer.Lock();
+				memcpy(Data, GLTFBuffer.data.data(), Size);
+				Buffer.Unlock();
+				Scene.Buffers.push_back(Buffer);
+			}
+		}
+	}
+
+	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
+	{
+		for (auto& Mesh : Scene.Meshes)
+		{
+			for (auto& Prim : Mesh.Prims)
+			{
+				//GetPSO(Prim.VertexDecl);
+
+				SVulkan::FBuffer& IB = Scene.Buffers[Prim.IndexBuffer].Buffer;
+				std::vector<VkBuffer> VBs;
+				for (auto VBIndex : Prim.VertexBuffers)
+				{
+					VBs.push_back(Scene.Buffers[VBIndex].Buffer.Buffer);
+				}
+				check(VBs.size() == Prim.VertexOffsets.size());
+				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, TestGLTFPSO.Pipeline);
+				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), Prim.VertexOffsets.data());
+				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB.Buffer, Prim.IndexOffset, Prim.IndexType);
+				vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Prim.NumIndices, 1, 0, 0, 0);
+			}
+		}
+	}
 };
 
 static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
@@ -534,6 +794,11 @@ static double Render(FApp& App)
 	GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
 	vkCmdDraw(CmdBuffer->CmdBuffer, 3, 1, 0, 0);
 
+	if (!App.Scene.Meshes.empty())
+	{
+		App.DrawScene(CmdBuffer);
+	}
+
 	CmdBuffer->EndRenderPass();
 
 	{
@@ -567,15 +832,24 @@ static double Render(FApp& App)
 
 	Device.EndTimestamp(CmdBuffer);
 
-/*
-	if (ImGui::Begin("Hello, world!"))
 	{
-		ImGui::Text("test...");
-		ImGui::End();
-	}
+		if (ImGui::Begin("Hello, world!"))
+		{
+			if (ImGui::Button("File..."))
+			{
+				ImGui::OpenPopup("OpenFilePopup");
+			}
+			if (ImGui::BeginPopup("OpenFilePopup"))
+			{
+				//ShowExampleMenuFile();
+				ImGui::EndPopup();
+			}
 
-*/
-	ImGui::ShowDemoWindow();
+			ImGui::End();
+		}
+
+		ImGui::ShowDemoWindow();
+	}
 
 	ImGui::Render();
 
@@ -613,6 +887,8 @@ static void SetupShaders(FApp& App)
 	FShaderInfo* ColorPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ColorPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* UIVS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* UIPS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainPS", FShaderInfo::EStage::Pixel);
+	FShaderInfo* TestGLTFVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "TestGLTFVS", FShaderInfo::EStage::Vertex);
+	FShaderInfo* TestGLTFPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "TestGLTFPS", FShaderInfo::EStage::Pixel);
 	GShaderLibrary.RecompileShaders();
 
 	App.TestCSPSO = GPSOCache.CreateComputePSO(App.TestCS);
@@ -676,6 +952,18 @@ static void SetupShaders(FApp& App)
 			VertexInputInfo->pVertexBindingDescriptions = VertexBindDesc;
 		});
 	}
+
+	App.TestGLTFPSO = GPSOCache.CreateGfxPSO(TestGLTFVS, TestGLTFPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	{
+		if (!App.VertexDecls.empty())
+		{
+			VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
+			VertexInputInfo->vertexAttributeDescriptionCount = App.VertexDecls[0].AttrDescs.size();
+			VertexInputInfo->pVertexAttributeDescriptions = App.VertexDecls[0].AttrDescs.data();
+			VertexInputInfo->vertexBindingDescriptionCount = App.VertexDecls[0].BindingDescs.size();
+			VertexInputInfo->pVertexBindingDescriptions = App.VertexDecls[0].BindingDescs.data();
+		}
+	});
 }
 
 static void ErrorCallback(int Error, const char* Msg)
@@ -715,6 +1003,12 @@ static GLFWwindow* Init(FApp& App)
 	GDescriptorCache.Init(&Device);
 
 	glfwSetKeyCallback(Window, KeyCallback);
+
+	const char* Filename = nullptr;
+	if (RCUtils::FCmdLine::Get().TryGetStringFromPrefix("-gltf=", Filename))
+	{
+		App.TryLoadGLTF(Device, Filename);
+	}
 
 	SetupShaders(App);
 

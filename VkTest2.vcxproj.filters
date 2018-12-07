@@ -28,6 +28,9 @@
     <Filter Include="External\imgui">
       <UniqueIdentifier>{2e7eb288-804e-4137-b0ea-348fd90a4646}</UniqueIdentifier>
     </Filter>
+    <Filter Include="External\tinygltf">
+      <UniqueIdentifier>{c31543e9-7164-4679-920e-4d089743d5ab}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -59,6 +62,9 @@
     </ClInclude>
     <ClInclude Include="..\imgui\imgui_internal.h">
       <Filter>External\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\tinygltf\tiny_gltf.h">
+      <Filter>External\tinygltf</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

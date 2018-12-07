@@ -78,3 +78,30 @@ float4 MainTexPS(FVSOut In)
 {
 	return Tex.Sample(SS, In.UVs) * In.Color;
 }
+
+
+
+struct FGLTFVS
+{
+	float3 Pos : POSITION;
+	float3 Normal : NORMAL;
+};
+
+struct FGLTFPS
+{
+	float4 Pos : SV_POSITION;
+	float3 Normal : NORMAL;
+};
+
+FGLTFPS TestGLTFVS(FGLTFVS In)
+{
+	FGLTFPS Out = (FGLTFPS)0;
+	Out.Pos = float4(In.Pos, 1);
+	Out.Normal = In.Normal;
+	return Out;
+}
+
+float4 TestGLTFPS(FGLTFPS In) : SV_Target0
+{
+	return float4(In.Normal, 1);
+}

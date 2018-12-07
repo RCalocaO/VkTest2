@@ -58,7 +58,7 @@ inline void ZeroVulkanMem(T& VulkanStruct, VkStructureType Type)
 struct SVulkan
 {
 	VkInstance Instance = VK_NULL_HANDLE;
-	VkDebugUtilsMessengerEXT DebugReportCallback = nullptr;
+	VkDebugUtilsMessengerEXT DebugReportCallback = (VkDebugUtilsMessengerEXT)0;
 
 	std::vector<VkPhysicalDevice> DiscreteDevices;
 	std::vector<VkPhysicalDevice> IntegratedDevices;
@@ -2241,7 +2241,7 @@ struct FDescriptorCache
 					{
 						Pool.FreeSets.push_back(Used.Sets);
 
-						if (Index < Pool.UsedSets.size() - 1)
+						if (Index < (int)Pool.UsedSets.size() - 1)
 						{
 							Pool.UsedSets[Index] = Pool.UsedSets[Pool.UsedSets.size() - 1];
 						}
