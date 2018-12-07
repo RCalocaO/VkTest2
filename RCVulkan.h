@@ -1285,6 +1285,14 @@ struct SVulkan
 			}
 		}
 
+		if (CallbackData->pMessageIdName)
+		{
+			if (!strcmp(CallbackData->pMessageIdName, "UNASSIGNED-CoreValidation-Shader-InputNotProduced"))
+			{
+				return VK_FALSE;
+			}
+		}
+
 		std::string s = "***";
 		s += (MessageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) ? "[Valid]" : "";
 		s += (MessageType & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT) ? "[Gen]" : "";

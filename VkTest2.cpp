@@ -489,23 +489,9 @@ struct FApp
 	{
 		std::vector<VkVertexInputAttributeDescription> AttrDescs;
 		std::vector<VkVertexInputBindingDescription> BindingDescs;
+		std::vector<std::string> Names;
 	};
 	std::vector<FVertexBindings> VertexDecls;
-
-	static uint32 GetShaderBinding(const std::string& Name)
-	{
-		if (Name == "POSITION")
-		{
-			return 0;
-		}
-		else if (Name == "NORMAL")
-		{
-			return 1;
-		}
-
-		check(0);
-		return (uint32)-1;
-	}
 
 	int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim)
 	{
@@ -524,7 +510,7 @@ struct FApp
 			ZeroMem(AttrDesc);
 			AttrDesc.binding = BindingIndex;
 			AttrDesc.format = GetFormat(Accessor.componentType, Accessor.type);
-			AttrDesc.location = GetShaderBinding(Name);
+			AttrDesc.location = BindingIndex;
 			AttrDesc.offset = 0;
 			VertexDecl.AttrDescs.push_back(AttrDesc);
 
@@ -532,8 +518,10 @@ struct FApp
 			ZeroMem(BindingDesc);
 			BindingDesc.binding = BindingIndex;
 			BindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-			BindingDesc.stride = BufferView.byteStride;
+			BindingDesc.stride = (uint32)BufferView.byteStride;
 			VertexDecl.BindingDescs.push_back(BindingDesc);
+
+			VertexDecl.Names.push_back(Name);
 
 			++BindingIndex;
 		}
@@ -877,6 +865,49 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 {
 }
 
+static void FixGLTFVertexDecl(FApp::FVertexBindings& VertexDecl, SVulkan::FShader* Shader)
+{
+	SpvReflectShaderModule Module;
+
+	SpvReflectResult result = spvReflectCreateShaderModule(Shader->SpirV.size(), Shader->SpirV.data(), &Module);
+	check(result == SPV_REFLECT_RESULT_SUCCESS);
+
+	uint32 Count = 0;
+	result = spvReflectEnumerateInputVariables(&Module, &Count, nullptr);
+	check(result == SPV_REFLECT_RESULT_SUCCESS);
+
+	std::vector<SpvReflectInterfaceVariable*> Variables(Count);
+	result = spvReflectEnumerateInputVariables(&Module, &Count, Variables.data());
+	check(result == SPV_REFLECT_RESULT_SUCCESS);
+
+	auto FindSemantic = [&](const char* Name) -> int32
+	{
+		for (auto* Var : Variables)
+		{
+			if (strstr(Var->name, Name))
+			{
+				return (int32)Var->location;
+			}
+		}
+
+		return -1;
+	};
+
+	uint32 Index = 0;
+	for (auto& Name : VertexDecl.Names)
+	{
+		int32 Found = FindSemantic(Name.c_str());
+		check(Found != -1);
+		{
+			VertexDecl.AttrDescs[Index].binding = (uint32)Found;
+		}
+
+		++Index;
+	}
+
+	spvReflectDestroyShaderModule(&Module);
+}
+
 static void SetupShaders(FApp& App)
 {
 	App.TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "TestCS", FShaderInfo::EStage::Compute);
@@ -887,8 +918,8 @@ static void SetupShaders(FApp& App)
 	FShaderInfo* ColorPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ColorPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* UIVS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* UIPS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainPS", FShaderInfo::EStage::Pixel);
-	FShaderInfo* TestGLTFVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "TestGLTFVS", FShaderInfo::EStage::Vertex);
-	FShaderInfo* TestGLTFPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "TestGLTFPS", FShaderInfo::EStage::Pixel);
+	FShaderInfo* TestGLTFVS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFVS", FShaderInfo::EStage::Vertex);
+	FShaderInfo* TestGLTFPS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFPS", FShaderInfo::EStage::Pixel);
 	GShaderLibrary.RecompileShaders();
 
 	App.TestCSPSO = GPSOCache.CreateComputePSO(App.TestCS);
@@ -953,14 +984,16 @@ static void SetupShaders(FApp& App)
 		});
 	}
 
-	App.TestGLTFPSO = GPSOCache.CreateGfxPSO(TestGLTFVS, TestGLTFPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	App.TestGLTFPSO = GPSOCache.CreateGfxPSO(TestGLTFVS, TestGLTFPS, RenderPass, [&](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		if (!App.VertexDecls.empty())
 		{
+			check(App.VertexDecls.size() == 1);
+			FixGLTFVertexDecl(App.VertexDecls[0], TestGLTFVS->Shader);
 			VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
-			VertexInputInfo->vertexAttributeDescriptionCount = App.VertexDecls[0].AttrDescs.size();
+			VertexInputInfo->vertexAttributeDescriptionCount = (uint32)App.VertexDecls[0].AttrDescs.size();
 			VertexInputInfo->pVertexAttributeDescriptions = App.VertexDecls[0].AttrDescs.data();
-			VertexInputInfo->vertexBindingDescriptionCount = App.VertexDecls[0].BindingDescs.size();
+			VertexInputInfo->vertexBindingDescriptionCount = (uint32)App.VertexDecls[0].BindingDescs.size();
 			VertexInputInfo->pVertexBindingDescriptions = App.VertexDecls[0].BindingDescs.data();
 		}
 	});
