@@ -21,19 +21,18 @@ struct FGLTFVS
 	// Use GLTF semantic names for easier binding
 	float3 POSITION : POSITION;
 	float3 NORMAL : NORMAL;
-	//float4 Tangent : TANGENT;
+	float4 TANGENT : TANGENT;
 	float2 TEXCOORD_0 : TEXCOORD_0;
-	//float2 UV1 : TEXCOORD1;
-	//float4 Color : COLOR;
+	float4 COLOR_0 : COLOR;
 };
 
 struct FGLTFPS
 {
 	float4 Pos : SV_POSITION;
 	float3 Normal : NORMAL;
+	float3 Tangent : TANGENT;
 	float2 UV0 : TEXCOORD0;
-	//float2 UV1 : TEXCOORD1;
-	//float4 Color : COLOR;
+	float4 Color : COLOR;
 };
 
 FGLTFPS TestGLTFVS(FGLTFVS In)
@@ -41,9 +40,9 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	FGLTFPS Out = (FGLTFPS)0;
 	Out.Pos = float4(In.POSITION, 1);
 	Out.Normal = In.NORMAL;
+	Out.Tangent = In.TANGENT;
 	Out.UV0 = In.TEXCOORD_0;
-	//Out.UV1 = In.UV1;
-	//Out.Color = In.Color;
+	Out.Color = In.COLOR_0;
 	return Out;
 }
 

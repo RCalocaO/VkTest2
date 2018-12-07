@@ -899,7 +899,7 @@ static void FixGLTFVertexDecl(FApp::FVertexBindings& VertexDecl, SVulkan::FShade
 		int32 Found = FindSemantic(Name.c_str());
 		check(Found != -1);
 		{
-			VertexDecl.AttrDescs[Index].binding = (uint32)Found;
+			VertexDecl.AttrDescs[Index].location = (uint32)Found;
 		}
 
 		++Index;
