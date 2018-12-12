@@ -1416,6 +1416,14 @@ struct SVulkan
 
 	void CreateInstance()
 	{
+		uint32 ApiVersion = 0;
+		VERIFY_VKRESULT(vkEnumerateInstanceVersion(&ApiVersion));
+		if (ApiVersion < VK_API_VERSION_1_1)
+		{
+			// 1.1 not available
+			check(0);
+		}
+
 		VkInstanceCreateInfo Info;
 		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
 
@@ -1471,6 +1479,13 @@ struct SVulkan
 
 		::OutputDebugStringA("Using Instance Extensions:\n");
 		PrintList(Extensions);
+
+		// Needed to enable 1.1
+		VkApplicationInfo AppInfo;
+		ZeroVulkanMem(AppInfo, VK_STRUCTURE_TYPE_APPLICATION_INFO);
+		AppInfo.apiVersion = VK_API_VERSION_1_1;
+
+		Info.pApplicationInfo = &AppInfo;
 
 		VERIFY_VKRESULT(vkCreateInstance(&Info, nullptr, &Instance));
 	}
