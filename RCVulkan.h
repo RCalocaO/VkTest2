@@ -2008,7 +2008,8 @@ struct FPSOCache
 
 		VkPipelineRasterizationStateCreateInfo RasterizerInfo;
 		ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
-		RasterizerInfo.cullMode = VK_CULL_MODE_NONE;
+		RasterizerInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+		RasterizerInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
 		RasterizerInfo.lineWidth = 1.0f;
 		GfxPipelineInfo.pRasterizationState = &RasterizerInfo;
 
@@ -2070,6 +2071,14 @@ struct FPSOCache
 		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &PSO.Pipeline));
 		PSOs.push_back(PSO);
 		return PSO;
+	}
+
+	inline SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
+	{
+		return CreateGfxPSO(VS, PS, RenderPass, 
+			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+			{
+			});
 	}
 
 	SVulkan::FComputePSO CreateComputePSO(FShaderInfo* CS)

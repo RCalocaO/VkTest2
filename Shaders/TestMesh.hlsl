@@ -48,5 +48,5 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 
 float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 {
-	return float4(In.UV0, 0, 1);
+	return Tex.Sample(SS, In.UV0);// * In.Color;
 }

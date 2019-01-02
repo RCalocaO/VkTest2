@@ -82,8 +82,8 @@ struct FApp
 			StagingClipVB.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ClipVBSize);
 			float* Data = (float*)StagingClipVB.Lock();
 			*Data++ = 0;		*Data++ = -0.5f;	*Data++ = 1; *Data++ = 1;
-			*Data++ = -0.5f;	*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
 			*Data++ = 0.5f;		*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
+			*Data++ = -0.5f;	*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
 			StagingClipVB.Unlock();
 		}
 
@@ -433,6 +433,7 @@ struct FApp
 	struct FScene
 	{
 		std::vector<FBufferWithMem> Buffers;
+		std::vector<FImageWithMemAndView> Images;
 		//std::vector<VkVertexInputAttributeDescription> AttrDescs;
 		//std::vector<VkVertexInputBindingDescription> BindingDescs;
 
@@ -461,6 +462,11 @@ struct FApp
 			for (auto& Buffer : Buffers)
 			{
 				Buffer.Destroy();
+			}
+
+			for (auto& Image : Images)
+			{
+				Image.Destroy();
 			}
 		}
 	};
@@ -496,6 +502,7 @@ struct FApp
 		std::vector<std::string> Names;
 	};
 	std::vector<FVertexBindings> VertexDecls;
+	bool bUseColorStream = false;
 
 	int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim)
 	{
@@ -529,6 +536,8 @@ struct FApp
 
 			++BindingIndex;
 		}
+
+		bUseColorStream = (GLTFPrim.attributes.find("COLOR_0") != GLTFPrim.attributes.end());
 
 		VertexDecls.push_back(VertexDecl);
 
@@ -599,6 +608,7 @@ struct FApp
 		return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 	}
 
+	std::string LoadedGLTF;
 	void TryLoadGLTF(SVulkan::SDevice& Device, const char* Filename)
 	{
 		tinygltf::TinyGLTF Loader;
@@ -643,6 +653,55 @@ struct FApp
 				Buffer.Unlock();
 				Scene.Buffers.push_back(Buffer);
 			}
+
+			for (tinygltf::Image& GLTFImage : Model.images)
+			{
+				check(!GLTFImage.as_is);
+				check(GLTFImage.bufferView == -1);
+				check(!GLTFImage.image.empty());
+				{
+					FImageWithMemAndView Image;
+					Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM);
+
+					FBufferWithMem TempBuffer;
+					TempBuffer.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, GLTFImage.width * GLTFImage.height * sizeof(uint32));
+
+					uint8* Data = (uint8*)TempBuffer.Lock();
+					memcpy(Data, GLTFImage.image.data(), TempBuffer.Size);
+					TempBuffer.Unlock();
+
+					SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
+
+					Device.TransitionImage(CmdBuffer, Image.Image.Image,
+						VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
+						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+						VK_IMAGE_ASPECT_COLOR_BIT);
+
+					VkBufferImageCopy Region;
+					ZeroMem(Region);
+					Region.imageExtent.width = GLTFImage.width;
+					Region.imageExtent.height = GLTFImage.height;
+					Region.imageExtent.depth = 1;
+					Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+					Region.imageSubresource.layerCount = 1;
+					vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, TempBuffer.Buffer.Buffer, Image.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+
+					Device.TransitionImage(CmdBuffer, Image.Image.Image,
+						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+						VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
+						VK_IMAGE_ASPECT_COLOR_BIT);
+
+					CmdBuffer->End();
+					Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
+					CmdBuffer->Fence.Wait(2 * 1000 * 1000);
+
+					TempBuffer.Destroy();
+
+					Scene.Images.push_back(Image);
+				}
+			}
+
+			LoadedGLTF = Filename;
 		}
 	}
 
@@ -664,6 +723,35 @@ struct FApp
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, TestGLTFPSO.Pipeline);
 				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), Prim.VertexOffsets.data());
 				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB.Buffer, Prim.IndexOffset, Prim.IndexType);
+
+				{
+					VkDescriptorImageInfo ImageInfo[2];
+					ZeroMem(ImageInfo);
+
+					ImageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					ImageInfo[0].sampler = ImGuiFontSampler;
+
+					ImageInfo[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					ImageInfo[1].imageView = Scene.Images[0].View;
+					ImageInfo[1].sampler = ImGuiFontSampler;
+
+					VkWriteDescriptorSet DescriptorWrites[2];
+					ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+					DescriptorWrites[0].descriptorCount = 1;
+					DescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+					DescriptorWrites[0].pImageInfo = &ImageInfo[0];
+					DescriptorWrites[0].dstBinding = TestGLTFPSO.PS[0]->bindings[0]->binding;
+
+					ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+					DescriptorWrites[1].descriptorCount = 1;
+					DescriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+					DescriptorWrites[1].pImageInfo = &ImageInfo[1];
+					DescriptorWrites[1].dstBinding = TestGLTFPSO.PS[0]->bindings[1]->binding;
+
+					GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, &DescriptorWrites[0], TestGLTFPSO);
+				}
+
+
 				vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Prim.NumIndices, 1, 0, 0, 0);
 			}
 		}
@@ -933,17 +1021,9 @@ static void SetupShaders(FApp& App)
 	VkViewport Viewport = GVulkan.Swapchain.GetViewport();
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();
 
-	App.DataClipVSColorPSO = GPSOCache.CreateGfxPSO(DataClipVS, ColorPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-	{
-	});
-
-	App.NoVBClipVSRedPSO = GPSOCache.CreateGfxPSO(NoVBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-	{
-	});
-
-	App.DataClipVSRedPSO = GPSOCache.CreateGfxPSO(DataClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-	{
-	});
+	App.DataClipVSColorPSO = GPSOCache.CreateGfxPSO(DataClipVS, ColorPS, RenderPass);
+	App.NoVBClipVSRedPSO = GPSOCache.CreateGfxPSO(NoVBClipVS, RedPS, RenderPass);
+	App.DataClipVSRedPSO = GPSOCache.CreateGfxPSO(DataClipVS, RedPS, RenderPass);
 
 	{
 		VkVertexInputAttributeDescription VertexAttrDesc;
@@ -1098,6 +1178,10 @@ int main()
 		{
 			std::stringstream ss;
 			ss << "VkTest2 CPU: " << CpuDelta << " ms,  GPU: " << GpuDelta << " ms";
+			if (!App.LoadedGLTF.empty())
+			{
+				ss << " - " << App.LoadedGLTF;
+			}
 			ss.flush();
 			::glfwSetWindowTitle(Window, ss.str().c_str());
 		}
