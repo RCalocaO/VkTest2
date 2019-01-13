@@ -2,7 +2,6 @@
 //
 
 #include "pch.h"
-#include <iostream>
 #include <GLFW/glfw3.h>
 
 // Fix Windows warning
@@ -36,6 +35,8 @@ static FPSOCache GPSOCache;
 
 static FDescriptorCache GDescriptorCache;
 
+static FStagingBufferManager GStagingBufferMgr;
+
 struct FApp
 {
 	uint32 FrameIndex = 0;
@@ -56,6 +57,7 @@ struct FApp
 	uint32 ImGuiMaxIndices = 16384 * 3;
 	FImageWithMemAndView ImGuiFont;
 	VkSampler ImGuiFontSampler = VK_NULL_HANDLE;
+	FImageWithMemAndView WhiteTexture;
 	enum
 	{
 		NUM_IMGUI_BUFFERS = 3,
@@ -109,10 +111,14 @@ struct FApp
 			memset(Data, 0x33, 16384);
 			TestCSUB.Unlock();
 		}
+
+		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, 4, 4, VK_FORMAT_R8G8B8A8_UNORM);
 	}
 
 	void Destroy()
 	{
+		WhiteTexture.Destroy();
+
 		vkDestroySampler(ImGuiFont.Image.Device, ImGuiFontSampler, nullptr);
 		for (int32 Index = 0; Index < NUM_IMGUI_BUFFERS; ++Index)
 		{
@@ -130,7 +136,7 @@ struct FApp
 		ColorUB.Destroy();
 	}
 
-	void SetupImGui(SVulkan::SDevice& Device)
+	void SetupImGuiAndResources(SVulkan::SDevice& Device)
 	{
 		ImGuiIO& IO = ImGui::GetIO();
 
@@ -138,10 +144,10 @@ struct FApp
 		unsigned char* Pixels = nullptr;
 		IO.Fonts->GetTexDataAsAlpha8(&Pixels, &Width, &Height);
 
-		FBufferWithMem FontBuffer;
-		FontBuffer.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, Width * Height * sizeof(uint32));
+		SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
-		uint8* Data = (uint8*)FontBuffer.Lock();
+		FBufferWithMem* FontBuffer = GStagingBufferMgr.AcquireBuffer(CmdBuffer, Width * Height * sizeof(uint32));
+		uint8* Data = (uint8*)FontBuffer->Lock();
 		for (int32 Index = 0; Index < Width * Height; ++Index)
 		{
 			*Data++ = *Pixels;
@@ -150,11 +156,9 @@ struct FApp
 			*Data++ = *Pixels;
 			++Pixels;
 		}
-		FontBuffer.Unlock();
+		FontBuffer->Unlock();
 
 		ImGuiFont.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Width, Height, VK_FORMAT_R8G8B8A8_UNORM);
-
-		SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
 		Device.TransitionImage(CmdBuffer, ImGuiFont.Image.Image,
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
@@ -168,7 +172,7 @@ struct FApp
 		Region.imageExtent.depth = 1;
 		Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		Region.imageSubresource.layerCount = 1;
-		vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, FontBuffer.Buffer.Buffer, ImGuiFont.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+		vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, FontBuffer->Buffer.Buffer, ImGuiFont.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
 
 		Device.TransitionImage(CmdBuffer, ImGuiFont.Image.Image,
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -177,11 +181,10 @@ struct FApp
 
 		CmdBuffer->End();
 		Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
-		CmdBuffer->Fence.Wait(2 * 1000 * 1000);
 
 		IO.Fonts->TexID = (void*)ImGuiFont.Image.Image;
 
-		FontBuffer.Destroy();
+		GStagingBufferMgr.ReleaseBuffer(FontBuffer);
 
 		const uint32 ImGuiVertexSize = sizeof(ImDrawVert) * ImGuiMaxVertices;
 		for (int32 Index = 0; Index < NUM_IMGUI_BUFFERS; ++Index)
@@ -204,6 +207,7 @@ struct FApp
 	void Update()
 	{
 		++FrameIndex;
+		GStagingBufferMgr.Refresh();
 	}
 
 	void ImGuiNewFrame()
@@ -663,14 +667,14 @@ struct FApp
 					FImageWithMemAndView Image;
 					Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM);
 
-					FBufferWithMem TempBuffer;
-					TempBuffer.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, GLTFImage.width * GLTFImage.height * sizeof(uint32));
-
-					uint8* Data = (uint8*)TempBuffer.Lock();
-					memcpy(Data, GLTFImage.image.data(), TempBuffer.Size);
-					TempBuffer.Unlock();
-
 					SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
+
+					uint32 Size = GLTFImage.width * GLTFImage.height * sizeof(uint32);
+					FBufferWithMem* TempBuffer = GStagingBufferMgr.AcquireBuffer(CmdBuffer, Size);
+
+					uint8* Data = (uint8*)TempBuffer->Lock();
+					memcpy(Data, GLTFImage.image.data(), Size);
+					TempBuffer->Unlock();
 
 					Device.TransitionImage(CmdBuffer, Image.Image.Image,
 						VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
@@ -684,7 +688,7 @@ struct FApp
 					Region.imageExtent.depth = 1;
 					Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 					Region.imageSubresource.layerCount = 1;
-					vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, TempBuffer.Buffer.Buffer, Image.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+					vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, TempBuffer->Buffer.Buffer, Image.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
 
 					Device.TransitionImage(CmdBuffer, Image.Image.Image,
 						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -693,9 +697,8 @@ struct FApp
 
 					CmdBuffer->End();
 					Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
-					CmdBuffer->Fence.Wait(2 * 1000 * 1000);
 
-					TempBuffer.Destroy();
+					GStagingBufferMgr.ReleaseBuffer(TempBuffer);
 
 					Scene.Images.push_back(Image);
 				}
@@ -732,7 +735,7 @@ struct FApp
 					ImageInfo[0].sampler = ImGuiFontSampler;
 
 					ImageInfo[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					ImageInfo[1].imageView = Scene.Images[0].View;
+					ImageInfo[1].imageView = Scene.Images.empty() ? WhiteTexture.View : Scene.Images[0].View;
 					ImageInfo[1].sampler = ImGuiFontSampler;
 
 					VkWriteDescriptorSet DescriptorWrites[2];
@@ -801,7 +804,7 @@ static double Render(FApp& App)
 		vkCmdCopyBuffer(CmdBuffer->CmdBuffer, App.StagingClipVB.Buffer.Buffer, App.ClipVB.Buffer.Buffer, 1, &Region);
 		bFirst = false;
 
-		App.SetupImGui(Device);
+		App.SetupImGuiAndResources(Device);
 	}
 
 	App.ImGuiNewFrame();
@@ -1118,6 +1121,7 @@ static GLFWwindow* Init(FApp& App)
 	GShaderLibrary.Init(Device.Device);
 	GPSOCache.Init(&Device);
 	GDescriptorCache.Init(&Device);
+	GStagingBufferMgr.Init(&Device);
 
 	glfwSetKeyCallback(Window, KeyCallback);
 
@@ -1146,6 +1150,8 @@ static void Deinit(FApp& App, GLFWwindow* Window)
 	GVulkan.DeinitPre();
 
 	ImGui::DestroyContext();
+
+	GStagingBufferMgr.Destroy();
 
 	App.Destroy();
 

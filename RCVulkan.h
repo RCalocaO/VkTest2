@@ -8,6 +8,7 @@
 #include <atomic>
 #include <sstream>
 #include <direct.h>
+#include <list>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -695,16 +696,26 @@ struct SVulkan
 			CmdPools[GfxQueueIndex].Destroy();
 			if (GfxQueueIndex != ComputeQueueIndex)
 			{
+				CmdPools[ComputeQueueIndex].Refresh();
+			}
+			if (GfxQueueIndex != TransferQueueIndex)
+			{
+				CmdPools[TransferQueueIndex].Refresh();
+			}
+		}
+
+		void Destroy()
+		{
+			CmdPools[GfxQueueIndex].Destroy();
+			if (GfxQueueIndex != ComputeQueueIndex)
+			{
 				CmdPools[ComputeQueueIndex].Destroy();
 			}
 			if (GfxQueueIndex != TransferQueueIndex)
 			{
 				CmdPools[TransferQueueIndex].Destroy();
 			}
-		}
 
-		void Destroy()
-		{
 			for (FMemAlloc* Alloc : MemAllocs)
 			{
 				vkFreeMemory(Device, Alloc->Memory, nullptr);
@@ -2379,6 +2390,90 @@ struct FDescriptorCache
 			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
 			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
 		}
+	}
+};
+
+struct FStagingBufferManager
+{
+	struct FEntry
+	{
+		FBufferWithMem* Buffer;
+		SVulkan::FCmdBuffer* CmdBuffer;
+		uint64 Fence;
+	};
+
+	std::list<FBufferWithMem*> FreeEntries;
+	std::vector<FEntry> UsedEntries;
+
+	SVulkan::SDevice* Device = nullptr;
+
+	void Init(SVulkan::SDevice* InDevice)
+	{
+		Device = InDevice;
+	}
+
+	void Destroy()
+	{
+		for (int32 Index = (int32)UsedEntries.size() - 1; Index >= 0; --Index)
+		{
+			FEntry& Entry = UsedEntries[Index];
+			if (Entry.CmdBuffer->Fence.Counter > Entry.Fence)
+			{
+				Entry.Buffer->Destroy();
+				delete Entry.Buffer;
+
+				UsedEntries[Index] = UsedEntries[UsedEntries.size() - 1];
+				UsedEntries.resize(UsedEntries.size() - 1);
+			}
+		}
+
+		check(UsedEntries.empty());
+
+		for (auto* Buffer : FreeEntries)
+		{
+			Buffer->Destroy();
+			delete Buffer;
+		}
+		FreeEntries.clear();
+	}
+
+	void Refresh()
+	{
+		for (int32 Index = (int32)UsedEntries.size() - 1; Index >= 0; --Index)
+		{
+			FEntry& Entry = UsedEntries[Index];
+			if (Entry.CmdBuffer->Fence.Counter > Entry.Fence)
+			{
+				FreeEntries.push_back(Entry.Buffer);
+				UsedEntries[Index] = UsedEntries[UsedEntries.size() - 1];
+				UsedEntries.resize(UsedEntries.size() - 1);
+			}
+		}
+	}
+
+	FBufferWithMem* AcquireBuffer(SVulkan::FCmdBuffer* CurrentCmdBuffer, uint32 Size)
+	{
+		for (auto* Buffer : FreeEntries)
+		{
+			if (Buffer->Size == Size)
+			{
+				FEntry Entry = { Buffer, CurrentCmdBuffer, CurrentCmdBuffer->Fence.Counter };
+				UsedEntries.push_back(Entry);
+				FreeEntries.remove(Buffer);
+				return Buffer;
+			}
+		}
+
+		FBufferWithMem* Buffer = new FBufferWithMem;
+		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, Size);
+		FEntry Entry = { Buffer, CurrentCmdBuffer, CurrentCmdBuffer->Fence.Counter };
+		UsedEntries.push_back(Entry);
+		return Buffer;
+	}
+
+	void ReleaseBuffer(FBufferWithMem*& Buffer)
+	{
+		Buffer = nullptr;
 	}
 };
 
