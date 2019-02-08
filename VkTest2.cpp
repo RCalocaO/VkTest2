@@ -507,6 +507,8 @@ struct FApp
 	};
 	std::vector<FVertexBindings> VertexDecls;
 	bool bUseColorStream = false;
+	bool bHasNormals = false;
+	bool bHasTexCoords = false;
 
 	int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim)
 	{
@@ -542,10 +544,57 @@ struct FApp
 		}
 
 		bUseColorStream = (GLTFPrim.attributes.find("COLOR_0") != GLTFPrim.attributes.end());
+		bHasNormals = (GLTFPrim.attributes.find("NORMAL") != GLTFPrim.attributes.end());
+		bHasTexCoords = (GLTFPrim.attributes.find("TEXCOORD_0") != GLTFPrim.attributes.end());
 
 		VertexDecls.push_back(VertexDecl);
 
 		return 0;
+	}
+
+	void AddDefaultVertexInputs(SVulkan::SDevice& Device)
+	{
+/*
+		auto AddDefaultStream = [&](const char* Name, VkFormat Format, uint32 Stride)
+		{
+			VkVertexInputAttributeDescription AttrDesc;
+			ZeroMem(AttrDesc);
+			AttrDesc.binding = BindingIndex;
+			AttrDesc.format = Format;
+			AttrDesc.location = OutPrim.VertexBuffers.size();
+			AttrDesc.offset = 0;
+			VertexDecl.AttrDescs.push_back(AttrDesc);
+
+			VkVertexInputBindingDescription BindingDesc;
+			ZeroMem(BindingDesc);
+			BindingDesc.binding = BindingIndex;
+			BindingDesc.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+			BindingDesc.stride = Stride;
+			VertexDecl.BindingDescs.push_back(BindingDesc);
+
+			VertexDecl.Names.push_back(Name);
+
+			OutPrim.VertexOffsets.push_back(0);
+			OutPrim.VertexBuffers.push_back(Scene.Buffers.size());
+			FBufferWithMem DefaultBuffer;
+			DefaultBuffer.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Stride);
+			Scene.Buffers.push_back(DefaultBuffer);
+
+			++BindingIndex;
+		};
+
+		if (!bUseColorStream)
+		{
+			AddDefaultStream("COLOR_0", VK_FORMAT_R8G8B8A8_UNORM, 4);
+		}
+		if (!bHasNormals)
+		{
+			AddDefaultStream("NORMAL", VK_FORMAT_R32G32B32_SFLOAT, 3 * 4);
+		}
+		if (!bHasTexCoords)
+		{
+			AddDefaultStream("TEXCOORD_0", VK_FORMAT_R32G32_SFLOAT, 2 * 4);
+		}*/
 	}
 
 	static inline VkIndexType GetIndexType(int GLTFComponentType)
@@ -657,6 +706,8 @@ struct FApp
 				Buffer.Unlock();
 				Scene.Buffers.push_back(Buffer);
 			}
+
+			AddDefaultVertexInputs(Device);
 
 			for (tinygltf::Image& GLTFImage : Model.images)
 			{
@@ -1140,7 +1191,7 @@ static GLFWwindow* Init(FApp& App)
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
 	ImGuiIO& IO = ImGui::GetIO();
-//	IO.ImeWindowHandle = ::Gethand;
+	//IO.ImeWindowHandle = Window;
 
 	return Window;
 }

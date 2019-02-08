@@ -15,6 +15,7 @@ struct FVSIn
 	float3 Position : POSITION;
 	float4 Color : COLOR;
 	float2 UVs : TEXCOORD0;
+	float3 Normal : NORMAL;
 };
 
 struct FVSOut
