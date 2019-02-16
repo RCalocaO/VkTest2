@@ -66,6 +66,9 @@
     <ClInclude Include="..\tinygltf\tiny_gltf.h">
       <Filter>External\tinygltf</Filter>
     </ClInclude>
+    <ClInclude Include="VkTest2.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -91,6 +94,9 @@
     </ClCompile>
     <ClCompile Include="..\imgui\imgui_widgets.cpp">
       <Filter>External\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="App.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

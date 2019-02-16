@@ -12,13 +12,16 @@
 #include "imgui.h"
 
 
+#if USE_CGLTF
+#include "../cgltf/cgltf.h"
+#endif
+
+#if USE_TINY_GLTF
 #pragma warning(push)
 #pragma warning(disable:4267)
-#define TINYGLTF_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../tinygltf/tiny_gltf.h"
 #pragma warning(pop)
+#endif
 
 #include "../RCUtils/RCUtilsMath.h"
 
@@ -476,6 +479,7 @@ struct FApp
 	};
 	FScene Scene;
 
+#if USE_TINY_GLTF
 	static VkFormat GetFormat(int GLTFComponentType, int GLTFType)
 	{
 		if (GLTFComponentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
@@ -498,6 +502,7 @@ struct FApp
 		check(0);
 		return VK_FORMAT_UNDEFINED;
 	}
+#endif
 
 	struct FVertexBindings
 	{
@@ -510,6 +515,7 @@ struct FApp
 	bool bHasNormals = false;
 	bool bHasTexCoords = false;
 
+#if USE_TINY_GLTF
 	int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim)
 	{
 		FVertexBindings VertexDecl;
@@ -660,10 +666,12 @@ struct FApp
 
 		return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 	}
+#endif
 
 	std::string LoadedGLTF;
 	void TryLoadGLTF(SVulkan::SDevice& Device, const char* Filename)
 	{
+#if USE_TINY_GLTF
 		tinygltf::TinyGLTF Loader;
 		tinygltf::Model Model;
 		std::string Error;
@@ -757,6 +765,7 @@ struct FApp
 
 			LoadedGLTF = Filename;
 		}
+#endif
 	}
 
 	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
