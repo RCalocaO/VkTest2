@@ -571,9 +571,7 @@ struct FApp
 			cgltf_accessor& Accessor = *Attribute.data;
 			cgltf_buffer_view& BufferView = *Accessor.buffer_view;
 			OutPrim.VertexOffsets.push_back(BufferView.offset + Accessor.offset);
-/*
-			OutPrim.VertexBuffers.push_back(BufferView.buffer);
-*/
+			OutPrim.VertexBuffers.push_back(FindBuffer(Data, BufferView.buffer));
 
 			VkVertexInputAttributeDescription AttrDesc;
 			ZeroMem(AttrDesc);
@@ -689,6 +687,26 @@ struct FApp
 		check(0);
 		return VK_FORMAT_UNDEFINED;
 	}
+
+	int32 FindBuffer(cgltf_data* Data, cgltf_buffer* Buffer)
+	{
+		for (cgltf_size BufferIndex = 0; BufferIndex < Data->buffers_count; ++BufferIndex)
+		{
+			cgltf_buffer& GLTFBuffer = Data->buffers[BufferIndex];
+			if (Buffer->size == GLTFBuffer.size)
+			{
+				if (memcmp(GLTFBuffer.data, Buffer->data, GLTFBuffer.size) == 0)
+				{
+					return (int32)BufferIndex;
+				}
+			}
+		}
+
+		check(0);
+		return -1;
+	};
+
+
 #endif
 
 	void AddDefaultVertexInputs(SVulkan::SDevice& Device)
@@ -815,6 +833,18 @@ struct FApp
 			Result = cgltf_load_buffers(&Options, Data, nullptr);
 			if (Result == cgltf_result_success)
 			{
+				for (cgltf_size BufferIndex = 0; BufferIndex < Data->buffers_count; ++BufferIndex)
+				{
+					cgltf_buffer& GLTFBuffer = Data->buffers[BufferIndex];
+					FBufferWithMem Buffer;
+					uint32 Size = (uint32)GLTFBuffer.size;
+					Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, Size);
+					float* Data = (float*)Buffer.Lock();
+					memcpy(Data, GLTFBuffer.data, Size);
+					Buffer.Unlock();
+					Scene.Buffers.push_back(Buffer);
+				}
+
 				for (cgltf_size MeshIndex = 0; MeshIndex < Data->meshes_count; ++MeshIndex)
 				{
 					cgltf_mesh& GLTFMesh = Data->meshes[MeshIndex];
@@ -831,24 +861,12 @@ struct FApp
 						Prim.PrimType = GetPrimType(GLTFPrim.type);
 						Prim.IndexOffset = Indices.offset + IndicesBufferView.offset;
 						Prim.NumIndices = (uint32)IndicesBufferView.size / GetSizeInBytes(Indices.component_type);
-						//Prim.IndexBuffer = IndicesBufferView.buffer;
+						Prim.IndexBuffer = FindBuffer(Data, IndicesBufferView.buffer);
 						Prim.IndexType = GetIndexType(Indices.component_type);
 						Mesh.Prims.push_back(Prim);
 					}
 
 					Scene.Meshes.push_back(Mesh);
-				}
-
-				for (cgltf_size BufferIndex = 0; BufferIndex < Data->buffers_count; ++BufferIndex)
-				{
-					cgltf_buffer& GLTFBuffer = Data->buffers[BufferIndex];
-					FBufferWithMem Buffer;
-					uint32 Size = (uint32)GLTFBuffer.size;
-					Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, Size);
-					float* Data = (float*)Buffer.Lock();
-					memcpy(Data, GLTFBuffer.data, Size);
-					Buffer.Unlock();
-					Scene.Buffers.push_back(Buffer);
 				}
 
 				AddDefaultVertexInputs(Device);
