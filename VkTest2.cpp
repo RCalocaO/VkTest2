@@ -115,7 +115,35 @@ struct FApp
 			TestCSUB.Unlock();
 		}
 
-		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, 4, 4, VK_FORMAT_R8G8B8A8_UNORM);
+		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 4, 4, VK_FORMAT_R8G8B8A8_UNORM);
+	}
+
+	void SetupFirstTime(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
+	{
+		VkBufferCopy Region;
+		ZeroMem(Region);
+		Region.size = ClipVB.Size;
+		vkCmdCopyBuffer(CmdBuffer->CmdBuffer, StagingClipVB.Buffer.Buffer, ClipVB.Buffer.Buffer, 1, &Region);
+
+		{
+			FBufferWithMem* Buffer = GStagingBufferMgr.AcquireBuffer(CmdBuffer, 4);
+			uint8* Mem = (uint8*)Buffer->Lock();
+			*Mem += 0xff;
+			*Mem += 0xff;
+			*Mem += 0xff;
+			*Mem += 0xff;
+			Buffer->Unlock();
+			VkBufferImageCopy Region;
+			ZeroMem(Region);
+			Region.imageExtent.width = 1;
+			Region.imageExtent.height = 1;
+			Region.imageExtent.depth = 1;
+			Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			Region.imageSubresource.layerCount = 1;
+			vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, Buffer->Buffer.Buffer, WhiteTexture.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+		}
+
+		SetupImGuiAndResources(Device);
 	}
 
 	void Destroy()
@@ -1114,13 +1142,8 @@ static double Render(FApp& App)
 	static bool bFirst = true;
 	if (bFirst)
 	{
-		VkBufferCopy Region;
-		ZeroMem(Region);
-		Region.size = App.ClipVB.Size;
-		vkCmdCopyBuffer(CmdBuffer->CmdBuffer, App.StagingClipVB.Buffer.Buffer, App.ClipVB.Buffer.Buffer, 1, &Region);
+		App.SetupFirstTime(Device, CmdBuffer);
 		bFirst = false;
-
-		App.SetupImGuiAndResources(Device);
 	}
 
 	App.ImGuiNewFrame();
