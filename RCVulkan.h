@@ -669,6 +669,64 @@ struct SVulkan
 
 			vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &MemProperties);
 
+			{
+				auto GetHeapFlagsString = [](VkMemoryHeapFlags Flags)
+				{
+					std::string s;
+					if (Flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+					{
+						s += " Local";
+					}
+					if (Flags & VK_MEMORY_HEAP_MULTI_INSTANCE_BIT)
+					{
+						s += " Instance";
+					}
+
+					return s;
+				};
+				std::stringstream ss;
+				ss << "*** " << MemProperties.memoryHeapCount << " Mem Heaps" << std::endl;
+				for (uint32 Index = 0; Index < MemProperties.memoryHeapCount; ++Index)
+				{
+					ss << "\t" << Index << ":" << GetHeapFlagsString(MemProperties.memoryHeaps[Index].flags) <<"(" << MemProperties.memoryHeaps[Index].flags << ") Size " << MemProperties.memoryHeaps[Index].size << std::endl;
+				}
+				auto GetTypeFlagsString = [](VkMemoryPropertyFlags Flags)
+				{
+					std::string s;
+					if (Flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+					{
+						s += " Local";
+					}
+					if (Flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+					{
+						s += " HostVis";
+					}
+					if (Flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+					{
+						s += " HostCoherent";
+					}
+					if (Flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)
+					{
+						s += " HostCached";
+					}
+					if (Flags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT)
+					{
+						s += " Lazy";
+					}
+					if (Flags & VK_MEMORY_PROPERTY_PROTECTED_BIT)
+					{
+						s += " Protected";
+					}
+
+					return s;
+				};
+				ss << MemProperties.memoryTypeCount << " Mem Types" << std::endl;
+				for (uint32 Index = 0; Index < MemProperties.memoryTypeCount; ++Index)
+				{
+					ss << "\t" << Index << ":" << GetTypeFlagsString(MemProperties.memoryTypes[Index].propertyFlags) << "(" << MemProperties.memoryTypes[Index].propertyFlags << ") Heap " << MemProperties.memoryTypes[Index].heapIndex << std::endl;
+				}
+				::OutputDebugStringA(ss.str().c_str());
+			}
 
 			VkQueryPoolCreateInfo PoolCreateInfo;
 			ZeroVulkanMem(PoolCreateInfo, VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
@@ -1186,14 +1244,16 @@ struct SVulkan
 				continue;
 			}
 
-			std::stringstream ss;
-			ss << "*** Device " << Props.deviceName << " ID " << Props.deviceID << " Driver " << Props.driverVersion << "\n";
-			ss << "\tGfx queue " << GfxQueueIndex << "\n";
-			ss << "\tCompute queue " << ComputeQueueIndex << "\n";
-			ss << "\tTransfer queue " << TransferQueueIndex << "\n";
-			ss << "\tPresent queue " << PresentQueueIndex << "\n";
-			ss.flush();
-			::OutputDebugStringA(ss.str().c_str());
+			{
+				std::stringstream ss;
+				ss << "*** Device " << Props.deviceName << " ID " << Props.deviceID << " Driver " << Props.driverVersion << "\n";
+				ss << "\tGfx queue " << GfxQueueIndex << "\n";
+				ss << "\tCompute queue " << ComputeQueueIndex << "\n";
+				ss << "\tTransfer queue " << TransferQueueIndex << "\n";
+				ss << "\tPresent queue " << PresentQueueIndex << "\n";
+				ss.flush();
+				::OutputDebugStringA(ss.str().c_str());
+			}
 
 			if (Props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
 			{
