@@ -35,6 +35,11 @@ extern "C"
 
 #include "../volk/volk.h"
 
+#if USE_VMA
+#define VMA_STATIC_VULKAN_FUNCTIONS 0
+#include "../VulkanMemoryAllocator/src/vk_mem_alloc.h"
+#endif
+
 #include <GLFW/glfw3native.h>
 
 
@@ -511,6 +516,9 @@ struct SVulkan
 
 		bool bPushDescriptor = false;
 
+#if USE_VMA
+		VmaAllocator VMAAllocator = VK_NULL_HANDLE;
+#endif
 		inline uint32 FindMemoryTypeIndex(VkMemoryPropertyFlags MemProps, uint32 Type) const
 		{
 			for (uint32 Index = 0; Index < MemProperties.memoryTypeCount; ++Index)
@@ -727,6 +735,42 @@ struct SVulkan
 				}
 				::OutputDebugStringA(ss.str().c_str());
 			}
+
+#if USE_VMA
+			{
+				VmaAllocatorCreateInfo VMACreateInfo = {};
+				VMACreateInfo.physicalDevice = PhysicalDevice;
+				VMACreateInfo.device = Device;
+
+				VmaVulkanFunctions Funcs = {};
+
+				Funcs.vkGetPhysicalDeviceProperties = vkGetPhysicalDeviceProperties;
+				Funcs.vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties;
+				Funcs.vkAllocateMemory = vkAllocateMemory;
+				Funcs.vkFreeMemory = vkFreeMemory;
+				Funcs.vkMapMemory = vkMapMemory;
+				Funcs.vkUnmapMemory = vkUnmapMemory;
+				Funcs.vkFlushMappedMemoryRanges = vkFlushMappedMemoryRanges;
+				Funcs.vkInvalidateMappedMemoryRanges = vkInvalidateMappedMemoryRanges;
+				Funcs.vkBindBufferMemory = vkBindBufferMemory;
+				Funcs.vkBindImageMemory = vkBindImageMemory;
+				Funcs.vkGetBufferMemoryRequirements = vkGetBufferMemoryRequirements;
+				Funcs.vkGetImageMemoryRequirements = vkGetImageMemoryRequirements;
+				Funcs.vkCreateBuffer = vkCreateBuffer;
+				Funcs.vkDestroyBuffer = vkDestroyBuffer;
+				Funcs.vkCreateImage = vkCreateImage;
+				Funcs.vkDestroyImage = vkDestroyImage;
+				Funcs.vkCmdCopyBuffer = vkCmdCopyBuffer;
+#if VMA_DEDICATED_ALLOCATION
+				Funcs.vkGetBufferMemoryRequirements2KHR = vkGetBufferMemoryRequirements2KHR;
+				Funcs.vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2KHR;
+#endif
+
+				VMACreateInfo.pVulkanFunctions = &Funcs;
+
+				vmaCreateAllocator(&VMACreateInfo, &VMAAllocator);
+			}
+#endif
 
 			VkQueryPoolCreateInfo PoolCreateInfo;
 			ZeroVulkanMem(PoolCreateInfo, VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);

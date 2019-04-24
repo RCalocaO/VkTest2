@@ -172,6 +172,7 @@
     <ClInclude Include="..\SPIRV-Reflect\spirv_reflect.h" />
     <ClInclude Include="..\tinygltf\tiny_gltf.h" />
     <ClInclude Include="..\volk\volk.h" />
+    <ClInclude Include="..\VulkanMemoryAllocator\src\vk_mem_alloc.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="RCVulkan.h" />
     <ClInclude Include="VkTest2.h" />

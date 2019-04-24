@@ -31,6 +31,9 @@
     <Filter Include="External\tinygltf">
       <UniqueIdentifier>{c31543e9-7164-4679-920e-4d089743d5ab}</UniqueIdentifier>
     </Filter>
+    <Filter Include="External\Vulkan Memory Allocator">
+      <UniqueIdentifier>{88586ad8-2ad5-4d22-bbe8-160de07e6b74}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -68,6 +71,9 @@
     </ClInclude>
     <ClInclude Include="VkTest2.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\VulkanMemoryAllocator\src\vk_mem_alloc.h">
+      <Filter>External\Vulkan Memory Allocator</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
