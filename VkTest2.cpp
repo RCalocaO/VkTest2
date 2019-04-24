@@ -43,6 +43,7 @@ static FStagingBufferManager GStagingBufferMgr;
 struct FApp
 {
 	uint32 FrameIndex = 0;
+	//SVulkan::FGfxPSO DataClipVSColorTessPSO;
 	SVulkan::FGfxPSO NoVBClipVSRedPSO;
 	SVulkan::FGfxPSO DataClipVSRedPSO;
 	SVulkan::FGfxPSO DataClipVSColorPSO;
@@ -1168,6 +1169,32 @@ static double Render(FApp& App)
 	{
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSRedPSO.Pipeline);
 	}
+	/*
+	else if (1)
+	{
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSColorTessPSO.Pipeline);
+
+		VkWriteDescriptorSet DescriptorWrites[2];
+		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+		DescriptorWrites[0].descriptorCount = 1;
+		DescriptorWrites[0].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.VS[0]->bindings[0]->descriptor_type;
+		DescriptorWrites[0].pTexelBufferView = &App.ClipVB.View;
+		//DescriptorWrites.pBufferInfo = &info.uniform_data.buffer_info;  // populated by init_uniform_buffer()
+		DescriptorWrites[0].dstBinding = App.DataClipVSRedPSO.VS[0]->bindings[0]->binding;
+
+		ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+		DescriptorWrites[1].descriptorCount = 1;
+		DescriptorWrites[1].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.PS[0]->bindings[0]->descriptor_type;
+		VkDescriptorBufferInfo BufferInfo;
+		ZeroMem(BufferInfo);
+		BufferInfo.buffer = App.ColorUB.Buffer.Buffer;
+		BufferInfo.range =  App.ColorUB.Size;
+		DescriptorWrites[1].pBufferInfo = &BufferInfo;
+		DescriptorWrites[1].dstBinding = App.DataClipVSColorPSO.PS[0]->bindings[0]->binding;
+
+		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, App.DataClipVSColorPSO);
+	}
+	*/
 	else if (1)
 	{
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSColorPSO.Pipeline);
@@ -1348,6 +1375,8 @@ static void SetupShaders(FApp& App)
 	FShaderInfo* VBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "VBClipVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* DataClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipVS", FShaderInfo::EStage::Vertex);
+	//FShaderInfo* DataClipHS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipHS", FShaderInfo::EStage::Hull);
+	//FShaderInfo* DataClipDS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipDS", FShaderInfo::EStage::Domain);
 	FShaderInfo* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* ColorPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ColorPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* UIVS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainVS", FShaderInfo::EStage::Vertex);
@@ -1364,6 +1393,7 @@ static void SetupShaders(FApp& App)
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();
 
 	App.DataClipVSColorPSO = GPSOCache.CreateGfxPSO(DataClipVS, ColorPS, RenderPass);
+//	App.DataClipVSColorTessPSO = GPSOCache.CreateGfxPSO(DataClipVS, DataClipHS, DataClipDS, ColorPS, RenderPass);
 	App.NoVBClipVSRedPSO = GPSOCache.CreateGfxPSO(NoVBClipVS, RedPS, RenderPass);
 	App.DataClipVSRedPSO = GPSOCache.CreateGfxPSO(DataClipVS, RedPS, RenderPass);
 

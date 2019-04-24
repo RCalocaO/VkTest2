@@ -42,6 +42,27 @@ float4 MainBufferClipVS(in uint VertexID : SV_VertexID) : SV_Position
 	return Pos[VertexID % 3];
 }
 
+/*
+struct FOutHS
+{
+	float Edges[3] : SV_TessFactor;
+	float Inside : SV_InsideTessFactor;
+};
+
+
+
+[domain("tri")]
+[partitioning("fractional_odd")]
+[outputtopology("triangle_cw")]
+[outputcontrolpoints(3)]
+[patchconstantfunc("PatchHS")]
+FOutHS MainBufferClipHS(InputPatch<FInHS, 3> InputPatch, uint ID : SV_OutputControlPointID)
+{
+	FOutHS OutHS = (FOutHS)0;
+	return OutHS;
+}
+*/
+
 float4 RedPS() : SV_Target0
 {
 	return float4(1, 0, 0, 1);

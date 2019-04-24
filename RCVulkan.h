@@ -1692,6 +1692,8 @@ struct FShaderInfo
 		Unknown = -1,
 		Vertex,
 		Pixel,
+		Hull,
+		Domain,
 
 		Compute = 16,
 	};
@@ -1779,6 +1781,8 @@ struct FShaderLibrary
 		case FShaderInfo::EStage::Compute:	return "comp";
 		case FShaderInfo::EStage::Vertex:	return "vert";
 		case FShaderInfo::EStage::Pixel:	return "frag";
+		case FShaderInfo::EStage::Hull:		return "tesc";
+		case FShaderInfo::EStage::Domain:	return "tese";
 		default:
 			break;
 		}
@@ -1793,6 +1797,8 @@ struct FShaderLibrary
 		case FShaderInfo::EStage::Compute:	return VK_SHADER_STAGE_COMPUTE_BIT;
 		case FShaderInfo::EStage::Vertex:	return VK_SHADER_STAGE_VERTEX_BIT;
 		case FShaderInfo::EStage::Pixel:	return VK_SHADER_STAGE_FRAGMENT_BIT;
+		case FShaderInfo::EStage::Hull:		return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+		case FShaderInfo::EStage::Domain:	return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
 		default:
 			break;
 		}
@@ -2025,9 +2031,14 @@ struct FPSOCache
 	}
 
 	template <typename TFunction>
-	SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
+	SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
 	{
 		check(VS->Shader && VS->Shader->ShaderModule);
+		if (HS || DS)
+		{
+			check(HS && DS);
+			check(HS->Shader && DS->Shader);
+		}
 		if (PS)
 		{
 			check(PS->Shader && PS->Shader->ShaderModule);
@@ -2047,21 +2058,37 @@ struct FPSOCache
 		ZeroVulkanMem(VertexInputInfo, VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
 		GfxPipelineInfo.pVertexInputState = &VertexInputInfo;
 
-		VkPipelineShaderStageCreateInfo StageInfos[2];
+		VkPipelineShaderStageCreateInfo StageInfos[5];
 		ZeroVulkanMem(StageInfos[0], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
 		StageInfos[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
 		StageInfos[0].module = VS->Shader->ShaderModule;
 		StageInfos[0].pName = VS->EntryPoint.c_str();
 		GfxPipelineInfo.stageCount = 1;
 
-		if (PS)
+		if (HS && DS)
 		{
-			ZeroVulkanMem(StageInfos[1], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
-			StageInfos[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-			StageInfos[1].module = PS->Shader->ShaderModule;
-			StageInfos[1].pName = PS->EntryPoint.c_str();
+			ZeroVulkanMem(StageInfos[GfxPipelineInfo.stageCount], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
+			StageInfos[GfxPipelineInfo.stageCount].stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+			StageInfos[GfxPipelineInfo.stageCount].module = HS->Shader->ShaderModule;
+			StageInfos[GfxPipelineInfo.stageCount].pName = HS->EntryPoint.c_str();
+			++GfxPipelineInfo.stageCount;
+
+			ZeroVulkanMem(StageInfos[GfxPipelineInfo.stageCount], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
+			StageInfos[GfxPipelineInfo.stageCount].stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+			StageInfos[GfxPipelineInfo.stageCount].module = DS->Shader->ShaderModule;
+			StageInfos[GfxPipelineInfo.stageCount].pName = DS->EntryPoint.c_str();
 			++GfxPipelineInfo.stageCount;
 		}
+
+		if (PS)
+		{
+			ZeroVulkanMem(StageInfos[GfxPipelineInfo.stageCount], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
+			StageInfos[GfxPipelineInfo.stageCount].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+			StageInfos[GfxPipelineInfo.stageCount].module = PS->Shader->ShaderModule;
+			StageInfos[GfxPipelineInfo.stageCount].pName = PS->EntryPoint.c_str();
+			++GfxPipelineInfo.stageCount;
+		}
+
 		GfxPipelineInfo.pStages = StageInfos;
 
 		SVulkan::FGfxPSO PSO;
@@ -2144,12 +2171,26 @@ struct FPSOCache
 		return PSO;
 	}
 
+	template <typename TFunction>
+	inline SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
+	{
+		return CreateGfxPSO(VS, nullptr, nullptr, PS, RenderPass, Callback);
+	}
+
 	inline SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
 	{
-		return CreateGfxPSO(VS, PS, RenderPass, 
+		return CreateGfxPSO(VS, nullptr, nullptr, PS, RenderPass, 
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 			{
 			});
+	}
+
+	inline SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
+	{
+		return CreateGfxPSO(VS, HS, DS, PS, RenderPass,
+			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+		{
+		});
 	}
 
 	SVulkan::FComputePSO CreateComputePSO(FShaderInfo* CS)
