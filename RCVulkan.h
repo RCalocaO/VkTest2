@@ -2549,20 +2549,12 @@ struct FGPUTiming
 	void EndTimestamp(SVulkan::FCmdBuffer* CmdBuffer)
 	{
 		vkCmdWriteTimestamp(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QueryPool, 1);
-#if USE_VMA
 		vkCmdCopyQueryPoolResults(CmdBuffer->CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-#else
-		vkCmdCopyQueryPoolResults(CmdBuffer->CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-#endif
 		vkCmdResetQueryPool(CmdBuffer->CmdBuffer, QueryPool, 0, 2);
 	}
 
 	double ReadTimestamp()
 	{
-/*
-		uint64 Values[2] ={0, 0};
-		VERIFY_VKRESULT(vkGetQueryPoolResults(Device, QueryPool, 0, 2, 2 * sizeof(uint64), &Values, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
-*/
 		uint64* Values;
 #if USE_VMA
 		vmaMapMemory(QueryResultsBuffer.Allocator, QueryResultsBuffer.Mem, (void**)&Values);
@@ -2570,8 +2562,9 @@ struct FGPUTiming
 		vmaUnmapMemory(QueryResultsBuffer.Allocator, QueryResultsBuffer.Mem);
 		return DeltaMs;
 #else
-		VERIFY_VKRESULT(vkMapMemory(Device->Device, QueryResultsMem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
-		vkUnmapMemory(Device->Device, QueryResultsMem->Memory);
+		VERIFY_VKRESULT(vkMapMemory(Device->Device, QueryResultsBuffer.Mem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
+		double DeltaMs = (Values[1] - Values[0]) * (Device->Props.limits.timestampPeriod * 1e-6);
+		vkUnmapMemory(Device->Device, QueryResultsBuffer.Mem->Memory);
 		return DeltaMs;
 #endif
 	}
