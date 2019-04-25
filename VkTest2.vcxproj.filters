@@ -75,6 +75,9 @@
     <ClInclude Include="..\VulkanMemoryAllocator\src\vk_mem_alloc.h">
       <Filter>External\Vulkan Memory Allocator</Filter>
     </ClInclude>
+    <ClInclude Include="RCVulkanBase.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -102,6 +105,9 @@
       <Filter>External\imgui</Filter>
     </ClCompile>
     <ClCompile Include="App.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="RCVulkan.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

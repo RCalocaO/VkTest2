@@ -175,6 +175,7 @@
     <ClInclude Include="..\VulkanMemoryAllocator\src\vk_mem_alloc.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="RCVulkan.h" />
+    <ClInclude Include="RCVulkanBase.h" />
     <ClInclude Include="VkTest2.h" />
   </ItemGroup>
   <ItemGroup>
@@ -191,6 +192,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="RCVulkan.cpp" />
     <ClCompile Include="VkTest2.cpp" />
   </ItemGroup>
   <ItemGroup>
