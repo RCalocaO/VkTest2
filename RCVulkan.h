@@ -490,22 +490,15 @@ struct SVulkan
 		uint32 TransferQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		VkPhysicalDeviceMemoryProperties MemProperties;
-		VkQueryPool QueryPool = VK_NULL_HANDLE;
-		SVulkan::FBuffer QueryResultsBuffer;
+
 #if USE_VMA
-		VmaAllocation QueryResultsMem = {};
-		VmaAllocationInfo QueryResultsMemInfo = {};
-		std::vector<VmaAllocation> MemAllocs;
+		VmaAllocator VMAAllocator = VK_NULL_HANDLE;
 #else
-		SVulkan::FMemAlloc* QueryResultsMem = nullptr;
 		std::vector<FMemAlloc*> MemAllocs;
 #endif
 
 		bool bPushDescriptor = false;
 
-#if USE_VMA
-		VmaAllocator VMAAllocator = VK_NULL_HANDLE;
-#endif
 		inline uint32 FindMemoryTypeIndex(VkMemoryPropertyFlags MemProps, uint32 Type) const
 		{
 			for (uint32 Index = 0; Index < MemProperties.memoryTypeCount; ++Index)
@@ -760,37 +753,10 @@ struct SVulkan
 				vmaCreateAllocator(&VMACreateInfo, &VMAAllocator);
 			}
 #endif
-
-			VkQueryPoolCreateInfo PoolCreateInfo;
-			ZeroVulkanMem(PoolCreateInfo, VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
-			PoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-			PoolCreateInfo.queryCount = 2;
-			VERIFY_VKRESULT(vkCreateQueryPool(Device, &PoolCreateInfo, nullptr, &QueryPool));
-
-#if USE_VMA
-#else
-			QueryResultsBuffer.Create(Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 2 * sizeof(uint64));
-
-			{
-				VkMemoryRequirements MemReqs;
-				vkGetBufferMemoryRequirements(Device, QueryResultsBuffer.Buffer, &MemReqs);
-
-				QueryResultsMem = AllocMemory(MemReqs.size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, MemReqs.memoryTypeBits);
-				VERIFY_VKRESULT(vkBindBufferMemory(Device, QueryResultsBuffer.Buffer, QueryResultsMem->Memory, QueryResultsMem->Offset));
-			}
-#endif
 		}
 
 		void DestroyPre()
 		{
-#if USE_VMA
-			check(0);
-#else
-			QueryResultsBuffer.Destroy();
-#endif
-
-			vkDestroyQueryPool(Device, QueryPool, nullptr);
-
 			CmdPools[GfxQueueIndex].Destroy();
 			if (GfxQueueIndex != ComputeQueueIndex)
 			{
@@ -815,18 +781,14 @@ struct SVulkan
 			}
 
 #if USE_VMA
-			for (VmaAllocation Allocation : MemAllocs)
-			{
-				vmaFreeMemory(VMAAllocator, Allocation);
-			}
 #else
 			for (FMemAlloc* Alloc : MemAllocs)
 			{
 				vkFreeMemory(Device, Alloc->Memory, nullptr);
 				delete Alloc;
 			}
-#endif
 			MemAllocs.clear();
+#endif
 
 #if USE_VMA
 			vmaDestroyAllocator(VMAAllocator);
@@ -901,40 +863,6 @@ struct SVulkan
 			{
 				Fence.Wait(TimeOutInNanoseconds);
 			}
-		}
-
-		void BeginTimestamp(FCmdBuffer* CmdBuffer)
-		{
-			vkCmdWriteTimestamp(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, QueryPool, 0);
-		}
-
-		void EndTimestamp(FCmdBuffer* CmdBuffer)
-		{
-			vkCmdWriteTimestamp(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QueryPool, 1);
-#if USE_VMA
-	//		check(0);
-#else
-			vkCmdCopyQueryPoolResults(CmdBuffer->CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-#endif
-			vkCmdResetQueryPool(CmdBuffer->CmdBuffer, QueryPool, 0, 2);
-		}
-
-		double ReadTimestamp()
-		{
-/*
-			uint64 Values[2] ={0, 0};
-			VERIFY_VKRESULT(vkGetQueryPoolResults(Device, QueryPool, 0, 2, 2 * sizeof(uint64), &Values, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
-*/
-#if USE_VMA
-		//	check(0);
-			return 0;
-#else
-			uint64* Values;
-			VERIFY_VKRESULT(vkMapMemory(Device, QueryResultsMem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
-			double DeltaMs = (Values[1] - Values[0]) * (Props.limits.timestampPeriod * 1e-6);
-			vkUnmapMemory(Device, QueryResultsMem->Memory);
-			return DeltaMs;
-#endif
 		}
 	};
 
@@ -2577,6 +2505,88 @@ struct FStagingBufferManager
 	void ReleaseBuffer(FBufferWithMem*& Buffer)
 	{
 		Buffer = nullptr;
+	}
+};
+
+
+struct FGPUTiming
+{
+	VkQueryPool QueryPool = VK_NULL_HANDLE;
+	SVulkan::FBuffer QueryResultsBuffer;
+#if USE_VMA
+	VmaAllocation QueryResultsMem ={};
+	VmaAllocationInfo QueryResultsMemInfo ={};
+#else
+	SVulkan::FMemAlloc* QueryResultsMem = nullptr;
+#endif
+	SVulkan::SDevice* Device = nullptr;
+
+	void Init(SVulkan::SDevice* InDevice)
+	{
+		Device = InDevice;
+
+		VkQueryPoolCreateInfo PoolCreateInfo;
+		ZeroVulkanMem(PoolCreateInfo, VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
+		PoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		PoolCreateInfo.queryCount = 2;
+		VERIFY_VKRESULT(vkCreateQueryPool(Device->Device, &PoolCreateInfo, nullptr, &QueryPool));
+
+#if USE_VMA
+#else
+		QueryResultsBuffer.Create(Device->Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 2 * sizeof(uint64));
+
+		{
+			VkMemoryRequirements MemReqs;
+			vkGetBufferMemoryRequirements(Device->Device, QueryResultsBuffer.Buffer, &MemReqs);
+
+			QueryResultsMem = InDevice->AllocMemory(MemReqs.size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, MemReqs.memoryTypeBits);
+			VERIFY_VKRESULT(vkBindBufferMemory(Device->Device, QueryResultsBuffer.Buffer, QueryResultsMem->Memory, QueryResultsMem->Offset));
+		}
+#endif
+	}
+
+	void Destroy()
+	{
+#if USE_VMA
+		check(0);
+#else
+		QueryResultsBuffer.Destroy();
+#endif
+		vkDestroyQueryPool(Device->Device, QueryPool, nullptr);
+	}
+
+	void BeginTimestamp(SVulkan::FCmdBuffer* CmdBuffer)
+	{
+		vkCmdWriteTimestamp(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, QueryPool, 0);
+	}
+
+	void EndTimestamp(SVulkan::FCmdBuffer* CmdBuffer)
+	{
+		vkCmdWriteTimestamp(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QueryPool, 1);
+#if USE_VMA
+//		check(0);
+#else
+		vkCmdCopyQueryPoolResults(CmdBuffer->CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+#endif
+		vkCmdResetQueryPool(CmdBuffer->CmdBuffer, QueryPool, 0, 2);
+	}
+
+	double ReadTimestamp()
+	{
+/*
+			uint64 Values[2] ={0, 0};
+			VERIFY_VKRESULT(vkGetQueryPoolResults(Device, QueryPool, 0, 2, 2 * sizeof(uint64), &Values, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
+*/
+#if USE_VMA
+//	check(0);
+		return 0;
+#else
+		uint64* Values;
+		VERIFY_VKRESULT(vkMapMemory(Device->Device, QueryResultsMem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
+		double DeltaMs = (Values[1] - Values[0]) * (Device->Props.limits.timestampPeriod * 1e-6);
+		vkUnmapMemory(Device->Device, QueryResultsMem->Memory);
+		return DeltaMs;
+#endif
 	}
 };
 

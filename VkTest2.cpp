@@ -62,6 +62,7 @@ struct FApp
 	FImageWithMemAndView ImGuiFont;
 	VkSampler ImGuiFontSampler = VK_NULL_HANDLE;
 	FImageWithMemAndView WhiteTexture;
+	FGPUTiming GPUTiming;
 	enum
 	{
 		NUM_IMGUI_BUFFERS = 3,
@@ -139,6 +140,8 @@ struct FApp
 #else
 		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 4, 4, VK_FORMAT_R8G8B8A8_UNORM);
 #endif
+
+		GPUTiming.Init(&Device);
 	}
 
 	void SetupFirstTime(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
@@ -171,6 +174,8 @@ struct FApp
 
 	void Destroy()
 	{
+		GPUTiming.Destroy();
+
 		WhiteTexture.Destroy();
 
 		vkDestroySampler(ImGuiFont.Image.Device, ImGuiFontSampler, nullptr);
@@ -1171,7 +1176,7 @@ static double Render(FApp& App)
 	App.Update();
 
 	SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
-	Device.BeginTimestamp(CmdBuffer);
+	App.GPUTiming.BeginTimestamp(CmdBuffer);
 
 	ImGuiIO& IO = ImGui::GetIO();
 	IO.DisplaySize.x = GVulkan.Swapchain.GetViewport().width;
@@ -1319,7 +1324,7 @@ static double Render(FApp& App)
 		}
 	}
 
-	Device.EndTimestamp(CmdBuffer);
+	App.GPUTiming.EndTimestamp(CmdBuffer);
 
 	{
 		if (ImGui::Begin("Hello, world!"))
@@ -1357,7 +1362,7 @@ static double Render(FApp& App)
 	//Device.WaitForFence(CmdBuffer.Fence, CmdBuffer.LastSubmittedFence);
 	;vkDeviceWaitIdle(Device.Device);
 
-	double GpuTimeMS = Device.ReadTimestamp();
+	double GpuTimeMS = App.GPUTiming.ReadTimestamp();
 	return GpuTimeMS;
 }
 
