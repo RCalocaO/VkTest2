@@ -1,10 +1,7 @@
 
 #include "pch.h"
 #include <GLFW/glfw3.h>
-
-// Fix Windows warning
-#undef APIENTRY
-
+#include <GLFW/glfw3native.h>
 
 #include "RCVulkan.h"
 

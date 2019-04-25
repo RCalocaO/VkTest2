@@ -20,46 +20,12 @@ extern "C"
 #include "../SPIRV-Reflect/spirv_reflect.h"
 }
 
-/*
-
-#define VK_NO_PROTOTYPES
-#ifdef _WIN32
-#include <vulkan/vulkan_core.h>
-#include <vulkan/vulkan_win32.h>
-#endif
-
-#ifdef APIENTRY
-#undef APIENTRY
-#endif
-*/
-
 #include "RCVulkanBase.h"
 
 #if USE_VMA
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #include "../VulkanMemoryAllocator/src/vk_mem_alloc.h"
 #endif
-
-#include <GLFW/glfw3native.h>
-
-
-#define VERIFY_VKRESULT(x)	if ((x) != VK_SUCCESS) { ::OutputDebugStringA(#x); ::OutputDebugStringA("\n"); check(0);}
-
-template <typename T>
-inline void ZeroMem(T& Object)
-{
-	const auto Size = sizeof(T);
-	memset(&Object, 0, Size);
-}
-
-template <typename T>
-inline void ZeroVulkanMem(T& VulkanStruct, VkStructureType Type)
-{
-//	static_assert( (void*)&VulkanStruct == (void*)&VulkanStruct.sType, "Vulkan struct size mismatch");
-	VulkanStruct.sType = Type;
-	const auto Size = sizeof(VulkanStruct) - sizeof(VkStructureType);
-	memset((uint8*)&VulkanStruct.sType + sizeof(VkStructureType), 0, Size);
-}
 
 
 struct SVulkan
