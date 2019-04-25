@@ -74,14 +74,22 @@ struct SVulkan
 		VkBuffer Buffer = VK_NULL_HANDLE;
 		VkDevice Device = VK_NULL_HANDLE;
 
-		void Create(VkDevice InDevice, VkBufferUsageFlags UsageFlags, uint32 Size)
+		static VkBufferCreateInfo SetupCreateInfo(VkBufferUsageFlags UsageFlags, uint32 Size)
 		{
-			Device = InDevice;
-
 			VkBufferCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
 			Info.size = Size;
 			Info.usage = UsageFlags;
+			return Info;
+		}
+
+#if USE_VMA
+#else
+		void Create(VkDevice InDevice, VkBufferUsageFlags UsageFlags, uint32 Size)
+		{
+			Device = InDevice;
+
+			VkBufferCreateInfo Info = SetupCreateInfo(UsageFlags, Size);
 			VERIFY_VKRESULT(vkCreateBuffer(Device, &Info, nullptr, &Buffer));
 		}
 
@@ -89,6 +97,7 @@ struct SVulkan
 		{
 			vkDestroyBuffer(Device, Buffer, nullptr);
 		}
+#endif
 	};
 
 	struct FImage
@@ -96,10 +105,8 @@ struct SVulkan
 		VkImage Image = VK_NULL_HANDLE;
 		VkDevice Device = VK_NULL_HANDLE;
 
-		void Create(VkDevice InDevice, VkImageUsageFlags UsageFlags, VkFormat Format, uint32 Width, uint32 Height)
+		static VkImageCreateInfo SetupCreateInfo(VkImageUsageFlags UsageFlags, VkFormat Format, uint32 Width, uint32 Height)
 		{
-			Device = InDevice;
-
 			VkImageCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO);
 			Info.format = Format;
@@ -111,6 +118,16 @@ struct SVulkan
 			Info.usage = UsageFlags;
 			Info.samples = VK_SAMPLE_COUNT_1_BIT;
 			Info.arrayLayers = 1;
+			return Info;
+		}
+
+#if USE_VMA
+#else
+		void Create(VkDevice InDevice, VkImageUsageFlags UsageFlags, VkFormat Format, uint32 Width, uint32 Height)
+		{
+			Device = InDevice;
+
+			VkImageCreateInfo Info = SetupCreateInfo(UsageFlags, Format, Width, Height);
 			VERIFY_VKRESULT(vkCreateImage(Device, &Info, nullptr, &Image));
 		}
 
@@ -118,6 +135,7 @@ struct SVulkan
 		{
 			vkDestroyImage(Device, Image, nullptr);
 		}
+#endif
 	};
 
 	struct FShader
@@ -514,6 +532,7 @@ struct SVulkan
 		SVulkan::FBuffer QueryResultsBuffer;
 #if USE_VMA
 		VmaAllocation QueryResultsMem = {};
+		VmaAllocationInfo QueryResultsMemInfo = {};
 		std::vector<VmaAllocation> MemAllocs;
 #else
 		SVulkan::FMemAlloc* QueryResultsMem = nullptr;
@@ -786,24 +805,27 @@ struct SVulkan
 			PoolCreateInfo.queryCount = 2;
 			VERIFY_VKRESULT(vkCreateQueryPool(Device, &PoolCreateInfo, nullptr, &QueryPool));
 
+#if USE_VMA
+#else
 			QueryResultsBuffer.Create(Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 2 * sizeof(uint64));
 
 			{
 				VkMemoryRequirements MemReqs;
 				vkGetBufferMemoryRequirements(Device, QueryResultsBuffer.Buffer, &MemReqs);
 
-#if USE_VMA
-				check(0);
-#else
 				QueryResultsMem = AllocMemory(MemReqs.size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, MemReqs.memoryTypeBits);
 				VERIFY_VKRESULT(vkBindBufferMemory(Device, QueryResultsBuffer.Buffer, QueryResultsMem->Memory, QueryResultsMem->Offset));
-#endif
 			}
+#endif
 		}
 
 		void DestroyPre()
 		{
+#if USE_VMA
+			check(0);
+#else
 			QueryResultsBuffer.Destroy();
+#endif
 
 			vkDestroyQueryPool(Device, QueryPool, nullptr);
 
@@ -927,7 +949,11 @@ struct SVulkan
 		void EndTimestamp(FCmdBuffer* CmdBuffer)
 		{
 			vkCmdWriteTimestamp(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QueryPool, 1);
+#if USE_VMA
+			check(0);
+#else
 			vkCmdCopyQueryPoolResults(CmdBuffer->CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+#endif
 			vkCmdResetQueryPool(CmdBuffer->CmdBuffer, QueryPool, 0, 2);
 		}
 
@@ -1682,7 +1708,6 @@ struct FBufferWithMem
 
 		VmaAllocationCreateInfo AllocCreateInfo = {};
 		AllocCreateInfo.usage = MemUsage;
-		//Buffer.Create(InDevice.Device, UsageFlags, Size);
 
 		VERIFY_VKRESULT(vmaCreateBuffer(Allocator, &Info, &AllocCreateInfo, &Buffer.Buffer, &Mem, &AllocInfo));
 	}
@@ -1702,8 +1727,14 @@ struct FBufferWithMem
 
 	void Destroy()
 	{
+#if USE_VMA
+		vmaDestroyBuffer(Allocator, Buffer.Buffer, Mem);
+		Mem = {};
+		this->AllocInfo = {};
+#else
 		Buffer.Destroy();
 		Mem = nullptr;
+#endif
 	}
 
 	void* Lock()
@@ -1732,23 +1763,23 @@ struct FBufferWithMem
 struct FBufferWithMemAndView : public FBufferWithMem
 {
 	VkBufferView View = VK_NULL_HANDLE;
+	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, 
 #if USE_VMA
-	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VmaMemoryUsage MemUsage, uint32 InSize, VkFormat Format)
-	{
-		FBufferWithMem::Create(InDevice, UsageFlags, MemUsage, InSize);
-		View = InDevice.CreateBufferView(Buffer, Format, InSize);
-	}
+		VmaMemoryUsage MemPropFlags, 
 #else
-	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 InSize, VkFormat Format)
+		VkMemoryPropertyFlags MemPropFlags,
+#endif
+		uint32 InSize, VkFormat Format)
 	{
 		FBufferWithMem::Create(InDevice, UsageFlags, MemPropFlags, InSize);
 		View = InDevice.CreateBufferView(Buffer, Format, InSize);
 	}
-#endif
+
 	void Destroy()
 	{
 		vkDestroyBufferView(Buffer.Device, View, nullptr);
 		View = VK_NULL_HANDLE;
+
 		FBufferWithMem::Destroy();
 	}
 };
@@ -1757,31 +1788,50 @@ struct FImageWithMem
 {
 	SVulkan::FImage Image;
 #if USE_VMA
+	VmaAllocator Allocator = {};
+	VmaAllocation Mem = {};
+	VmaAllocationInfo AllocInfo = {};
 #else
 	SVulkan::FMemAlloc* Mem = nullptr;
 #endif
-	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 Width, uint32 Height)
+
+#if USE_VMA
+	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags,
+		VmaMemoryUsage MemPropFlags,
+		uint32 Width, uint32 Height)
+	{
+		Allocator = InDevice.VMAAllocator;
+
+		VkImageCreateInfo Info = SVulkan::FImage::SetupCreateInfo(UsageFlags, Format, Width, Height);
+
+		VmaAllocationCreateInfo AllocCreateInfo = {};
+		AllocCreateInfo.usage = MemPropFlags;
+
+		VERIFY_VKRESULT(vmaCreateImage(Allocator, &Info, &AllocCreateInfo, &Image.Image, &Mem, &AllocInfo));
+	}
+#else
+	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags,
+		VkMemoryPropertyFlags MemPropFlags,
+		uint32 Width, uint32 Height)
 	{
 		Image.Create(InDevice.Device, UsageFlags, Format, Width, Height);
 
 		VkMemoryRequirements MemReqs;
 		vkGetImageMemoryRequirements(InDevice.Device, Image.Image, &MemReqs);
 
-#if USE_VMA
-		check(0);
-#else
 		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits);
 		VERIFY_VKRESULT(vkBindImageMemory(InDevice.Device, Image.Image, Mem->Memory, Mem->Offset));
-#endif
 	}
+#endif
 
 	void Destroy()
 	{
-		Image.Destroy();
 #if USE_VMA
-		check(0);
+		vmaDestroyImage(Allocator, Image.Image, Mem);
+		Mem = {};
+		AllocInfo = {};
 #else
-		Mem = nullptr;
+		Image.Destroy();
 #endif
 	}
 };
@@ -1790,7 +1840,13 @@ struct FImageWithMemAndView : public FImageWithMem
 {
 	VkImageView View = VK_NULL_HANDLE;
 
-	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 Width, uint32 Height, VkFormat ViewFormat)
+	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags, 
+#if USE_VMA
+		VmaMemoryUsage MemPropFlags,
+#else
+		VkMemoryPropertyFlags MemPropFlags,
+#endif
+		uint32 Width, uint32 Height, VkFormat ViewFormat)
 	{
 		FImageWithMem::Create(InDevice, Format, UsageFlags, MemPropFlags, Width, Height);
 		View = InDevice.CreateImageView(Image.Image, ViewFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D);
@@ -2686,12 +2742,12 @@ struct FStagingBufferManager
 
 		FBufferWithMem* Buffer = new FBufferWithMem;
 #if USE_VMA
-		check(0);
+		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, Size);
 #else
 		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, Size);
-		FEntry Entry = { Buffer, CurrentCmdBuffer, CurrentCmdBuffer->Fence.Counter };
-		UsedEntries.push_back(Entry);
 #endif
+		FEntry Entry ={Buffer, CurrentCmdBuffer, CurrentCmdBuffer->Fence.Counter};
+		UsedEntries.push_back(Entry);
 		return Buffer;
 	}
 
