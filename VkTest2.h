@@ -7,4 +7,3 @@
 
 
 #define USE_VMA			0
-

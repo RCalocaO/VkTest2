@@ -476,6 +476,7 @@ struct SVulkan
 		}
 	};
 
+#if !USE_VMA
 	struct FMemAlloc
 	{
 		VkDeviceMemory Memory = VK_NULL_HANDLE;
@@ -492,6 +493,7 @@ struct SVulkan
 			VERIFY_VKRESULT(vkFlushMappedMemoryRanges(Device, 1, &Range));
 		}
 	};
+#endif
 
 	struct SDevice
 	{
@@ -510,9 +512,13 @@ struct SVulkan
 		VkPhysicalDeviceMemoryProperties MemProperties;
 		VkQueryPool QueryPool = VK_NULL_HANDLE;
 		SVulkan::FBuffer QueryResultsBuffer;
+#if USE_VMA
+		VmaAllocation QueryResultsMem = {};
+		std::vector<VmaAllocation> MemAllocs;
+#else
 		SVulkan::FMemAlloc* QueryResultsMem = nullptr;
-
 		std::vector<FMemAlloc*> MemAllocs;
+#endif
 
 		bool bPushDescriptor = false;
 
@@ -536,6 +542,7 @@ struct SVulkan
 			return ~0;
 		}
 
+#if !USE_VMA
 		FMemAlloc* AllocMemory(VkDeviceSize Size, VkMemoryPropertyFlags MemPropFlags, uint32 Type)
 		{
 			FMemAlloc* MemAlloc = new FMemAlloc();
@@ -548,6 +555,7 @@ struct SVulkan
 			MemAllocs.push_back(MemAlloc);
 			return MemAlloc;
 		}
+#endif
 
 		VkBufferView CreateBufferView(FBuffer& Buffer, VkFormat Format, VkDeviceSize Size, VkDeviceSize Offset = 0)
 		{
@@ -784,8 +792,12 @@ struct SVulkan
 				VkMemoryRequirements MemReqs;
 				vkGetBufferMemoryRequirements(Device, QueryResultsBuffer.Buffer, &MemReqs);
 
+#if USE_VMA
+				check(0);
+#else
 				QueryResultsMem = AllocMemory(MemReqs.size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, MemReqs.memoryTypeBits);
 				VERIFY_VKRESULT(vkBindBufferMemory(Device, QueryResultsBuffer.Buffer, QueryResultsMem->Memory, QueryResultsMem->Offset));
+#endif
 			}
 		}
 
@@ -818,13 +830,23 @@ struct SVulkan
 				CmdPools[TransferQueueIndex].Destroy();
 			}
 
+#if USE_VMA
+			for (VmaAllocation Allocation : MemAllocs)
+			{
+				vmaFreeMemory(VMAAllocator, Allocation);
+			}
+#else
 			for (FMemAlloc* Alloc : MemAllocs)
 			{
 				vkFreeMemory(Device, Alloc->Memory, nullptr);
 				delete Alloc;
 			}
+#endif
 			MemAllocs.clear();
 
+#if USE_VMA
+			vmaDestroyAllocator(VMAAllocator);
+#endif
 			vkDestroyDevice(Device, nullptr);
 			Device = VK_NULL_HANDLE;
 		}
@@ -911,15 +933,20 @@ struct SVulkan
 
 		double ReadTimestamp()
 		{
-			uint64* Values;
 /*
 			uint64 Values[2] ={0, 0};
 			VERIFY_VKRESULT(vkGetQueryPoolResults(Device, QueryPool, 0, 2, 2 * sizeof(uint64), &Values, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
 */
+#if USE_VMA
+			check(0);
+			return 0;
+#else
+			uint64* Values;
 			VERIFY_VKRESULT(vkMapMemory(Device, QueryResultsMem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
 			double DeltaMs = (Values[1] - Values[0]) * (Props.limits.timestampPeriod * 1e-6);
 			vkUnmapMemory(Device, QueryResultsMem->Memory);
 			return DeltaMs;
+#endif
 		}
 	};
 
@@ -1634,9 +1661,32 @@ struct SVulkan
 struct FBufferWithMem
 {
 	SVulkan::FBuffer Buffer;
+#if USE_VMA
+	VmaAllocator Allocator = {};
+	VmaAllocation Mem = {};
+	VmaAllocationInfo AllocInfo = {};
+#else
 	SVulkan::FMemAlloc* Mem = nullptr;
+#endif
 	uint32 Size = 0;
 
+#if USE_VMA
+	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VmaMemoryUsage MemUsage, uint32 InSize)
+	{
+		Allocator = InDevice.VMAAllocator;
+		Size = InSize;
+
+		VkBufferCreateInfo Info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+		Info.size = InSize;
+		Info.usage = UsageFlags;
+
+		VmaAllocationCreateInfo AllocCreateInfo = {};
+		AllocCreateInfo.usage = MemUsage;
+		//Buffer.Create(InDevice.Device, UsageFlags, Size);
+
+		VERIFY_VKRESULT(vmaCreateBuffer(Allocator, &Info, &AllocCreateInfo, &Buffer.Buffer, &Mem, &AllocInfo));
+	}
+#else
 	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 InSize)
 	{
 		Size = InSize;
@@ -1645,10 +1695,10 @@ struct FBufferWithMem
 
 		VkMemoryRequirements MemReqs;
 		vkGetBufferMemoryRequirements(InDevice.Device, Buffer.Buffer, &MemReqs);
-
 		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits);
 		VERIFY_VKRESULT(vkBindBufferMemory(InDevice.Device, Buffer.Buffer, Mem->Memory, Mem->Offset));
 	}
+#endif
 
 	void Destroy()
 	{
@@ -1659,14 +1709,22 @@ struct FBufferWithMem
 	void* Lock()
 	{
 		void* Data = nullptr;
+#if USE_VMA
+		VERIFY_VKRESULT(vmaMapMemory(Allocator, Mem, &Data));
+#else
 		VERIFY_VKRESULT(vkMapMemory(Buffer.Device, Mem->Memory, Mem->Offset, Mem->Size, 0, &Data));
+#endif
 		return Data;
 	}
 
 	void Unlock()
 	{
+#if USE_VMA
+		vmaUnmapMemory(Allocator, Mem);
+#else
 		Mem->Flush(Buffer.Device);
 		vkUnmapMemory(Buffer.Device, Mem->Memory);
+#endif
 	}
 };
 
@@ -1674,12 +1732,19 @@ struct FBufferWithMem
 struct FBufferWithMemAndView : public FBufferWithMem
 {
 	VkBufferView View = VK_NULL_HANDLE;
+#if USE_VMA
+	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VmaMemoryUsage MemUsage, uint32 InSize, VkFormat Format)
+	{
+		FBufferWithMem::Create(InDevice, UsageFlags, MemUsage, InSize);
+		View = InDevice.CreateBufferView(Buffer, Format, InSize);
+	}
+#else
 	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 InSize, VkFormat Format)
 	{
 		FBufferWithMem::Create(InDevice, UsageFlags, MemPropFlags, InSize);
 		View = InDevice.CreateBufferView(Buffer, Format, InSize);
 	}
-
+#endif
 	void Destroy()
 	{
 		vkDestroyBufferView(Buffer.Device, View, nullptr);
@@ -1691,8 +1756,10 @@ struct FBufferWithMemAndView : public FBufferWithMem
 struct FImageWithMem
 {
 	SVulkan::FImage Image;
+#if USE_VMA
+#else
 	SVulkan::FMemAlloc* Mem = nullptr;
-
+#endif
 	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 Width, uint32 Height)
 	{
 		Image.Create(InDevice.Device, UsageFlags, Format, Width, Height);
@@ -1700,14 +1767,22 @@ struct FImageWithMem
 		VkMemoryRequirements MemReqs;
 		vkGetImageMemoryRequirements(InDevice.Device, Image.Image, &MemReqs);
 
+#if USE_VMA
+		check(0);
+#else
 		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits);
 		VERIFY_VKRESULT(vkBindImageMemory(InDevice.Device, Image.Image, Mem->Memory, Mem->Offset));
+#endif
 	}
 
 	void Destroy()
 	{
 		Image.Destroy();
+#if USE_VMA
+		check(0);
+#else
 		Mem = nullptr;
+#endif
 	}
 };
 
@@ -2610,9 +2685,13 @@ struct FStagingBufferManager
 		}
 
 		FBufferWithMem* Buffer = new FBufferWithMem;
+#if USE_VMA
+		check(0);
+#else
 		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, Size);
 		FEntry Entry = { Buffer, CurrentCmdBuffer, CurrentCmdBuffer->Fence.Counter };
 		UsedEntries.push_back(Entry);
+#endif
 		return Buffer;
 	}
 

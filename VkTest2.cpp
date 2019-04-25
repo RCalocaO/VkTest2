@@ -82,10 +82,17 @@ struct FApp
 
 		// Dummy stuff
 		uint32 ClipVBSize = 3 * 4 * sizeof(float);
+#if USE_VMA
+		ClipVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY, ClipVBSize, VK_FORMAT_R32G32B32A32_SFLOAT);
+#else
 		ClipVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, ClipVBSize, VK_FORMAT_R32G32B32A32_SFLOAT);
-
+#endif
 		{
+#if USE_VMA
+			StagingClipVB.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, ClipVBSize);
+#else
 			StagingClipVB.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ClipVBSize);
+#endif
 			float* Data = (float*)StagingClipVB.Lock();
 			*Data++ = 0;		*Data++ = -0.5f;	*Data++ = 1; *Data++ = 1;
 			*Data++ = 0.5f;		*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
@@ -93,7 +100,11 @@ struct FApp
 			StagingClipVB.Unlock();
 		}
 
+#if USE_VMA
+		ColorUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, 4 * sizeof(float));
+#else
 		ColorUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(float));
+#endif
 		{
 			float* Data = (float*)ColorUB.Lock();
 			*Data++ = 0.0f;
@@ -103,9 +114,16 @@ struct FApp
 			ColorUB.Unlock();
 		}
 
+#if USE_VMA
+		TestCSBuffer.Create(Device, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, 256 * 256 * 4 * sizeof(float), VK_FORMAT_R32G32B32A32_SFLOAT);
+#else
 		TestCSBuffer.Create(Device, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 256 * 256 * 4 * sizeof(float),  VK_FORMAT_R32G32B32A32_SFLOAT);
-
+#endif
+#if USE_VMA
+		TestCSUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, 4 * sizeof(uint32) + 16 * 1024);
+#else
 		TestCSUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(uint32) + 16 * 1024);
+#endif
 		{
 			uint32* Data = (uint32*)TestCSUB.Lock();
 			*Data++ = 0xffffffff;
@@ -221,12 +239,22 @@ struct FApp
 		const uint32 ImGuiVertexSize = sizeof(ImDrawVert) * ImGuiMaxVertices;
 		for (int32 Index = 0; Index < NUM_IMGUI_BUFFERS; ++Index)
 		{
+#if USE_VMA
+			check(0);
+#else
 			ImGuiVB[Index].Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiVertexSize);
-
+#endif
 			static_assert(sizeof(uint16) == sizeof(ImDrawIdx), "");
+#if USE_VMA
+			check(0);
+#else
 			ImGuiIB[Index].Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ImGuiMaxIndices * sizeof(uint16));
-
+#endif
+#if USE_VMA
+			check(0);
+#else
 			ImGuiScaleTranslateUB[Index].Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 4 * sizeof(float));
+#endif
 		}
 
 		{
@@ -867,7 +895,11 @@ struct FApp
 					cgltf_buffer& GLTFBuffer = Data->buffers[BufferIndex];
 					FBufferWithMem Buffer;
 					uint32 Size = (uint32)GLTFBuffer.size;
+#if USE_VMA
+					Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, Size);
+#else
 					Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, Size);
+#endif
 					float* Data = (float*)Buffer.Lock();
 					memcpy(Data, GLTFBuffer.data, Size);
 					Buffer.Unlock();
