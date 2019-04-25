@@ -1453,6 +1453,8 @@ struct FBufferWithMem
 		Allocator = InDevice.VMAAllocator;
 		Size = InSize;
 
+		Buffer.Device = InDevice.Device;
+
 		VkBufferCreateInfo Info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
 		Info.size = InSize;
 		Info.usage = UsageFlags;
@@ -1552,6 +1554,7 @@ struct FImageWithMem
 		uint32 Width, uint32 Height)
 	{
 		Allocator = InDevice.VMAAllocator;
+		Image.Device = InDevice.Device;
 
 		VkImageCreateInfo Info = SVulkan::FImage::SetupCreateInfo(UsageFlags, Format, Width, Height);
 
@@ -2512,13 +2515,7 @@ struct FStagingBufferManager
 struct FGPUTiming
 {
 	VkQueryPool QueryPool = VK_NULL_HANDLE;
-	SVulkan::FBuffer QueryResultsBuffer;
-#if USE_VMA
-	VmaAllocation QueryResultsMem ={};
-	VmaAllocationInfo QueryResultsMemInfo ={};
-#else
-	SVulkan::FMemAlloc* QueryResultsMem = nullptr;
-#endif
+	FBufferWithMem QueryResultsBuffer;
 	SVulkan::SDevice* Device = nullptr;
 
 	void Init(SVulkan::SDevice* InDevice)
@@ -2532,26 +2529,15 @@ struct FGPUTiming
 		VERIFY_VKRESULT(vkCreateQueryPool(Device->Device, &PoolCreateInfo, nullptr, &QueryPool));
 
 #if USE_VMA
+		QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU, 2 * sizeof(uint64));
 #else
-		QueryResultsBuffer.Create(Device->Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 2 * sizeof(uint64));
-
-		{
-			VkMemoryRequirements MemReqs;
-			vkGetBufferMemoryRequirements(Device->Device, QueryResultsBuffer.Buffer, &MemReqs);
-
-			QueryResultsMem = InDevice->AllocMemory(MemReqs.size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, MemReqs.memoryTypeBits);
-			VERIFY_VKRESULT(vkBindBufferMemory(Device->Device, QueryResultsBuffer.Buffer, QueryResultsMem->Memory, QueryResultsMem->Offset));
-		}
+		QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 2 * sizeof(uint64));
 #endif
 	}
 
 	void Destroy()
 	{
-#if USE_VMA
-		check(0);
-#else
 		QueryResultsBuffer.Destroy();
-#endif
 		vkDestroyQueryPool(Device->Device, QueryPool, nullptr);
 	}
 
@@ -2564,7 +2550,7 @@ struct FGPUTiming
 	{
 		vkCmdWriteTimestamp(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, QueryPool, 1);
 #if USE_VMA
-//		check(0);
+		vkCmdCopyQueryPoolResults(CmdBuffer->CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 #else
 		vkCmdCopyQueryPoolResults(CmdBuffer->CmdBuffer, QueryPool, 0, 2, QueryResultsBuffer.Buffer, 0, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 #endif
@@ -2574,16 +2560,17 @@ struct FGPUTiming
 	double ReadTimestamp()
 	{
 /*
-			uint64 Values[2] ={0, 0};
-			VERIFY_VKRESULT(vkGetQueryPoolResults(Device, QueryPool, 0, 2, 2 * sizeof(uint64), &Values, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
+		uint64 Values[2] ={0, 0};
+		VERIFY_VKRESULT(vkGetQueryPoolResults(Device, QueryPool, 0, 2, 2 * sizeof(uint64), &Values, sizeof(uint64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT));
 */
-#if USE_VMA
-//	check(0);
-		return 0;
-#else
 		uint64* Values;
-		VERIFY_VKRESULT(vkMapMemory(Device->Device, QueryResultsMem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
+#if USE_VMA
+		vmaMapMemory(QueryResultsBuffer.Allocator, QueryResultsBuffer.Mem, (void**)&Values);
 		double DeltaMs = (Values[1] - Values[0]) * (Device->Props.limits.timestampPeriod * 1e-6);
+		vmaUnmapMemory(QueryResultsBuffer.Allocator, QueryResultsBuffer.Mem);
+		return DeltaMs;
+#else
+		VERIFY_VKRESULT(vkMapMemory(Device->Device, QueryResultsMem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
 		vkUnmapMemory(Device->Device, QueryResultsMem->Memory);
 		return DeltaMs;
 #endif
