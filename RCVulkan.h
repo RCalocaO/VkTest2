@@ -22,11 +22,6 @@ extern "C"
 
 #include "RCVulkanBase.h"
 
-#if USE_VMA
-#define VMA_STATIC_VULKAN_FUNCTIONS 0
-#include "../VulkanMemoryAllocator/src/vk_mem_alloc.h"
-#endif
-
 
 struct SVulkan
 {

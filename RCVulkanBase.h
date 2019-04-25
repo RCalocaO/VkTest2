@@ -13,3 +13,10 @@ inline void ZeroVulkanMem(T& VulkanStruct, VkStructureType Type)
 }
 
 #define VERIFY_VKRESULT(x)	if ((x) != VK_SUCCESS) { ::OutputDebugStringA(#x); ::OutputDebugStringA("\n"); check(0);}
+
+#if USE_VMA
+#define VMA_MAX(x, y) Max((x), (y))
+#define VMA_MIN(x, y) Min((x), (y))
+#define VMA_STATIC_VULKAN_FUNCTIONS 0
+#include "../VulkanMemoryAllocator/src/vk_mem_alloc.h"
+#endif

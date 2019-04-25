@@ -3,6 +3,7 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
+#define VMA_IMPLEMENTATION
 #include "RCVulkan.h"
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
