@@ -2,6 +2,9 @@
 
 #pragma once
 
+#define SCENE_USE_SINGLE_BUFFERS	1
+
+
 struct FVertexBindings
 {
 	std::vector<VkVertexInputAttributeDescription> AttrDescs;
@@ -19,11 +22,15 @@ struct FScene
 
 	struct FPrim
 	{
-		VkDeviceSize IndexOffset;
-		uint32 NumIndices;
+#if SCENE_USE_SINGLE_BUFFERS
+		FBufferWithMem IndexBuffer;
+#else
 		int IndexBuffer;
+		VkDeviceSize IndexOffset;
+#endif
 		std::vector<int> VertexBuffers;
 		std::vector<VkDeviceSize> VertexOffsets;
+		uint32 NumIndices;
 		VkIndexType IndexType;
 		VkPrimitiveTopology PrimType;
 		int Material;
@@ -39,6 +46,19 @@ struct FScene
 
 	void Destroy()
 	{
+#if SCENE_USE_SINGLE_BUFFERS
+		for (auto& Mesh : Meshes)
+		{
+			for (auto& Prim : Mesh.Prims)
+			{
+				Prim.IndexBuffer.Destroy();
+				for (auto& VB : Prim.VertexBuffers)
+				{
+					//VB.Destroy();
+				}
+			}
+		}
+#endif
 		for (auto& Buffer : Buffers)
 		{
 			Buffer.Destroy();

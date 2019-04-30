@@ -133,6 +133,7 @@ struct FApp
 #else
 		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 4, 4, VK_FORMAT_R8G8B8A8_UNORM);
 #endif
+		Device.SetDebugName(WhiteTexture.Image.Image, "WhiteTexture");
 
 		GPUTiming.Init(&Device);
 	}
@@ -145,6 +146,11 @@ struct FApp
 		vkCmdCopyBuffer(CmdBuffer->CmdBuffer, StagingClipVB.Buffer.Buffer, ClipVB.Buffer.Buffer, 1, &Region);
 
 		{
+			Device.TransitionImage(CmdBuffer, WhiteTexture.Image.Image,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
+				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+				VK_IMAGE_ASPECT_COLOR_BIT);
+
 			FBufferWithMem* Buffer = GStagingBufferMgr.AcquireBuffer(CmdBuffer, 4);
 			uint8* Mem = (uint8*)Buffer->Lock();
 			*Mem += 0xff;
@@ -160,6 +166,11 @@ struct FApp
 			Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 			Region.imageSubresource.layerCount = 1;
 			vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, Buffer->Buffer.Buffer, WhiteTexture.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+
+			Device.TransitionImage(CmdBuffer, WhiteTexture.Image.Image,
+				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
+				VK_IMAGE_ASPECT_COLOR_BIT);
 		}
 
 		SetupImGuiAndResources(Device);
@@ -215,6 +226,7 @@ struct FApp
 #else
 		ImGuiFont.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Width, Height, VK_FORMAT_R8G8B8A8_UNORM);
 #endif
+		Device.SetDebugName(ImGuiFont.Image.Image, "ImGuiFont");
 
 		Device.TransitionImage(CmdBuffer, ImGuiFont.Image.Image,
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
@@ -571,16 +583,20 @@ struct FApp
 			{
 				//GetPSO(Prim.VertexDecl);
 
+				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, TestGLTFPSO.Pipeline);
+#if SCENE_USE_SINGLE_BUFFERS
+				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, Prim.IndexBuffer.Buffer.Buffer, 0, Prim.IndexType);
+#else
 				SVulkan::FBuffer& IB = Scene.Buffers[Prim.IndexBuffer].Buffer;
+				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB.Buffer, Prim.IndexOffset, Prim.IndexType);
+#endif
 				std::vector<VkBuffer> VBs;
 				for (auto VBIndex : Prim.VertexBuffers)
 				{
 					VBs.push_back(Scene.Buffers[VBIndex].Buffer.Buffer);
 				}
 				check(VBs.size() == Prim.VertexOffsets.size());
-				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, TestGLTFPSO.Pipeline);
 				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), Prim.VertexOffsets.data());
-				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB.Buffer, Prim.IndexOffset, Prim.IndexType);
 
 				{
 					VkDescriptorImageInfo ImageInfo[2];

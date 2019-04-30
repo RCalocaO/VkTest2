@@ -864,6 +864,7 @@ struct SVulkan
 				Fence.Wait(TimeOutInNanoseconds);
 			}
 		}
+		void SetDebugName(VkImage Image, const char* Name);
 	};
 
 	struct FSwapchain
@@ -1060,6 +1061,7 @@ struct SVulkan
 	std::map<VkPhysicalDevice, SDevice> Devices;
 
 	VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
+	bool bRenderDoc = false;
 
 	void Init(GLFWwindow* Window)
 	{
@@ -1261,6 +1263,19 @@ struct SVulkan
 		check(0);
 	}
 
+	static bool ContainsLayer(const std::vector<VkLayerProperties>& LayerProperties, const char* Name)
+	{
+		for (const auto& Entry : LayerProperties)
+		{
+			if (!strcmp(Entry.layerName, Name))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	static void VerifyLayers(const std::vector<VkLayerProperties>& LayerProperties, const std::vector<const char*>& Layers)
 	{
 		for (const auto& Layer : Layers)
@@ -1366,14 +1381,22 @@ struct SVulkan
 
 		std::vector<const char*> Layers;
 
-		if (RCUtils::FCmdLine::Get().Contains("-apidump"))
+		if (ContainsLayer(LayerProperties, "VK_LAYER_RENDERDOC_Capture"))
 		{
-			Layers.push_back("VK_LAYER_LUNARG_api_dump");
+			bRenderDoc = true;
 		}
 
-		if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
+		if (!bRenderDoc)
 		{
-			Layers.push_back("VK_LAYER_LUNARG_standard_validation");
+			if (RCUtils::FCmdLine::Get().Contains("-apidump"))
+			{
+				Layers.push_back("VK_LAYER_LUNARG_api_dump");
+			}
+
+			if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
+			{
+				Layers.push_back("VK_LAYER_KHRONOS_validation");
+			}
 		}
 
 		VerifyLayers(LayerProperties, Layers);

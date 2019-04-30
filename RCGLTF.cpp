@@ -353,9 +353,28 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 					Prim.VertexDecl = GetOrAddVertexDecl(SrcData, GLTFPrim, Prim, VertexDecls);
 					//Prim.Material = GLTFPrim.material;
 					Prim.PrimType = GetPrimType(GLTFPrim.type);
+					check(GetSizeInBytes(Indices.component_type) == Indices.stride);
+					check((uint32)IndicesBufferView.size / GetSizeInBytes(Indices.component_type) == Indices.count);
+#if SCENE_USE_SINGLE_BUFFERS
+					uint32 IBSize = (uint32)(Indices.count * Indices.stride);
+#if USE_VMA
+					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, IBSize);
+#else
+					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, IBSize);
+#endif
+					{
+						check(Indices.buffer_view->size == IBSize);
+						uint16* IBData = (uint16*)Prim.IndexBuffer.Lock();
+						uint16* SrcIBData = (uint16*)((uint8*)Indices.buffer_view->buffer->data + Indices.buffer_view->offset);
+						memcpy(IBData, SrcIBData, IBSize);
+						Prim.IndexBuffer.Unlock();
+					}
+
+#else
 					Prim.IndexOffset = Indices.offset + IndicesBufferView.offset;
-					Prim.NumIndices = (uint32)IndicesBufferView.size / GetSizeInBytes(Indices.component_type);
 					Prim.IndexBuffer = FindBuffer(SrcData, IndicesBufferView.buffer);
+#endif
+					Prim.NumIndices = (uint32)Indices.count;
 					Prim.IndexType = GetIndexType(Indices.component_type);
 					Mesh.Prims.push_back(Prim);
 				}
