@@ -66,14 +66,16 @@ struct SVulkan
 	{
 		VkImage Image = VK_NULL_HANDLE;
 		VkDevice Device = VK_NULL_HANDLE;
+		uint32 Width = 0;
+		uint32 Height = 0;
 
-		static VkImageCreateInfo SetupCreateInfo(VkImageUsageFlags UsageFlags, VkFormat Format, uint32 Width, uint32 Height)
+		static VkImageCreateInfo SetupCreateInfo(VkImageUsageFlags UsageFlags, VkFormat Format, uint32 InWidth, uint32 InHeight)
 		{
 			VkImageCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO);
 			Info.format = Format;
-			Info.extent.width = Width;
-			Info.extent.height = Height;
+			Info.extent.width = InWidth;
+			Info.extent.height = InHeight;
 			Info.extent.depth = 1;
 			Info.imageType = VK_IMAGE_TYPE_2D;
 			Info.mipLevels = 1;
@@ -85,9 +87,11 @@ struct SVulkan
 
 #if USE_VMA
 #else
-		void Create(VkDevice InDevice, VkImageUsageFlags UsageFlags, VkFormat Format, uint32 Width, uint32 Height)
+		void Create(VkDevice InDevice, VkImageUsageFlags UsageFlags, VkFormat Format, uint32 InWidth, uint32 InHeight)
 		{
 			Device = InDevice;
+			Width = InWidth;
+			Height = InHeight;
 
 			VkImageCreateInfo Info = SetupCreateInfo(UsageFlags, Format, Width, Height);
 			VERIFY_VKRESULT(vkCreateImage(Device, &Info, nullptr, &Image));
@@ -462,6 +466,7 @@ struct SVulkan
 		VkDeviceMemory Memory = VK_NULL_HANDLE;
 		VkDeviceSize Offset = 0;
 		VkDeviceSize Size = 0;
+		void* MappedMem = nullptr;
 
 		void Flush(VkDevice Device)
 		{
@@ -517,7 +522,7 @@ struct SVulkan
 		}
 
 #if !USE_VMA
-		FMemAlloc* AllocMemory(VkDeviceSize Size, VkMemoryPropertyFlags MemPropFlags, uint32 Type)
+		FMemAlloc* AllocMemory(VkDeviceSize Size, VkMemoryPropertyFlags MemPropFlags, uint32 Type, bool bMapped)
 		{
 			FMemAlloc* MemAlloc = new FMemAlloc();
 			VkMemoryAllocateInfo Info;
@@ -527,6 +532,12 @@ struct SVulkan
 			VERIFY_VKRESULT(vkAllocateMemory(Device, &Info, nullptr, &MemAlloc->Memory));
 			MemAlloc->Size = Size;
 			MemAllocs.push_back(MemAlloc);
+
+			if (bMapped)
+			{
+				VERIFY_VKRESULT(vkMapMemory(Device, MemAlloc->Memory, MemAlloc->Offset, MemAlloc->Size, 0, &MemAlloc->MappedMem))
+			}
+
 			return MemAlloc;
 		}
 #endif
@@ -1408,7 +1419,8 @@ struct SVulkan
 
 		if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
 		{
-			Layers.push_back("VK_LAYER_KHRONOS_validation");
+			//Layers.push_back("VK_LAYER_KHRONOS_validation");
+			Layers.push_back("VK_LAYER_LUNARG_standard_validation");
 		}
 
 		VerifyLayers(LayerProperties, Layers);
@@ -1500,7 +1512,7 @@ struct FBufferWithMem
 		VERIFY_VKRESULT(vmaCreateBuffer(Allocator, &Info, &AllocCreateInfo, &Buffer.Buffer, &Mem, &AllocInfo));
 	}
 #else
-	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 InSize)
+	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 InSize, bool bMapped)
 	{
 		Size = InSize;
 
@@ -1508,7 +1520,7 @@ struct FBufferWithMem
 
 		VkMemoryRequirements MemReqs;
 		vkGetBufferMemoryRequirements(InDevice.Device, Buffer.Buffer, &MemReqs);
-		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits);
+		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits, bMapped);
 		VERIFY_VKRESULT(vkBindBufferMemory(InDevice.Device, Buffer.Buffer, Mem->Memory, Mem->Offset));
 	}
 #endif
@@ -1527,22 +1539,22 @@ struct FBufferWithMem
 
 	void* Lock()
 	{
-		void* Data = nullptr;
 #if USE_VMA
+		void* Data = nullptr;
 		VERIFY_VKRESULT(vmaMapMemory(Allocator, Mem, &Data));
-#else
-		VERIFY_VKRESULT(vkMapMemory(Buffer.Device, Mem->Memory, Mem->Offset, Mem->Size, 0, &Data));
-#endif
 		return Data;
+#else
+		check(Mem->MappedMem);
+		return Mem->MappedMem;
+#endif
 	}
 
 	void Unlock()
 	{
 #if USE_VMA
 		vmaUnmapMemory(Allocator, Mem);
+		vmaFlushAllocation(Allocator, Mem, 0, Size);
 #else
-		Mem->Flush(Buffer.Device);
-		vkUnmapMemory(Buffer.Device, Mem->Memory);
 #endif
 	}
 };
@@ -1557,9 +1569,9 @@ struct FBufferWithMemAndView : public FBufferWithMem
 #else
 		VkMemoryPropertyFlags MemPropFlags,
 #endif
-		uint32 InSize, VkFormat Format)
+		uint32 InSize, VkFormat Format, bool bMapped)
 	{
-		FBufferWithMem::Create(InDevice, UsageFlags, MemPropFlags, InSize);
+		FBufferWithMem::Create(InDevice, UsageFlags, MemPropFlags, InSize, bMapped);
 		View = InDevice.CreateBufferView(Buffer, Format, InSize);
 	}
 
@@ -1608,7 +1620,7 @@ struct FImageWithMem
 		VkMemoryRequirements MemReqs;
 		vkGetImageMemoryRequirements(InDevice.Device, Image.Image, &MemReqs);
 
-		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits);
+		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits, false);
 		VERIFY_VKRESULT(vkBindImageMemory(InDevice.Device, Image.Image, Mem->Memory, Mem->Offset));
 	}
 #endif
@@ -2533,7 +2545,7 @@ struct FStagingBufferManager
 #if USE_VMA
 		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, Size);
 #else
-		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, Size);
+		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, Size, true);
 #endif
 		FEntry Entry ={Buffer, CurrentCmdBuffer, CurrentCmdBuffer->Fence.Counter};
 		UsedEntries.push_back(Entry);
@@ -2566,7 +2578,7 @@ struct FGPUTiming
 #if USE_VMA
 		QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU, 2 * sizeof(uint64));
 #else
-		QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 2 * sizeof(uint64));
+		QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 2 * sizeof(uint64), true);
 #endif
 	}
 
@@ -2590,16 +2602,15 @@ struct FGPUTiming
 
 	double ReadTimestamp()
 	{
-		uint64* Values;
 #if USE_VMA
+		uint64* Values;
 		vmaMapMemory(QueryResultsBuffer.Allocator, QueryResultsBuffer.Mem, (void**)&Values);
 		double DeltaMs = (Values[1] - Values[0]) * (Device->Props.limits.timestampPeriod * 1e-6);
 		vmaUnmapMemory(QueryResultsBuffer.Allocator, QueryResultsBuffer.Mem);
 		return DeltaMs;
 #else
-		VERIFY_VKRESULT(vkMapMemory(Device->Device, QueryResultsBuffer.Mem->Memory, 0, 2 * sizeof(uint64), 0, (void**)&Values));
+		uint64* Values = (uint64*)QueryResultsBuffer.Mem->MappedMem;
 		double DeltaMs = (Values[1] - Values[0]) * (Device->Props.limits.timestampPeriod * 1e-6);
-		vkUnmapMemory(Device->Device, QueryResultsBuffer.Mem->Memory);
 		return DeltaMs;
 #endif
 	}
@@ -2617,3 +2628,139 @@ inline void SVulkan::FCmdBuffer::BeginRenderPass(FFramebuffer* Framebuffer)
 	vkCmdBeginRenderPass(CmdBuffer, &Info, VK_SUBPASS_CONTENTS_INLINE);
 	State = EState::InRenderPass;
 }
+
+
+struct FPendingOpsManager
+{
+	struct FPendingOp
+	{
+		enum OpType
+		{
+			EInvalid,
+			ECopyBuffer,
+			ECopyBufferToImage,
+			EUpdateBuffer,
+		};
+
+		OpType Op = EInvalid;
+
+		struct FCopyBuffer
+		{
+			FBufferWithMem* SrcStaging = nullptr;
+			VkBuffer Dest = VK_NULL_HANDLE;
+			uint32 Size = 0;
+			uint32 SrcOffset = 0;
+			uint32 DestOffset = 0;
+		};
+		FCopyBuffer Copy;
+
+		struct FUpdateBuffer
+		{
+			std::vector<char> Data;
+			VkBuffer Dest = VK_NULL_HANDLE;
+			uint32 Size = 0;
+			uint32 Offset = 0;
+		};
+		FUpdateBuffer Update;
+
+		struct FCopyBufferToImage
+		{
+			FBufferWithMem* SrcStaging = nullptr;
+			VkImage Dest = VK_NULL_HANDLE;
+			VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_MAX_ENUM;
+			VkImageLayout DestLayout = VK_IMAGE_LAYOUT_MAX_ENUM;
+			VkImageAspectFlags Aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+			uint32 Width = 0;
+			uint32 Height = 0;
+			uint32 BufferOffset = 0;
+		};
+		FCopyBufferToImage CopyImage;
+
+		void Exec(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
+		{
+			switch (Op)
+			{
+			case ECopyBuffer:
+			{
+				VkBufferCopy Region;
+				ZeroMem(Region);
+				Region.size = Copy.Size;
+				Region.srcOffset = Copy.SrcOffset;
+				Region.dstOffset = Copy.DestOffset;
+				vkCmdCopyBuffer(CmdBuffer->CmdBuffer, Copy.SrcStaging->Buffer.Buffer, Copy.Dest, 1, &Region);
+			}
+				break;
+			case ECopyBufferToImage:
+			{
+				VkBufferImageCopy Region;
+				ZeroMem(Region);
+				Region.imageSubresource.aspectMask = CopyImage.Aspect;
+				Region.imageSubresource.layerCount = 1;
+				Region.bufferOffset = CopyImage.BufferOffset;
+				Region.imageExtent.width = CopyImage.Width;
+				Region.imageExtent.height = CopyImage.Height;
+				Region.imageExtent.depth = 1;
+
+				if (CopyImage.SrcLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+				{
+					check(CopyImage.SrcLayout == VK_IMAGE_LAYOUT_UNDEFINED);
+					Device.TransitionImage(CmdBuffer, CopyImage.Dest,
+						VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
+						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+						CopyImage.Aspect);
+				}
+
+				vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, CopyImage.SrcStaging->Buffer.Buffer, CopyImage.Dest, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+
+				if (CopyImage.DestLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+				{
+					check(CopyImage.DestLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+					Device.TransitionImage(CmdBuffer, CopyImage.Dest,
+						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+						VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
+						CopyImage.Aspect);
+				}
+			}
+				break;
+			case EUpdateBuffer:
+			{
+				vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, Update.Dest, Update.Offset, Update.Size, Update.Data.data());
+			}
+				break;
+
+			default:
+				check(0);
+			}
+		}
+	};
+
+	void ExecutePendingStagingOps(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
+	{
+		if (!Ops.empty())
+		{
+			for (auto& Op : Ops)
+			{
+				Op.Exec(Device, CmdBuffer);
+			}
+			Ops.resize(0);
+		}
+	}
+
+	void AddCopyBufferToImage(FBufferWithMem* Buffer, SVulkan::FImage& Image, VkImageLayout StartLayout, VkImageLayout FinalLayout)
+	{
+		FPendingOp Op;
+		Op.Op = FPendingOp::ECopyBufferToImage;
+		Op.CopyImage.SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		Op.CopyImage.DestLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		Op.CopyImage.Dest = Image.Image;
+		Op.CopyImage.Width = Image.Width;
+		Op.CopyImage.Height = Image.Height;
+		Op.CopyImage.SrcStaging = Buffer;
+		Op.CopyImage.SrcLayout = StartLayout;
+		Op.CopyImage.DestLayout = FinalLayout;
+
+		Ops.push_back(Op);
+	}
+
+	std::vector<FPendingOp> Ops;
+};

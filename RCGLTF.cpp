@@ -311,7 +311,7 @@ int GetOrAddVertexDecl(cgltf_data* Data, cgltf_primitive& GLTFPrim, FScene::FPri
 
 #endif
 
-bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVertexBindings>& VertexDecls, FScene& Scene)
+bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVertexBindings>& VertexDecls, FScene& Scene, FPendingOpsManager& PendingStagingOps)
 {
 #if USE_CGLTF
 	cgltf_options Options;
@@ -331,7 +331,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 #if USE_VMA
 				Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, Size);
 #else
-				Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, Size);
+				Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, Size, true);
 #endif
 				float* Data = (float*)Buffer.Lock();
 				memcpy(Data, GLTFBuffer.data, Size);
@@ -358,9 +358,9 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 #if SCENE_USE_SINGLE_BUFFERS
 					uint32 IBSize = (uint32)(Indices.count * Indices.stride);
 #if USE_VMA
-					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, IBSize);
+					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, IBSize);
 #else
-					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, IBSize);
+					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, IBSize, true);
 #endif
 					Device.SetDebugName(Prim.IndexBuffer.Buffer.Buffer, "PrimIB");
 					{
