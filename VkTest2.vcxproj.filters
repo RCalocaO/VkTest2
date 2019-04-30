@@ -78,6 +78,9 @@
     <ClInclude Include="RCVulkanBase.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="RCScene.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -108,6 +111,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="RCVulkan.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="RCGLTF.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
