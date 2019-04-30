@@ -328,11 +328,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 				cgltf_buffer& GLTFBuffer = SrcData->buffers[BufferIndex];
 				FBufferWithMem Buffer;
 				uint32 Size = (uint32)GLTFBuffer.size;
-#if USE_VMA
-				Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, Size);
-#else
-				Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, Size, true);
-#endif
+				Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, Size, true);
 				float* Data = (float*)Buffer.Lock();
 				memcpy(Data, GLTFBuffer.data, Size);
 				Buffer.Unlock();
@@ -357,20 +353,15 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 					check((uint32)IndicesBufferView.size / GetSizeInBytes(Indices.component_type) == Indices.count);
 #if SCENE_USE_SINGLE_BUFFERS
 					uint32 IBSize = (uint32)(Indices.count * Indices.stride);
-#if USE_VMA
-					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, IBSize);
-#else
-					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, IBSize, true);
-#endif
+					check(Indices.buffer_view->size == IBSize);
+					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, IBSize, true);
 					Device.SetDebugName(Prim.IndexBuffer.Buffer.Buffer, "PrimIB");
-					{
-						check(Indices.buffer_view->size == IBSize);
-						uint16* IBData = (uint16*)Prim.IndexBuffer.Lock();
-						uint16* SrcIBData = (uint16*)((uint8*)Indices.buffer_view->buffer->data + Indices.buffer_view->offset);
-						memcpy(IBData, SrcIBData, IBSize);
-						Prim.IndexBuffer.Unlock();
-					}
-
+					PendingStagingOps.AddUpdateBuffer(Prim.IndexBuffer.Buffer.Buffer, IBSize,
+						[&](void* DestData)
+						{
+							uint16* SrcIBData = (uint16*)((uint8*)Indices.buffer_view->buffer->data + Indices.buffer_view->offset);
+							memcpy(DestData, SrcIBData, IBSize);
+						});
 #else
 					Prim.IndexOffset = Indices.offset + IndicesBufferView.offset;
 					Prim.IndexBuffer = FindBuffer(SrcData, IndicesBufferView.buffer);

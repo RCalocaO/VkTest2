@@ -23,6 +23,45 @@ extern "C"
 #include "RCVulkanBase.h"
 
 
+enum class MemLocation
+{
+	CPU_TO_GPU,
+	GPU,
+};
+
+#if USE_VMA
+inline VmaMemoryUsage GetVulkanMemLocation(MemLocation Location)
+{
+	switch (Location)
+	{
+	case MemLocation::GPU:
+		return VMA_MEMORY_USAGE_GPU_ONLY;
+	case MemLocation::CPU_TO_GPU:
+		return VMA_MEMORY_USAGE_CPU_TO_GPU;
+	default:
+		check(0);
+	};
+
+	return VMA_MEMORY_USAGE_CPU_TO_GPU;
+}
+#else
+inline VkMemoryPropertyFlags GetVulkanMemLocation(MemLocation Location)
+{
+	switch(Location)
+	{
+	case MemLocation::GPU:
+		return VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	case MemLocation::CPU_TO_GPU:
+		return VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	default:
+		check(0);
+	};
+
+	return VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+}
+#endif
+
+
 struct SVulkan
 {
 	VkInstance Instance = VK_NULL_HANDLE;
@@ -1494,27 +1533,26 @@ struct FBufferWithMem
 #endif
 	uint32 Size = 0;
 
-#if USE_VMA
-	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VmaMemoryUsage MemUsage, uint32 InSize)
+	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, MemLocation Location, uint32 InSize, bool bMapped)
 	{
-		Allocator = InDevice.VMAAllocator;
 		Size = InSize;
+#if USE_VMA
+		VmaMemoryUsage MemUsage = GetVulkanMemLocation(Location);
+
+		Allocator = InDevice.VMAAllocator;
 
 		Buffer.Device = InDevice.Device;
 
-		VkBufferCreateInfo Info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+		VkBufferCreateInfo Info ={VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
 		Info.size = InSize;
 		Info.usage = UsageFlags;
 
-		VmaAllocationCreateInfo AllocCreateInfo = {};
+		VmaAllocationCreateInfo AllocCreateInfo ={};
 		AllocCreateInfo.usage = MemUsage;
 
 		VERIFY_VKRESULT(vmaCreateBuffer(Allocator, &Info, &AllocCreateInfo, &Buffer.Buffer, &Mem, &AllocInfo));
-	}
 #else
-	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, VkMemoryPropertyFlags MemPropFlags, uint32 InSize, bool bMapped)
-	{
-		Size = InSize;
+		VkMemoryPropertyFlags MemPropFlags = GetVulkanMemLocation(Location);
 
 		Buffer.Create(InDevice.Device, UsageFlags, Size);
 
@@ -1522,8 +1560,8 @@ struct FBufferWithMem
 		vkGetBufferMemoryRequirements(InDevice.Device, Buffer.Buffer, &MemReqs);
 		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits, bMapped);
 		VERIFY_VKRESULT(vkBindBufferMemory(InDevice.Device, Buffer.Buffer, Mem->Memory, Mem->Offset));
-	}
 #endif
+	}
 
 	void Destroy()
 	{
@@ -1564,14 +1602,9 @@ struct FBufferWithMemAndView : public FBufferWithMem
 {
 	VkBufferView View = VK_NULL_HANDLE;
 	void Create(SVulkan::SDevice& InDevice, VkBufferUsageFlags UsageFlags, 
-#if USE_VMA
-		VmaMemoryUsage MemPropFlags, 
-#else
-		VkMemoryPropertyFlags MemPropFlags,
-#endif
-		uint32 InSize, VkFormat Format, bool bMapped)
+		MemLocation Location, uint32 InSize, VkFormat Format, bool bMapped)
 	{
-		FBufferWithMem::Create(InDevice, UsageFlags, MemPropFlags, InSize, bMapped);
+		FBufferWithMem::Create(InDevice, UsageFlags, Location, InSize, bMapped);
 		View = InDevice.CreateBufferView(Buffer, Format, InSize);
 	}
 
@@ -1595,11 +1628,11 @@ struct FImageWithMem
 	SVulkan::FMemAlloc* Mem = nullptr;
 #endif
 
-#if USE_VMA
 	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags,
-		VmaMemoryUsage MemPropFlags,
-		uint32 Width, uint32 Height)
+		MemLocation Location, uint32 Width, uint32 Height)
 	{
+#if USE_VMA
+		VmaMemoryUsage MemPropFlags = GetVulkanMemLocation(MemLocation);
 		Allocator = InDevice.VMAAllocator;
 		Image.Device = InDevice.Device;
 
@@ -1609,12 +1642,8 @@ struct FImageWithMem
 		AllocCreateInfo.usage = MemPropFlags;
 
 		VERIFY_VKRESULT(vmaCreateImage(Allocator, &Info, &AllocCreateInfo, &Image.Image, &Mem, &AllocInfo));
-	}
 #else
-	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags,
-		VkMemoryPropertyFlags MemPropFlags,
-		uint32 Width, uint32 Height)
-	{
+		VkMemoryPropertyFlags MemPropFlags = GetVulkanMemLocation(Location);
 		Image.Create(InDevice.Device, UsageFlags, Format, Width, Height);
 
 		VkMemoryRequirements MemReqs;
@@ -1622,8 +1651,8 @@ struct FImageWithMem
 
 		Mem = InDevice.AllocMemory(MemReqs.size, MemPropFlags, MemReqs.memoryTypeBits, false);
 		VERIFY_VKRESULT(vkBindImageMemory(InDevice.Device, Image.Image, Mem->Memory, Mem->Offset));
-	}
 #endif
+	}
 
 	void Destroy()
 	{
@@ -1642,14 +1671,9 @@ struct FImageWithMemAndView : public FImageWithMem
 	VkImageView View = VK_NULL_HANDLE;
 
 	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags, 
-#if USE_VMA
-		VmaMemoryUsage MemPropFlags,
-#else
-		VkMemoryPropertyFlags MemPropFlags,
-#endif
-		uint32 Width, uint32 Height, VkFormat ViewFormat)
+		MemLocation Location, uint32 Width, uint32 Height, VkFormat ViewFormat)
 	{
-		FImageWithMem::Create(InDevice, Format, UsageFlags, MemPropFlags, Width, Height);
+		FImageWithMem::Create(InDevice, Format, UsageFlags, Location, Width, Height);
 		View = InDevice.CreateImageView(Image.Image, ViewFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D);
 	}
 
@@ -2542,11 +2566,7 @@ struct FStagingBufferManager
 		}
 
 		FBufferWithMem* Buffer = new FBufferWithMem;
-#if USE_VMA
-		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU, Size);
-#else
-		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, Size, true);
-#endif
+		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, MemLocation::CPU_TO_GPU, Size, true);
 		FEntry Entry ={Buffer, CurrentCmdBuffer, CurrentCmdBuffer->Fence.Counter};
 		UsedEntries.push_back(Entry);
 		return Buffer;
@@ -2575,11 +2595,7 @@ struct FGPUTiming
 		PoolCreateInfo.queryCount = 2;
 		VERIFY_VKRESULT(vkCreateQueryPool(Device->Device, &PoolCreateInfo, nullptr, &QueryPool));
 
-#if USE_VMA
-		QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU, 2 * sizeof(uint64));
-#else
-		QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 2 * sizeof(uint64), true);
-#endif
+		QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, 2 * sizeof(uint64), true);
 	}
 
 	void Destroy()
@@ -2758,6 +2774,20 @@ struct FPendingOpsManager
 		Op.CopyImage.SrcStaging = Buffer;
 		Op.CopyImage.SrcLayout = StartLayout;
 		Op.CopyImage.DestLayout = FinalLayout;
+
+		Ops.push_back(Op);
+	}
+
+	template <typename TCallback>
+	void AddUpdateBuffer(VkBuffer Buffer, uint32 Size, TCallback Callback, uint32 Offset = 0)
+	{
+		FPendingOp Op;
+		Op.Op = FPendingOp::EUpdateBuffer;
+		Op.Update.Dest = Buffer;
+		Op.Update.Offset = Offset;
+		Op.Update.Size = Size;
+		Op.Update.Data.resize(Size);
+		Callback(Op.Update.Data.data());
 
 		Ops.push_back(Op);
 	}
