@@ -43,7 +43,6 @@ struct FApp
 	SVulkan::FGfxPSO VBClipVSRedPSO;
 	SVulkan::FGfxPSO TestGLTFPSO;
 	FBufferWithMemAndView ClipVB;
-	FBufferWithMem StagingClipVB;
 	FShaderInfo* TestCS = nullptr;
 	SVulkan::FComputePSO TestCSPSO;
 	FBufferWithMemAndView TestCSBuffer;
@@ -77,14 +76,14 @@ struct FApp
 		// Dummy stuff
 		uint32 ClipVBSize = 3 * 4 * sizeof(float);
 		ClipVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::GPU, ClipVBSize, VK_FORMAT_R32G32B32A32_SFLOAT, false);
-		{
-			StagingClipVB.Create(Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, MemLocation::CPU_TO_GPU, ClipVBSize, true);
-			float* Data = (float*)StagingClipVB.Lock();
-			*Data++ = 0;		*Data++ = -0.5f;	*Data++ = 1; *Data++ = 1;
-			*Data++ = 0.5f;		*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
-			*Data++ = -0.5f;	*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
-			StagingClipVB.Unlock();
-		}
+		PendingOpsMgr.AddUpdateBuffer(ClipVB.Buffer.Buffer, ClipVBSize, 
+			[](void* InData)
+			{
+				float* Data = (float*)InData;
+				*Data++ = 0;		*Data++ = -0.5f;	*Data++ = 1; *Data++ = 1;
+				*Data++ = 0.5f;		*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
+				*Data++ = -0.5f;	*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
+			});
 
 		ColorUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, MemLocation::CPU_TO_GPU, 4 * sizeof(float), true);
 		{
@@ -117,11 +116,6 @@ struct FApp
 
 	void SetupFirstTime(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
 	{
-		VkBufferCopy Region;
-		ZeroMem(Region);
-		Region.size = ClipVB.Size;
-		vkCmdCopyBuffer(CmdBuffer->CmdBuffer, StagingClipVB.Buffer.Buffer, ClipVB.Buffer.Buffer, 1, &Region);
-
 		{
 			Device.TransitionImage(CmdBuffer, WhiteTexture.Image.Image,
 				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
@@ -151,7 +145,7 @@ struct FApp
 				VK_IMAGE_ASPECT_COLOR_BIT);
 		}
 
-		SetupImGuiAndResources(Device);
+		SetupImGuiAndResources(Device, CmdBuffer);
 	}
 
 	void Destroy()
@@ -172,12 +166,11 @@ struct FApp
 		Scene.Destroy();
 		TestCSUB.Destroy();
 		TestCSBuffer.Destroy();
-		StagingClipVB.Destroy();
 		ClipVB.Destroy();
 		ColorUB.Destroy();
 	}
 
-	void SetupImGuiAndResources(SVulkan::SDevice& Device)
+	void SetupImGuiAndResources(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
 	{
 		ImGuiIO& IO = ImGui::GetIO();
 
@@ -185,7 +178,7 @@ struct FApp
 		unsigned char* Pixels = nullptr;
 		IO.Fonts->GetTexDataAsAlpha8(&Pixels, &Width, &Height);
 
-		SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
+		//SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
 		FBufferWithMem* FontBuffer = GStagingBufferMgr.AcquireBuffer(CmdBuffer, Width * Height * sizeof(uint32));
 		uint8* Data = (uint8*)FontBuffer->Lock();
@@ -204,8 +197,8 @@ struct FApp
 
 		PendingOpsMgr.AddCopyBufferToImage(FontBuffer, ImGuiFont.Image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-		CmdBuffer->End();
-		Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
+		//CmdBuffer->End();
+		//Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
 
 		IO.Fonts->TexID = (void*)ImGuiFont.Image.Image;
 
