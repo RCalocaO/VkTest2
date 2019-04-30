@@ -1,7 +1,7 @@
 
 
-#include "RCVulkan.h"
 #include "VkTest2.h"
+#include "RCVulkan.h"
 #include "RCScene.h"
 
 #define	USE_TINY_GLTF			0
@@ -362,6 +362,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 #else
 					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, IBSize);
 #endif
+					Device.SetDebugName(Prim.IndexBuffer.Buffer.Buffer, "PrimIB");
 					{
 						check(Indices.buffer_view->size == IBSize);
 						uint16* IBData = (uint16*)Prim.IndexBuffer.Lock();

@@ -133,7 +133,7 @@ struct FApp
 #else
 		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 4, 4, VK_FORMAT_R8G8B8A8_UNORM);
 #endif
-		Device.SetDebugName(WhiteTexture.Image.Image, "WhiteTexture");
+		Device.SetDebugName(WhiteTexture.Image.Image, VK_OBJECT_TYPE_IMAGE, "WhiteTexture");
 
 		GPUTiming.Init(&Device);
 	}

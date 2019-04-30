@@ -864,7 +864,27 @@ struct SVulkan
 				Fence.Wait(TimeOutInNanoseconds);
 			}
 		}
-		void SetDebugName(VkImage Image, const char* Name);
+
+		template <typename T>
+		void SetDebugName(T Handle,VkObjectType Type, const char* Name)
+		{
+			VkDebugUtilsObjectNameInfoEXT Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT);
+			Info.objectHandle = (uint64)Handle;
+			Info.objectType = Type;
+			Info.pObjectName = Name;
+			vkSetDebugUtilsObjectNameEXT(Device, &Info);
+		}
+
+		void SetDebugName(VkImage Image, const char* Name)
+		{
+			SetDebugName<VkImage>(Image, VK_OBJECT_TYPE_IMAGE, Name);
+		}
+
+		void SetDebugName(VkBuffer Buffer, const char* Name)
+		{
+			SetDebugName<VkBuffer>(Buffer, VK_OBJECT_TYPE_BUFFER, Name);
+		}
 	};
 
 	struct FSwapchain
@@ -1381,22 +1401,14 @@ struct SVulkan
 
 		std::vector<const char*> Layers;
 
-		if (ContainsLayer(LayerProperties, "VK_LAYER_RENDERDOC_Capture"))
+		if (RCUtils::FCmdLine::Get().Contains("-apidump"))
 		{
-			bRenderDoc = true;
+			Layers.push_back("VK_LAYER_LUNARG_api_dump");
 		}
 
-		if (!bRenderDoc)
+		if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
 		{
-			if (RCUtils::FCmdLine::Get().Contains("-apidump"))
-			{
-				Layers.push_back("VK_LAYER_LUNARG_api_dump");
-			}
-
-			if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
-			{
-				Layers.push_back("VK_LAYER_KHRONOS_validation");
-			}
+			Layers.push_back("VK_LAYER_KHRONOS_validation");
 		}
 
 		VerifyLayers(LayerProperties, Layers);

@@ -152,13 +152,3 @@ void SVulkan::FSwapchain::Create(SDevice& Device, GLFWwindow* Window)
 		ImageViews[i] = Device.CreateImageView(Images[i], Format, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D);
 	}
 }
-
-void SVulkan::SDevice::SetDebugName(VkImage Image, const char* Name)
-{
-	VkDebugUtilsObjectNameInfoEXT Info;
-	ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT);
-	Info.objectHandle = (uint64)Image;
-	Info.objectType = VK_OBJECT_TYPE_IMAGE;
-	Info.pObjectName = Name;
-	vkSetDebugUtilsObjectNameEXT(Device, &Info);
-}
