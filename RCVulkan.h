@@ -25,6 +25,7 @@ extern "C"
 
 enum class MemLocation
 {
+	CPU,
 	CPU_TO_GPU,
 	GPU,
 };
@@ -34,6 +35,8 @@ inline VmaMemoryUsage GetVulkanMemLocation(MemLocation Location)
 {
 	switch (Location)
 	{
+	case MemLocation::CPU:
+		return VMA_MEMORY_USAGE_CPU_ONLY;
 	case MemLocation::GPU:
 		return VMA_MEMORY_USAGE_GPU_ONLY;
 	case MemLocation::CPU_TO_GPU:
@@ -49,15 +52,17 @@ inline VkMemoryPropertyFlags GetVulkanMemLocation(MemLocation Location)
 {
 	switch(Location)
 	{
+	case MemLocation::CPU:
+		return VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 	case MemLocation::GPU:
 		return VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 	case MemLocation::CPU_TO_GPU:
-		return VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+		return VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT/* | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT*/;
 	default:
 		check(0);
 	};
 
-	return VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	return VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT/* | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT*/;
 }
 #endif
 
@@ -631,7 +636,7 @@ struct SVulkan
 
 			check(Props.limits.timestampComputeAndGraphics);
 
-			float Priorities[1] ={1.0f};
+			float Priorities[1] = {1.0f};
 
 			std::vector<const char*> DeviceExtensions =
 			{
@@ -1543,11 +1548,11 @@ struct FBufferWithMem
 
 		Buffer.Device = InDevice.Device;
 
-		VkBufferCreateInfo Info ={VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+		VkBufferCreateInfo Info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
 		Info.size = InSize;
 		Info.usage = UsageFlags;
 
-		VmaAllocationCreateInfo AllocCreateInfo ={};
+		VmaAllocationCreateInfo AllocCreateInfo = {};
 		AllocCreateInfo.usage = MemUsage;
 
 		VERIFY_VKRESULT(vmaCreateBuffer(Allocator, &Info, &AllocCreateInfo, &Buffer.Buffer, &Mem, &AllocInfo));
@@ -2494,17 +2499,18 @@ struct FDescriptorCache
 	}
 };
 
+
+struct FStagingBuffer
+{
+	FBufferWithMem* Buffer = nullptr;
+	SVulkan::FCmdBuffer* CmdBuffer = nullptr;
+	uint64 Fence = 0;
+};
+
 struct FStagingBufferManager
 {
-	struct FEntry
-	{
-		FBufferWithMem* Buffer;
-		SVulkan::FCmdBuffer* CmdBuffer;
-		uint64 Fence;
-	};
-
-	std::list<FBufferWithMem*> FreeEntries;
-	std::vector<FEntry> UsedEntries;
+	std::list<FStagingBuffer*> FreeEntries;
+	std::vector<FStagingBuffer*> UsedEntries;
 
 	SVulkan::SDevice* Device = nullptr;
 
@@ -2517,22 +2523,25 @@ struct FStagingBufferManager
 	{
 		for (int32 Index = (int32)UsedEntries.size() - 1; Index >= 0; --Index)
 		{
-			FEntry& Entry = UsedEntries[Index];
-			if (Entry.CmdBuffer->Fence.Counter > Entry.Fence)
+			FStagingBuffer* Entry = UsedEntries[Index];
+			if (Entry->CmdBuffer->Fence.Counter > Entry->Fence)
 			{
-				Entry.Buffer->Destroy();
-				delete Entry.Buffer;
-
-				UsedEntries[Index] = UsedEntries[UsedEntries.size() - 1];
-				UsedEntries.resize(UsedEntries.size() - 1);
+				Entry->Buffer->Destroy();
+				delete Entry->Buffer;
+				delete Entry;
+			}
+			else
+			{
+				check(0);
 			}
 		}
 
 		check(UsedEntries.empty());
 
-		for (auto* Buffer : FreeEntries)
+		for (FStagingBuffer* Buffer : FreeEntries)
 		{
-			Buffer->Destroy();
+			Buffer->Buffer->Destroy();
+			delete Buffer->Buffer;
 			delete Buffer;
 		}
 		FreeEntries.clear();
@@ -2542,39 +2551,40 @@ struct FStagingBufferManager
 	{
 		for (int32 Index = (int32)UsedEntries.size() - 1; Index >= 0; --Index)
 		{
-			FEntry& Entry = UsedEntries[Index];
-			if (Entry.CmdBuffer->Fence.Counter > Entry.Fence)
+			FStagingBuffer* Entry = UsedEntries[Index];
+			if (Entry->CmdBuffer)
 			{
-				FreeEntries.push_back(Entry.Buffer);
-				UsedEntries[Index] = UsedEntries[UsedEntries.size() - 1];
-				UsedEntries.resize(UsedEntries.size() - 1);
+				if (Entry->CmdBuffer->Fence.Counter > Entry->Fence)
+				{
+					FreeEntries.push_back(Entry);
+					UsedEntries[Index] = UsedEntries[UsedEntries.size() - 1];
+					UsedEntries.resize(UsedEntries.size() - 1);
+				}
 			}
 		}
 	}
 
-	FBufferWithMem* AcquireBuffer(SVulkan::FCmdBuffer* CurrentCmdBuffer, uint32 Size)
+	FStagingBuffer* AcquireBuffer(uint32 Size, SVulkan::FCmdBuffer* CurrentCmdBuffer)
 	{
 		for (auto* Buffer : FreeEntries)
 		{
-			if (Buffer->Size == Size)
+			if (Buffer->Buffer->Size == Size)
 			{
-				FEntry Entry = { Buffer, CurrentCmdBuffer, CurrentCmdBuffer->Fence.Counter };
-				UsedEntries.push_back(Entry);
+				Buffer->CmdBuffer = CurrentCmdBuffer;
+				Buffer->Fence = CurrentCmdBuffer ? CurrentCmdBuffer->Fence.Counter : 0;
+				UsedEntries.push_back(Buffer);
 				FreeEntries.remove(Buffer);
 				return Buffer;
 			}
 		}
 
-		FBufferWithMem* Buffer = new FBufferWithMem;
-		Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, MemLocation::CPU_TO_GPU, Size, true);
-		FEntry Entry ={Buffer, CurrentCmdBuffer, CurrentCmdBuffer->Fence.Counter};
+		FStagingBuffer* Entry = new FStagingBuffer;
+		Entry->Buffer = new FBufferWithMem;
+		Entry->Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, MemLocation::CPU, Size, true);
+		Entry->CmdBuffer = CurrentCmdBuffer;
+		Entry->Fence = CurrentCmdBuffer ? CurrentCmdBuffer->Fence.Counter : 0;
 		UsedEntries.push_back(Entry);
-		return Buffer;
-	}
-
-	void ReleaseBuffer(FBufferWithMem*& Buffer)
-	{
-		Buffer = nullptr;
+		return Entry;
 	}
 };
 
@@ -2662,7 +2672,7 @@ struct FPendingOpsManager
 
 		struct FCopyBuffer
 		{
-			FBufferWithMem* SrcStaging = nullptr;
+			FStagingBuffer* SrcStaging = nullptr;
 			VkBuffer Dest = VK_NULL_HANDLE;
 			uint32 Size = 0;
 			uint32 SrcOffset = 0;
@@ -2681,7 +2691,7 @@ struct FPendingOpsManager
 
 		struct FCopyBufferToImage
 		{
-			FBufferWithMem* SrcStaging = nullptr;
+			FStagingBuffer* SrcStaging = nullptr;
 			VkImage Dest = VK_NULL_HANDLE;
 			VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_MAX_ENUM;
 			VkImageLayout DestLayout = VK_IMAGE_LAYOUT_MAX_ENUM;
@@ -2703,7 +2713,9 @@ struct FPendingOpsManager
 				Region.size = Copy.Size;
 				Region.srcOffset = Copy.SrcOffset;
 				Region.dstOffset = Copy.DestOffset;
-				vkCmdCopyBuffer(CmdBuffer->CmdBuffer, Copy.SrcStaging->Buffer.Buffer, Copy.Dest, 1, &Region);
+				vkCmdCopyBuffer(CmdBuffer->CmdBuffer, Copy.SrcStaging->Buffer->Buffer.Buffer, Copy.Dest, 1, &Region);
+				Copy.SrcStaging->CmdBuffer = CmdBuffer;
+				Copy.SrcStaging->Fence = CmdBuffer->LastSubmittedFence;
 			}
 				break;
 			case ECopyBufferToImage:
@@ -2726,7 +2738,7 @@ struct FPendingOpsManager
 						CopyImage.Aspect);
 				}
 
-				vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, CopyImage.SrcStaging->Buffer.Buffer, CopyImage.Dest, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+				vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, CopyImage.SrcStaging->Buffer->Buffer.Buffer, CopyImage.Dest, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
 
 				if (CopyImage.DestLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
 				{
@@ -2736,6 +2748,9 @@ struct FPendingOpsManager
 						VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
 						CopyImage.Aspect);
 				}
+
+				CopyImage.SrcStaging->CmdBuffer = CmdBuffer;
+				CopyImage.SrcStaging->Fence = CmdBuffer->LastSubmittedFence;
 			}
 				break;
 			case EUpdateBuffer:
@@ -2762,7 +2777,7 @@ struct FPendingOpsManager
 		}
 	}
 
-	void AddCopyBufferToImage(FBufferWithMem* Buffer, SVulkan::FImage& Image, VkImageLayout StartLayout, VkImageLayout FinalLayout)
+	void AddCopyBufferToImage(FStagingBuffer* Buffer, SVulkan::FImage& Image, VkImageLayout StartLayout, VkImageLayout FinalLayout)
 	{
 		FPendingOp Op;
 		Op.Op = FPendingOp::ECopyBufferToImage;

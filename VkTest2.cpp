@@ -108,44 +108,21 @@ struct FApp
 			TestCSUB.Unlock();
 		}
 
-		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, MemLocation::GPU, 4, 4, VK_FORMAT_R8G8B8A8_UNORM);
+		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, MemLocation::GPU, 1, 1, VK_FORMAT_R8G8B8A8_UNORM);
 		Device.SetDebugName(WhiteTexture.Image.Image, VK_OBJECT_TYPE_IMAGE, "WhiteTexture");
-
-		GPUTiming.Init(&Device);
-	}
-
-	void SetupFirstTime(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
-	{
 		{
-			Device.TransitionImage(CmdBuffer, WhiteTexture.Image.Image,
-				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
-				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
-				VK_IMAGE_ASPECT_COLOR_BIT);
+			FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(4, nullptr);
+			uint8* Mem = (uint8*)Buffer->Buffer->Lock();
+			*Mem += 0xff;
+			*Mem += 0xff;
+			*Mem += 0xff;
+			*Mem += 0xff;
+			Buffer->Buffer->Unlock();
 
-			FBufferWithMem* Buffer = GStagingBufferMgr.AcquireBuffer(CmdBuffer, 4);
-			uint8* Mem = (uint8*)Buffer->Lock();
-			*Mem += 0xff;
-			*Mem += 0xff;
-			*Mem += 0xff;
-			*Mem += 0xff;
-			Buffer->Unlock();
-
-			VkBufferImageCopy Region;
-			ZeroMem(Region);
-			Region.imageExtent.width = 1;
-			Region.imageExtent.height = 1;
-			Region.imageExtent.depth = 1;
-			Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			Region.imageSubresource.layerCount = 1;
-			vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, Buffer->Buffer.Buffer, WhiteTexture.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
-
-			Device.TransitionImage(CmdBuffer, WhiteTexture.Image.Image,
-				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
-				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
-				VK_IMAGE_ASPECT_COLOR_BIT);
+			PendingOpsMgr.AddCopyBufferToImage(Buffer, WhiteTexture.Image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		}
 
-		SetupImGuiAndResources(Device, CmdBuffer);
+		GPUTiming.Init(&Device);
 	}
 
 	void Destroy()
@@ -170,7 +147,7 @@ struct FApp
 		ColorUB.Destroy();
 	}
 
-	void SetupImGuiAndResources(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
+	void SetupImGuiAndResources(SVulkan::SDevice& Device)
 	{
 		ImGuiIO& IO = ImGui::GetIO();
 
@@ -178,10 +155,8 @@ struct FApp
 		unsigned char* Pixels = nullptr;
 		IO.Fonts->GetTexDataAsAlpha8(&Pixels, &Width, &Height);
 
-		//SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
-
-		FBufferWithMem* FontBuffer = GStagingBufferMgr.AcquireBuffer(CmdBuffer, Width * Height * sizeof(uint32));
-		uint8* Data = (uint8*)FontBuffer->Lock();
+		FStagingBuffer* FontBuffer = GStagingBufferMgr.AcquireBuffer(Width * Height * sizeof(uint32), nullptr);
+		uint8* Data = (uint8*)FontBuffer->Buffer->Lock();
 		for (int32 Index = 0; Index < Width * Height; ++Index)
 		{
 			*Data++ = *Pixels;
@@ -190,19 +165,14 @@ struct FApp
 			*Data++ = *Pixels;
 			++Pixels;
 		}
-		FontBuffer->Unlock();
+		FontBuffer->Buffer->Unlock();
 
 		ImGuiFont.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, MemLocation::GPU, Width, Height, VK_FORMAT_R8G8B8A8_UNORM);
 		Device.SetDebugName(ImGuiFont.Image.Image, "ImGuiFont");
 
 		PendingOpsMgr.AddCopyBufferToImage(FontBuffer, ImGuiFont.Image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-		//CmdBuffer->End();
-		//Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
-
 		IO.Fonts->TexID = (void*)ImGuiFont.Image.Image;
-
-		GStagingBufferMgr.ReleaseBuffer(FontBuffer);
 
 		const uint32 ImGuiVertexSize = sizeof(ImDrawVert) * ImGuiMaxVertices;
 		for (int32 Index = 0; Index < NUM_IMGUI_BUFFERS; ++Index)
@@ -606,13 +576,6 @@ static double Render(FApp& App)
 
 	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(&GVulkan.Swapchain, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
 
-	static bool bFirst = true;
-	if (bFirst)
-	{
-		App.SetupFirstTime(Device, CmdBuffer);
-		bFirst = false;
-	}
-
 	App.PendingOpsMgr.ExecutePendingStagingOps(Device, CmdBuffer);
 
 	App.ImGuiNewFrame();
@@ -972,12 +935,13 @@ static GLFWwindow* Init(FApp& App)
 
 	App.Create(Device, Window);
 
-
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
 	ImGuiIO& IO = ImGui::GetIO();
 	//IO.ImeWindowHandle = Window;
+
+	App.SetupImGuiAndResources(Device);
 
 	return Window;
 }
