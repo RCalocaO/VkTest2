@@ -4,8 +4,8 @@
 #include "RCVulkan.h"
 #include "RCScene.h"
 
-#define	USE_TINY_GLTF			0
-#define	USE_CGLTF				1
+#define	USE_TINY_GLTF			1
+#define	USE_CGLTF				0
 
 
 #if USE_TINY_GLTF
@@ -118,7 +118,7 @@ static inline VkPrimitiveTopology GetPrimType(int GLTFMode)
 #endif
 
 #if USE_TINY_GLTF
-int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim)
+int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim, std::vector<FVertexBindings>& OutVertexDecls)
 {
 	FVertexBindings VertexDecl;
 	uint32 BindingIndex = 0;
@@ -151,11 +151,13 @@ int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FS
 		++BindingIndex;
 	}
 
+/*
 	bUseColorStream = (GLTFPrim.attributes.find("COLOR_0") != GLTFPrim.attributes.end());
 	bHasNormals = (GLTFPrim.attributes.find("NORMAL") != GLTFPrim.attributes.end());
 	bHasTexCoords = (GLTFPrim.attributes.find("TEXCOORD_0") != GLTFPrim.attributes.end());
+*/
 
-	VertexDecls.push_back(VertexDecl);
+	OutVertexDecls.push_back(VertexDecl);
 
 	return 0;
 }
@@ -460,7 +462,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 
 				tinygltf::BufferView& IndicesBufferView = Model.bufferViews[Indices.bufferView];
 
-				Prim.VertexDecl = GetOrAddVertexDecl(Model, GLTFPrim, Prim);
+				Prim.VertexDecl = GetOrAddVertexDecl(Model, GLTFPrim, Prim, VertexDecls);
 				Prim.Material = GLTFPrim.material;
 				Prim.PrimType = GetPrimType(GLTFPrim.mode);
 				Prim.IndexOffset = Indices.byteOffset + IndicesBufferView.byteOffset;
@@ -478,14 +480,14 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 		{
 			FBufferWithMem Buffer;
 			uint32 Size = (uint32)GLTFBuffer.data.size();
-			Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, Size);
+			Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, Size, true);
 			float* Data = (float*)Buffer.Lock();
 			memcpy(Data, GLTFBuffer.data.data(), Size);
 			Buffer.Unlock();
 			Scene.Buffers.push_back(Buffer);
 		}
 
-		AddDefaultVertexInputs(Device);
+		//AddDefaultVertexInputs(Device);
 
 		for (tinygltf::Image& GLTFImage : Model.images)
 		{
@@ -494,16 +496,16 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 			check(!GLTFImage.image.empty());
 			{
 				FImageWithMemAndView Image;
-				Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM);
+				Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, MemLocation::GPU, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM);
 
 				SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
 				uint32 Size = GLTFImage.width * GLTFImage.height * sizeof(uint32);
-				FBufferWithMem* TempBuffer = GStagingBufferMgr.AcquireBuffer(CmdBuffer, Size);
+				FStagingBuffer* TempBuffer = StagingMgr->AcquireBuffer(Size, CmdBuffer);
 
-				uint8* Data = (uint8*)TempBuffer->Lock();
+				uint8* Data = (uint8*)TempBuffer->Buffer->Lock();
 				memcpy(Data, GLTFImage.image.data(), Size);
-				TempBuffer->Unlock();
+				TempBuffer->Buffer->Unlock();
 
 				Device.TransitionImage(CmdBuffer, Image.Image.Image,
 					VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
@@ -517,7 +519,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 				Region.imageExtent.depth = 1;
 				Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 				Region.imageSubresource.layerCount = 1;
-				vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, TempBuffer->Buffer.Buffer, Image.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+				vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, TempBuffer->Buffer->Buffer.Buffer, Image.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
 
 				Device.TransitionImage(CmdBuffer, Image.Image.Image,
 					VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -527,7 +529,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 				CmdBuffer->End();
 				Device.Submit(Device.GfxQueue, CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_NULL_HANDLE, VK_NULL_HANDLE);
 
-				GStagingBufferMgr.ReleaseBuffer(TempBuffer);
+				//StagingMgr->ReleaseBuffer(TempBuffer);
 
 				Scene.Images.push_back(Image);
 			}
