@@ -2,7 +2,7 @@
 
 #pragma once
 
-#define SCENE_USE_SINGLE_BUFFERS	1
+#define SCENE_USE_SINGLE_BUFFERS	0
 
 
 struct FVertexBindings
