@@ -931,6 +931,11 @@ struct SVulkan
 			vkSetDebugUtilsObjectNameEXT(Device, &Info);
 		}
 
+		void SetDebugName(VkPipeline Pipeline, const char* Name)
+		{
+			SetDebugName<VkPipeline>(Pipeline, VK_OBJECT_TYPE_IMAGE, Name);
+		}
+
 		void SetDebugName(VkImage Image, const char* Name)
 		{
 			SetDebugName<VkImage>(Image, VK_OBJECT_TYPE_IMAGE, Name);
@@ -2036,7 +2041,7 @@ struct FPSOCache
 	}
 
 	template <typename TFunction>
-	SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
+	SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
 	{
 		check(VS->Shader && VS->Shader->ShaderModule);
 		if (HS || DS)
@@ -2173,32 +2178,35 @@ struct FPSOCache
 
 		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &PSO.Pipeline));
 		PSOs.push_back(PSO);
+
+		Device->SetDebugName(PSO.Pipeline, Name);
+
 		return PSO;
 	}
 
 	template <typename TFunction>
-	inline SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
+	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
 	{
-		return CreateGfxPSO(VS, nullptr, nullptr, PS, RenderPass, Callback);
+		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, Callback);
 	}
 
-	inline SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
+	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
 	{
-		return CreateGfxPSO(VS, nullptr, nullptr, PS, RenderPass, 
+		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, 
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 			{
 			});
 	}
 
-	inline SVulkan::FGfxPSO CreateGfxPSO(FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
+	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
 	{
-		return CreateGfxPSO(VS, HS, DS, PS, RenderPass,
+		return CreateGfxPSO(Name, VS, HS, DS, PS, RenderPass,
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 		{
 		});
 	}
 
-	SVulkan::FComputePSO CreateComputePSO(FShaderInfo* CS)
+	SVulkan::FComputePSO CreateComputePSO(const char* Name, FShaderInfo* CS)
 	{
 		check(CS->Shader && CS->Shader->ShaderModule);
 
@@ -2218,6 +2226,7 @@ struct FPSOCache
 
 		VERIFY_VKRESULT(vkCreateComputePipelines(Device->Device, VK_NULL_HANDLE, 1, &PipelineInfo, nullptr, &PSO.Pipeline));
 		PSOs.push_back(PSO);
+		Device->SetDebugName(PSO.Pipeline, Name);
 		return PSO;
 	}
 
