@@ -970,6 +970,10 @@ int main()
 {
 	FApp App;
 	GLFWwindow* Window = Init(App);
+
+	uint32 ExitAfterNFrames = RCUtils::FCmdLine::Get().TryGetIntPrefix("-exitafterframes=", (uint32)-1);
+
+	uint32 Frame = 0;
 	while (!glfwWindowShouldClose(Window))
 	{
 		double CpuBegin = glfwGetTime() * 1000.0;
@@ -993,6 +997,12 @@ int main()
 			::glfwSetWindowTitle(Window, ss.str().c_str());
 		}
 		App.LastDelta = (float)CpuDelta;
+		++Frame;
+
+		if (Frame > ExitAfterNFrames)
+		{
+			glfwSetWindowShouldClose(Window, 1);
+		}
 	}
 
 	Deinit(App, Window);
