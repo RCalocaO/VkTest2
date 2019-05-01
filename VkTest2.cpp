@@ -30,7 +30,7 @@ static FDescriptorCache GDescriptorCache;
 static FStagingBufferManager GStagingBufferMgr;
 
 
-extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVertexBindings>& VertexDecls, FScene& Scene, FPendingOpsManager& PendingStagingOps);
+extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVertexBindings>& VertexDecls, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
 
 
 struct FApp
@@ -479,7 +479,7 @@ struct FApp
 
 	void TryLoadGLTF(SVulkan::SDevice& Device, const char* Filename)
 	{
-		if (LoadGLTF(Device, Filename, VertexDecls, Scene, PendingOpsMgr))
+		if (LoadGLTF(Device, Filename, VertexDecls, Scene, PendingOpsMgr, &GStagingBufferMgr))
 		{
 			LoadedGLTF = Filename;
 		}

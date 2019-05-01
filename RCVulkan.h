@@ -2663,7 +2663,7 @@ struct FPendingOpsManager
 		enum OpType
 		{
 			EInvalid,
-			ECopyBuffer,
+			ECopyBuffers,
 			ECopyBufferToImage,
 			EUpdateBuffer,
 		};
@@ -2675,8 +2675,8 @@ struct FPendingOpsManager
 			FStagingBuffer* SrcStaging = nullptr;
 			VkBuffer Dest = VK_NULL_HANDLE;
 			uint32 Size = 0;
-			uint32 SrcOffset = 0;
-			uint32 DestOffset = 0;
+			//uint32 SrcOffset = 0;
+			//uint32 DestOffset = 0;
 		};
 		FCopyBuffer Copy;
 
@@ -2706,13 +2706,13 @@ struct FPendingOpsManager
 		{
 			switch (Op)
 			{
-			case ECopyBuffer:
+			case ECopyBuffers:
 			{
 				VkBufferCopy Region;
 				ZeroMem(Region);
 				Region.size = Copy.Size;
-				Region.srcOffset = Copy.SrcOffset;
-				Region.dstOffset = Copy.DestOffset;
+				Region.srcOffset = 0;//Copy.SrcOffset;
+				Region.dstOffset = 0;//Copy.DestOffset;
 				vkCmdCopyBuffer(CmdBuffer->CmdBuffer, Copy.SrcStaging->Buffer->Buffer.Buffer, Copy.Dest, 1, &Region);
 				Copy.SrcStaging->CmdBuffer = CmdBuffer;
 				Copy.SrcStaging->Fence = CmdBuffer->LastSubmittedFence;
@@ -2775,6 +2775,17 @@ struct FPendingOpsManager
 			}
 			Ops.resize(0);
 		}
+	}
+
+	void AddCopyBuffers(FStagingBuffer* SrcBuffer, SVulkan::FBuffer* DestBuffer)
+	{
+		FPendingOp Op;
+		Op.Op = FPendingOp::ECopyBuffers;
+		Op.Copy.SrcStaging = SrcBuffer;
+		Op.Copy.Dest = DestBuffer->Buffer;
+		Op.Copy.Size = SrcBuffer->Buffer->Size;
+
+		Ops.push_back(Op);
 	}
 
 	void AddCopyBufferToImage(FStagingBuffer* Buffer, SVulkan::FImage& Image, VkImageLayout StartLayout, VkImageLayout FinalLayout)

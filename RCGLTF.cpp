@@ -311,7 +311,7 @@ int GetOrAddVertexDecl(cgltf_data* Data, cgltf_primitive& GLTFPrim, FScene::FPri
 
 #endif
 
-bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVertexBindings>& VertexDecls, FScene& Scene, FPendingOpsManager& PendingStagingOps)
+bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVertexBindings>& VertexDecls, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr)
 {
 #if USE_CGLTF
 	cgltf_options Options;
@@ -354,14 +354,25 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 #if SCENE_USE_SINGLE_BUFFERS
 					uint32 IBSize = (uint32)(Indices.count * Indices.stride);
 					check(Indices.buffer_view->size == IBSize);
-					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, IBSize, true);
+					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::GPU, IBSize, false);
 					Device.SetDebugName(Prim.IndexBuffer.Buffer.Buffer, "PrimIB");
+					{
+						FStagingBuffer* Buffer = StagingMgr->AcquireBuffer(IBSize, nullptr);
+						void* DestIBData = Buffer->Buffer->Lock();
+						uint16* SrcIBData = (uint16*)((uint8*)Indices.buffer_view->buffer->data + Indices.buffer_view->offset);
+						memcpy(DestIBData, SrcIBData, IBSize);
+						Buffer->Buffer->Unlock();
+
+						PendingStagingOps.AddCopyBuffers(Buffer, &Prim.IndexBuffer.Buffer);
+					}
+/*
 					PendingStagingOps.AddUpdateBuffer(Prim.IndexBuffer.Buffer.Buffer, IBSize,
 						[&](void* DestData)
 						{
 							uint16* SrcIBData = (uint16*)((uint8*)Indices.buffer_view->buffer->data + Indices.buffer_view->offset);
 							memcpy(DestData, SrcIBData, IBSize);
 						});
+*/
 #else
 					Prim.IndexOffset = Indices.offset + IndicesBufferView.offset;
 					Prim.IndexBuffer = FindBuffer(SrcData, IndicesBufferView.buffer);
