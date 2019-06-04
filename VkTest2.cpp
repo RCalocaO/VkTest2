@@ -69,6 +69,8 @@ struct FApp
 	GLFWcursor* MouseCursors[ImGuiMouseCursor_COUNT] = {0};
 
 	float LastDelta = 1.0f / 60.0f;
+	double GpuDelta = 0;
+	double CpuDelta = 0;
 
 	void Create(SVulkan::SDevice& Device, GLFWwindow* InWindow)
 	{
@@ -692,6 +694,36 @@ static double Render(FApp& App)
 
 	App.GPUTiming.EndTimestamp(CmdBuffer);
 
+
+	if (ImGui::BeginMainMenuBar())
+	{
+		{
+			char s[256];
+			sprintf(s, "FPS %3.2f", (float)(1000.0 / App.CpuDelta));
+			ImGui::MenuItem(s, nullptr, false, false);
+			sprintf(s, "CPU %3.2fms", (float)App.CpuDelta);
+			ImGui::MenuItem(s, nullptr, false, false);
+			sprintf(s, "GPU %3.2fms", (float)App.GpuDelta);
+			ImGui::MenuItem(s, nullptr, false, false);
+			if (!App.LoadedGLTF.empty())
+			{
+				ImGui::MenuItem(App.LoadedGLTF.c_str(), nullptr, false, false);
+			}
+		}
+/*
+		if (ImGui::BeginMenu("File"))
+		{
+			if (ImGui::MenuItem("Open", "Ctrl+O"))
+			{
+			}
+			ImGui::EndMenu();
+		}
+*/
+
+		ImGui::EndMainMenuBar();
+	}
+
+/*
 	{
 		if (ImGui::Begin("Hello, world!"))
 		{
@@ -708,8 +740,9 @@ static double Render(FApp& App)
 			ImGui::End();
 		}
 
-		ImGui::ShowDemoWindow();
+		//ImGui::ShowDemoWindow();
 	}
+*/
 
 	ImGui::Render();
 
@@ -966,12 +999,13 @@ int main()
 
 		glfwPollEvents();
 
-		double GpuDelta = Render(App);
+		App.GpuDelta = Render(App);
 
 		double CpuEnd = glfwGetTime() * 1000.0;
 
-		double CpuDelta = CpuEnd - CpuBegin;
+		App.CpuDelta = CpuEnd - CpuBegin;
 
+/*
 		{
 			std::stringstream ss;
 			ss << "VkTest2 CPU: " << CpuDelta << " ms,  GPU: " << GpuDelta << " ms";
@@ -982,7 +1016,8 @@ int main()
 			ss.flush();
 			::glfwSetWindowTitle(Window, ss.str().c_str());
 		}
-		App.LastDelta = (float)CpuDelta;
+*/
+		App.LastDelta = (float)App.CpuDelta;
 		++Frame;
 
 		if (Frame > ExitAfterNFrames)
