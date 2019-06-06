@@ -101,9 +101,9 @@ static inline VkPrimitiveTopology GetPrimType(int GLTFMode)
 	return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 }
 
-int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim, std::vector<FVertexBindings>& OutVertexDecls)
+int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim, std::vector<FPSOCache::FVertexDecl>& OutVertexDecls)
 {
-	FVertexBindings VertexDecl;
+	FPSOCache::FVertexDecl VertexDecl;
 	uint32 BindingIndex = 0;
 	for (auto Pair : GLTFPrim.attributes)
 	{
@@ -146,7 +146,7 @@ int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FS
 }
 
 
-bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVertexBindings>& VertexDecls, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr)
+bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FPSOCache::FVertexDecl>& VertexDecls, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr)
 {
 	tinygltf::TinyGLTF Loader;
 	tinygltf::Model Model;

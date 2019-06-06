@@ -5,14 +5,6 @@
 #define SCENE_USE_SINGLE_BUFFERS	0
 
 
-struct FVertexBindings
-{
-	std::vector<VkVertexInputAttributeDescription> AttrDescs;
-	std::vector<VkVertexInputBindingDescription> BindingDescs;
-	std::vector<std::string> Names;
-};
-
-
 struct FScene
 {
 	std::vector<FBufferWithMem> Buffers;

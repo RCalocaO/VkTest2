@@ -1971,6 +1971,35 @@ struct FRenderTargetCache
 
 struct FPSOCache
 {
+	struct FVertexDecl
+	{
+		std::vector<VkVertexInputAttributeDescription> AttrDescs;
+		std::vector<std::string> Names;
+
+		std::vector<VkVertexInputBindingDescription> BindingDescs;
+
+		void AddAttribute(uint32 StreamIndex, uint32 AttributeIndex, VkFormat Format, uint32 AttributeOffset, const char* Name)
+		{
+			VkVertexInputAttributeDescription Attr;
+			Attr.location = AttributeIndex;
+			Attr.binding = StreamIndex;
+			Attr.format = Format;
+			Attr.offset = AttributeOffset;
+			AttrDescs.push_back(Attr);
+			Names.push_back(Name);
+		}
+
+		void AddStream(uint32 StreamIndex, uint32 Stride)
+		{
+			VkVertexInputBindingDescription Desc;
+			Desc.binding = StreamIndex;
+			Desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+			Desc.stride = Stride;
+			BindingDescs.push_back(Desc);
+		}
+	};
+	std::vector<FVertexDecl> VertexDecls;
+
 	struct FLayout
 	{
 		VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
