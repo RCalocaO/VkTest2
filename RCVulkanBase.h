@@ -20,3 +20,14 @@ inline void ZeroVulkanMem(T& VulkanStruct, VkStructureType Type)
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #include "../VulkanMemoryAllocator/src/vk_mem_alloc.h"
 #endif
+
+
+inline bool operator == (const VkVertexInputAttributeDescription& A, const VkVertexInputAttributeDescription& B)
+{
+	return A.binding == B.binding && A.format == B.format && A.location == B.location && A.offset == B.offset;
+}
+
+inline bool operator == (const VkVertexInputBindingDescription& A, const VkVertexInputBindingDescription& B)
+{
+	return A.binding == B.binding && A.inputRate == B.inputRate && A.stride == B.stride;
+}

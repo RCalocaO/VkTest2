@@ -330,7 +330,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 				cgltf_buffer& GLTFBuffer = SrcData->buffers[BufferIndex];
 				FBufferWithMem Buffer;
 				uint32 Size = (uint32)GLTFBuffer.size;
-				Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, Size, true);
+				Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, Size, true);
 				float* Data = (float*)Buffer.Lock();
 				memcpy(Data, GLTFBuffer.data, Size);
 				Buffer.Unlock();
@@ -356,7 +356,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 #if SCENE_USE_SINGLE_BUFFERS
 					uint32 IBSize = (uint32)(Indices.count * Indices.stride);
 					check(Indices.buffer_view->size == IBSize);
-					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::GPU, IBSize, false);
+					Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::GPU, IBSize, false);
 					Device.SetDebugName(Prim.IndexBuffer.Buffer.Buffer, "PrimIB");
 					{
 						FStagingBuffer* Buffer = StagingMgr->AcquireBuffer(IBSize, nullptr);
@@ -480,7 +480,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 		{
 			FBufferWithMem Buffer;
 			uint32 Size = (uint32)GLTFBuffer.data.size();
-			Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, Size, true);
+			Buffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, Size, true);
 			float* Data = (float*)Buffer.Lock();
 			memcpy(Data, GLTFBuffer.data.data(), Size);
 			Buffer.Unlock();
@@ -496,7 +496,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FVerte
 			check(!GLTFImage.image.empty());
 			{
 				FImageWithMemAndView Image;
-				Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, MemLocation::GPU, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM);
+				Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, EMemLocation::GPU, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM);
 
 				SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 

@@ -44,7 +44,6 @@ struct FApp
 	SVulkan::FGfxPSO VBClipVSRedPSO;
 	SVulkan::FGfxPSO TestGLTFPSO;
 	FBufferWithMemAndView ClipVB;
-	FShaderInfo* TestCS = nullptr;
 	SVulkan::FComputePSO TestCSPSO;
 	FBufferWithMemAndView TestCSBuffer;
 	FBufferWithMem TestCSUB;
@@ -78,7 +77,7 @@ struct FApp
 
 		// Dummy stuff
 		uint32 ClipVBSize = 3 * 4 * sizeof(float);
-		ClipVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::GPU, ClipVBSize, VK_FORMAT_R32G32B32A32_SFLOAT, false);
+		ClipVB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::GPU, ClipVBSize, VK_FORMAT_R32G32B32A32_SFLOAT, false);
 		PendingOpsMgr.AddUpdateBuffer(ClipVB.Buffer.Buffer, ClipVBSize, 
 			[](void* InData)
 			{
@@ -88,7 +87,7 @@ struct FApp
 				*Data++ = -0.5f;	*Data++ = 0.5f;		*Data++ = 1; *Data++ = 1;
 			});
 
-		ColorUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, MemLocation::CPU_TO_GPU, 4 * sizeof(float), true);
+		ColorUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, EMemLocation::CPU_TO_GPU, 4 * sizeof(float), true);
 		{
 			float* Data = (float*)ColorUB.Lock();
 			*Data++ = 0.0f;
@@ -98,9 +97,9 @@ struct FApp
 			ColorUB.Unlock();
 		}
 
-		TestCSBuffer.Create(Device, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT, MemLocation::CPU_TO_GPU, 256 * 256 * 4 * sizeof(float), VK_FORMAT_R32G32B32A32_SFLOAT, false);
+		TestCSBuffer.Create(Device, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT, EMemLocation::CPU_TO_GPU, 256 * 256 * 4 * sizeof(float), VK_FORMAT_R32G32B32A32_SFLOAT, false);
 
-		TestCSUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, MemLocation::CPU_TO_GPU, 4 * sizeof(uint32) + 16 * 1024, true);
+		TestCSUB.Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, EMemLocation::CPU_TO_GPU, 4 * sizeof(uint32) + 16 * 1024, true);
 		{
 			uint32* Data = (uint32*)TestCSUB.Lock();
 			*Data++ = 0xffffffff;
@@ -111,7 +110,7 @@ struct FApp
 			TestCSUB.Unlock();
 		}
 
-		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, MemLocation::GPU, 1, 1, VK_FORMAT_R8G8B8A8_UNORM);
+		WhiteTexture.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::GPU, 1, 1, VK_FORMAT_R8G8B8A8_UNORM);
 		Device.SetDebugName(WhiteTexture.Image.Image, VK_OBJECT_TYPE_IMAGE, "WhiteTexture");
 		{
 			FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(4, nullptr);
@@ -170,7 +169,7 @@ struct FApp
 		}
 		FontBuffer->Buffer->Unlock();
 
-		ImGuiFont.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, MemLocation::GPU, Width, Height, VK_FORMAT_R8G8B8A8_UNORM);
+		ImGuiFont.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, EMemLocation::GPU, Width, Height, VK_FORMAT_R8G8B8A8_UNORM);
 		Device.SetDebugName(ImGuiFont.Image.Image, "ImGuiFont");
 
 		PendingOpsMgr.AddCopyBufferToImage(FontBuffer, ImGuiFont.Image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -180,10 +179,10 @@ struct FApp
 		const uint32 ImGuiVertexSize = sizeof(ImDrawVert) * ImGuiMaxVertices;
 		for (int32 Index = 0; Index < NUM_IMGUI_BUFFERS; ++Index)
 		{
-			ImGuiVB[Index].Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, ImGuiVertexSize, true);
+			ImGuiVB[Index].Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, ImGuiVertexSize, true);
 			static_assert(sizeof(uint16) == sizeof(ImDrawIdx), "");
-			ImGuiIB[Index].Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, ImGuiMaxIndices * sizeof(uint16), true);
-			ImGuiScaleTranslateUB[Index].Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, MemLocation::CPU_TO_GPU, 4 * sizeof(float), true);
+			ImGuiIB[Index].Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, ImGuiMaxIndices * sizeof(uint16), true);
+			ImGuiScaleTranslateUB[Index].Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, 4 * sizeof(float), true);
 		}
 
 		{
@@ -698,7 +697,7 @@ static double Render(FApp& App)
 	if (ImGui::BeginMainMenuBar())
 	{
 		{
-			char s[256];
+			char s[64];
 			sprintf(s, "FPS %3.2f", (float)(1000.0 / App.CpuDelta));
 			ImGui::MenuItem(s, nullptr, false, false);
 			sprintf(s, "CPU %3.2fms", (float)App.CpuDelta);
@@ -815,7 +814,7 @@ static void FixGLTFVertexDecl(FVertexBindings& VertexDecl, SVulkan::FShader* Sha
 
 static void SetupShaders(FApp& App)
 {
-	App.TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "TestCS", FShaderInfo::EStage::Compute);
+	FShaderInfo* TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "TestCS", FShaderInfo::EStage::Compute);
 	FShaderInfo* VBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "VBClipVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* DataClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipVS", FShaderInfo::EStage::Vertex);
@@ -830,7 +829,7 @@ static void SetupShaders(FApp& App)
 	FShaderInfo* PassThroughVS = GShaderLibrary.RegisterShader("Shaders/PassThroughVS.hlsl", "MainVS", FShaderInfo::EStage::Vertex);
 	GShaderLibrary.RecompileShaders();
 
-	App.TestCSPSO = GPSOCache.CreateComputePSO("TestCSPSO", App.TestCS);
+	App.TestCSPSO = GPSOCache.CreateComputePSO("TestCSPSO", TestCS);
 
 	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
 
