@@ -890,16 +890,13 @@ static void SetupShaders(FApp& App)
 
 	App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, [&](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
-		if (!GPSOCache.VertexDecls.empty())
-		{
-			check(GPSOCache.VertexDecls.size() == 1);
-			FixGLTFVertexDecl(GPSOCache.VertexDecls[0], TestGLTFVS->Shader);
-			VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
-			VertexInputInfo->vertexAttributeDescriptionCount = (uint32)GPSOCache.VertexDecls[0].AttrDescs.size();
-			VertexInputInfo->pVertexAttributeDescriptions = GPSOCache.VertexDecls[0].AttrDescs.data();
-			VertexInputInfo->vertexBindingDescriptionCount = (uint32)GPSOCache.VertexDecls[0].BindingDescs.size();
-			VertexInputInfo->pVertexBindingDescriptions = GPSOCache.VertexDecls[0].BindingDescs.data();
-		}
+		check(GPSOCache.VertexDecls.size() == 1);
+		FixGLTFVertexDecl(GPSOCache.VertexDecls[0], TestGLTFVS->Shader);
+		VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
+		VertexInputInfo->vertexAttributeDescriptionCount = (uint32)GPSOCache.VertexDecls[0].AttrDescs.size();
+		VertexInputInfo->pVertexAttributeDescriptions = GPSOCache.VertexDecls[0].AttrDescs.data();
+		VertexInputInfo->vertexBindingDescriptionCount = (uint32)GPSOCache.VertexDecls[0].BindingDescs.size();
+		VertexInputInfo->pVertexBindingDescriptions = GPSOCache.VertexDecls[0].BindingDescs.data();
 	});
 }
 

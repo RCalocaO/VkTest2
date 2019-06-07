@@ -114,22 +114,8 @@ int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FS
 		OutPrim.VertexOffsets.push_back(BufferView.byteOffset + Accessor.byteOffset);
 		OutPrim.VertexBuffers.push_back(BufferView.buffer);
 
-		VkVertexInputAttributeDescription AttrDesc;
-		ZeroMem(AttrDesc);
-		AttrDesc.binding = BindingIndex;
-		AttrDesc.format = GetFormat(Accessor.componentType, Accessor.type);
-		AttrDesc.location = BindingIndex;
-		AttrDesc.offset = 0;
-		VertexDecl.AttrDescs.push_back(AttrDesc);
-
-		VkVertexInputBindingDescription BindingDesc;
-		ZeroMem(BindingDesc);
-		BindingDesc.binding = BindingIndex;
-		BindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-		BindingDesc.stride = (uint32)BufferView.byteStride;
-		VertexDecl.BindingDescs.push_back(BindingDesc);
-
-		VertexDecl.Names.push_back(Name);
+		VertexDecl.AddAttribute(BindingIndex, BindingIndex, GetFormat(Accessor.componentType, Accessor.type), 0, Name.c_str());
+		VertexDecl.AddStream(BindingIndex, (uint32)BufferView.byteStride);
 
 		++BindingIndex;
 	}
