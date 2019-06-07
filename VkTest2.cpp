@@ -30,7 +30,7 @@ static FDescriptorCache GDescriptorCache;
 static FStagingBufferManager GStagingBufferMgr;
 
 
-extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FPSOCache::FVertexDecl>& VertexDecls, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
+extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
 
 
 struct FApp
@@ -480,7 +480,7 @@ struct FApp
 
 	void TryLoadGLTF(SVulkan::SDevice& Device, const char* Filename)
 	{
-		if (LoadGLTF(Device, Filename, GPSOCache.VertexDecls, Scene, PendingOpsMgr, &GStagingBufferMgr))
+		if (LoadGLTF(Device, Filename, GPSOCache, Scene, PendingOpsMgr, &GStagingBufferMgr))
 		{
 			LoadedGLTF = Filename;
 		}
@@ -495,20 +495,26 @@ struct FApp
 				//GetPSO(Prim.VertexDecl);
 
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, TestGLTFPSO.Pipeline);
+				std::vector<VkBuffer> VBs;
 #if SCENE_USE_SINGLE_BUFFERS
 				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, Prim.IndexBuffer.Buffer.Buffer, 0, Prim.IndexType);
+				std::vector<VkDeviceSize> VertexOffsets;
+				for (auto VB : Prim.VertexBuffers)
+				{
+					VBs.push_back(VB.Buffer.Buffer);
+					VertexOffsets.push_back(0);
+				}
+				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), VertexOffsets.data());
 #else
 				SVulkan::FBuffer& IB = Scene.Buffers[Prim.IndexBuffer].Buffer;
 				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB.Buffer, Prim.IndexOffset, Prim.IndexType);
-#endif
-				std::vector<VkBuffer> VBs;
 				for (auto VBIndex : Prim.VertexBuffers)
 				{
 					VBs.push_back(Scene.Buffers[VBIndex].Buffer.Buffer);
 				}
 				check(VBs.size() == Prim.VertexOffsets.size());
 				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), Prim.VertexOffsets.data());
-
+#endif
 				{
 					VkDescriptorImageInfo ImageInfo[2];
 					ZeroMem(ImageInfo);
@@ -768,7 +774,7 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 {
 }
 
-static void FixGLTFVertexDecl(FPSOCache::FVertexDecl& VertexDecl, SVulkan::FShader* Shader)
+static FPSOCache::FVertexDecl* FixGLTFVertexDecl(SVulkan::FShader* Shader, int32& PrimVertexDeclHandle)
 {
 	SpvReflectShaderModule Module;
 
@@ -782,6 +788,8 @@ static void FixGLTFVertexDecl(FPSOCache::FVertexDecl& VertexDecl, SVulkan::FShad
 	std::vector<SpvReflectInterfaceVariable*> Variables(Count);
 	result = spvReflectEnumerateInputVariables(&Module, &Count, Variables.data());
 	check(result == SPV_REFLECT_RESULT_SUCCESS);
+
+	FPSOCache::FVertexDecl NewDecl = GPSOCache.VertexDecls[PrimVertexDeclHandle];
 
 	auto FindSemantic = [&](const char* Name) -> int32
 	{
@@ -797,18 +805,22 @@ static void FixGLTFVertexDecl(FPSOCache::FVertexDecl& VertexDecl, SVulkan::FShad
 	};
 
 	uint32 Index = 0;
-	for (auto& Name : VertexDecl.Names)
+	for (auto& Name : NewDecl.Names)
 	{
 		int32 Found = FindSemantic(Name.c_str());
 		check(Found != -1);
 		{
-			VertexDecl.AttrDescs[Index].location = (uint32)Found;
+			NewDecl.AttrDescs[Index].location = (uint32)Found;
 		}
 
 		++Index;
 	}
 
 	spvReflectDestroyShaderModule(&Module);
+
+	PrimVertexDeclHandle = GPSOCache.FindOrAddVertexDecl(NewDecl);
+
+	return &GPSOCache.VertexDecls[PrimVertexDeclHandle];
 }
 
 static void SetupShaders(FApp& App)
@@ -891,12 +903,14 @@ static void SetupShaders(FApp& App)
 	App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, [&](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		check(GPSOCache.VertexDecls.size() == 1);
-		FixGLTFVertexDecl(GPSOCache.VertexDecls[0], TestGLTFVS->Shader);
+		check(App.Scene.Meshes.size() == 1);
+		check(App.Scene.Meshes[0].Prims.size() == 1);
+		FPSOCache::FVertexDecl* NewDecl = FixGLTFVertexDecl(TestGLTFVS->Shader, App.Scene.Meshes[0].Prims[0].VertexDecl);
 		VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
-		VertexInputInfo->vertexAttributeDescriptionCount = (uint32)GPSOCache.VertexDecls[0].AttrDescs.size();
-		VertexInputInfo->pVertexAttributeDescriptions = GPSOCache.VertexDecls[0].AttrDescs.data();
-		VertexInputInfo->vertexBindingDescriptionCount = (uint32)GPSOCache.VertexDecls[0].BindingDescs.size();
-		VertexInputInfo->pVertexBindingDescriptions = GPSOCache.VertexDecls[0].BindingDescs.data();
+		VertexInputInfo->vertexAttributeDescriptionCount = (uint32)NewDecl->AttrDescs.size();
+		VertexInputInfo->pVertexAttributeDescriptions = NewDecl->AttrDescs.data();
+		VertexInputInfo->vertexBindingDescriptionCount = (uint32)NewDecl->BindingDescs.size();
+		VertexInputInfo->pVertexBindingDescriptions = NewDecl->BindingDescs.data();
 	});
 }
 

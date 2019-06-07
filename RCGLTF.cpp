@@ -101,21 +101,37 @@ static inline VkPrimitiveTopology GetPrimType(int GLTFMode)
 	return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 }
 
-int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim, std::vector<FPSOCache::FVertexDecl>& OutVertexDecls)
+static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FScene::FPrim& OutPrim, FPSOCache& PSOCache)
 {
 	FPSOCache::FVertexDecl VertexDecl;
 	uint32 BindingIndex = 0;
+
 	for (auto Pair : GLTFPrim.attributes)
 	{
 		std::string Name = Pair.first;
 		tinygltf::Accessor& Accessor = Model.accessors[Pair.second];
 
 		tinygltf::BufferView& BufferView = Model.bufferViews[Accessor.bufferView];
+#if SCENE_USE_SINGLE_BUFFERS
+		VertexDecl.AddAttribute(BindingIndex, BindingIndex, GetFormat(Accessor.componentType, Accessor.type), 0, Name.c_str());
+
+		uint32 Size = (uint32)BufferView.byteLength;
+		OutPrim.VertexBuffers.push_back(FBufferWithMem());
+		FBufferWithMem& VB = OutPrim.VertexBuffers.back();
+		VB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, Size, true);
+		{
+			unsigned char* SrcData = (unsigned char*)Model.buffers[BufferView.buffer].data.data();
+			SrcData += BufferView.byteOffset + Accessor.byteOffset;
+			float* DestData = (float*)VB.Lock();
+			memcpy(DestData, SrcData, Size);
+			VB.Unlock();
+		}
+#else
 		OutPrim.VertexOffsets.push_back(BufferView.byteOffset + Accessor.byteOffset);
 		OutPrim.VertexBuffers.push_back(BufferView.buffer);
-
-		VertexDecl.AddAttribute(BindingIndex, BindingIndex, GetFormat(Accessor.componentType, Accessor.type), 0, Name.c_str());
-		VertexDecl.AddStream(BindingIndex, (uint32)BufferView.byteStride);
+		VertexDecl.AddAttribute(BindingIndex, UINT32_MAX, GetFormat(Accessor.componentType, Accessor.type), 0, Name.c_str());
+#endif
+		VertexDecl.AddBinding(BindingIndex, (uint32)BufferView.byteStride);
 
 		++BindingIndex;
 	}
@@ -125,14 +141,11 @@ int GetOrAddVertexDecl(tinygltf::Model& Model, tinygltf::Primitive& GLTFPrim, FS
 	bHasNormals = (GLTFPrim.attributes.find("NORMAL") != GLTFPrim.attributes.end());
 	bHasTexCoords = (GLTFPrim.attributes.find("TEXCOORD_0") != GLTFPrim.attributes.end());
 */
-
-	OutVertexDecls.push_back(VertexDecl);
-
-	return 0;
+	return PSOCache.FindOrAddVertexDecl(VertexDecl);
 }
 
 
-bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FPSOCache::FVertexDecl>& VertexDecls, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr)
+bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr)
 {
 	tinygltf::TinyGLTF Loader;
 	tinygltf::Model Model;
@@ -152,12 +165,24 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FPSOCa
 
 				tinygltf::BufferView& IndicesBufferView = Model.bufferViews[Indices.bufferView];
 
-				Prim.VertexDecl = GetOrAddVertexDecl(Model, GLTFPrim, Prim, VertexDecls);
+				Prim.VertexDecl = GetOrAddVertexDecl(Device, Model, GLTFPrim, Prim, PSOCache);
 				Prim.Material = GLTFPrim.material;
 				Prim.PrimType = GetPrimType(GLTFPrim.mode);
-				Prim.IndexOffset = Indices.byteOffset + IndicesBufferView.byteOffset;
 				Prim.NumIndices = (uint32)IndicesBufferView.byteLength / GetSizeInBytes(Indices.componentType);
+#if SCENE_USE_SINGLE_BUFFERS
+				uint32 Size = (uint32)IndicesBufferView.byteLength;
+				Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, Size, true);
+				{
+					unsigned char* SrcData = Model.buffers[IndicesBufferView.buffer].data.data();
+					SrcData += IndicesBufferView.byteOffset + Indices.byteOffset;
+					unsigned short* DestData = (unsigned short*)Prim.IndexBuffer.Lock();
+					memcpy(DestData, SrcData, Size);
+					Prim.IndexBuffer.Unlock();
+				}
+#else
+				Prim.IndexOffset = Indices.byteOffset + IndicesBufferView.byteOffset;
 				Prim.IndexBuffer = IndicesBufferView.buffer;
+#endif
 				Prim.IndexType = GetIndexType(Indices.componentType);
 
 				Mesh.Prims.push_back(Prim);
@@ -166,6 +191,8 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FPSOCa
 			Scene.Meshes.push_back(Mesh);
 		}
 
+#if !SCENE_USE_SINGLE_BUFFERS
+		check(Model.buffers.size() == 1);
 		for (tinygltf::Buffer& GLTFBuffer : Model.buffers)
 		{
 			FBufferWithMem Buffer;
@@ -176,7 +203,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, std::vector<FPSOCa
 			Buffer.Unlock();
 			Scene.Buffers.push_back(Buffer);
 		}
-
+#endif
 		//AddDefaultVertexInputs(Device);
 
 		for (tinygltf::Image& GLTFImage : Model.images)

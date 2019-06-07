@@ -2,7 +2,7 @@
 
 #pragma once
 
-#define SCENE_USE_SINGLE_BUFFERS	0
+#define SCENE_USE_SINGLE_BUFFERS	1
 
 
 struct FScene
@@ -16,12 +16,13 @@ struct FScene
 	{
 #if SCENE_USE_SINGLE_BUFFERS
 		FBufferWithMem IndexBuffer;
+		std::vector<FBufferWithMem> VertexBuffers;
 #else
 		int IndexBuffer;
 		VkDeviceSize IndexOffset;
-#endif
 		std::vector<int> VertexBuffers;
 		std::vector<VkDeviceSize> VertexOffsets;
+#endif
 		uint32 NumIndices;
 		VkIndexType IndexType;
 		VkPrimitiveTopology PrimType;
@@ -46,7 +47,7 @@ struct FScene
 				Prim.IndexBuffer.Destroy();
 				for (auto& VB : Prim.VertexBuffers)
 				{
-					//VB.Destroy();
+					VB.Destroy();
 				}
 			}
 		}

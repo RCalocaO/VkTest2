@@ -1978,27 +1978,49 @@ struct FPSOCache
 
 		std::vector<VkVertexInputBindingDescription> BindingDescs;
 
-		void AddAttribute(uint32 StreamIndex, uint32 AttributeIndex, VkFormat Format, uint32 AttributeOffset, const char* Name)
+		void AddAttribute(uint32 BindingIndex, uint32 Location, VkFormat Format, uint32 AttributeOffset, const char* Name)
 		{
 			VkVertexInputAttributeDescription Attr;
-			Attr.location = AttributeIndex;
-			Attr.binding = StreamIndex;
+			Attr.location = Location;
+			Attr.binding = BindingIndex;
 			Attr.format = Format;
 			Attr.offset = AttributeOffset;
 			AttrDescs.push_back(Attr);
 			Names.push_back(Name);
 		}
 
-		void AddStream(uint32 StreamIndex, uint32 Stride)
+		void AddBinding(uint32 BindingIndex, uint32 Stride)
 		{
 			VkVertexInputBindingDescription Desc;
-			Desc.binding = StreamIndex;
+			Desc.binding = BindingIndex;
 			Desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 			Desc.stride = Stride;
 			BindingDescs.push_back(Desc);
 		}
 	};
 	std::vector<FVertexDecl> VertexDecls;
+
+	int32 FindOrAddVertexDecl(const FVertexDecl& VertexDecl)
+	{
+		int32 Index = 0;
+		for (auto& Entry : VertexDecls)
+		{
+			if (Entry.AttrDescs == VertexDecl.AttrDescs
+				&& Entry.BindingDescs == VertexDecl.BindingDescs
+				&& Entry.Names == VertexDecl.Names
+				)
+			{
+				check(Entry.Names == VertexDecl.Names);
+				return Index;
+			}
+
+			++Index;
+		}
+
+		VertexDecls.push_back(VertexDecl);
+
+		return Index;
+	}
 
 	struct FLayout
 	{
