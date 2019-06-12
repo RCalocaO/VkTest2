@@ -1461,15 +1461,15 @@ struct SVulkan
 
 		std::vector<const char*> Layers;
 
+		if (RCUtils::FCmdLine::Get().Contains("-apidump"))
+		{
+			Layers.push_back("VK_LAYER_LUNARG_api_dump");
+		}
+
 		if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
 		{
 			Layers.push_back("VK_LAYER_KHRONOS_validation");
 			//Layers.push_back("VK_LAYER_LUNARG_standard_validation");
-		}
-
-		if (RCUtils::FCmdLine::Get().Contains("-apidump"))
-		{
-			Layers.push_back("VK_LAYER_LUNARG_api_dump");
 		}
 
 		VerifyLayers(LayerProperties, Layers);
@@ -2043,9 +2043,17 @@ struct FPSOCache
 	std::vector<SVulkan::FPSO> PSOs;
 
 	SVulkan::SDevice* Device =  nullptr;
+	FBufferWithMem ZeroBuffer;
+
 	void Init(SVulkan::SDevice* InDevice)
 	{
 		Device = InDevice;
+		ZeroBuffer.Create(*InDevice, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, 4 * sizeof(float), true);
+		{
+			void* Mem = ZeroBuffer.Lock();
+			memset(Mem, ZeroBuffer.Size, 255);
+			ZeroBuffer.Unlock();
+		}
 	}
 
 	VkPipelineLayout GetOrCreatePipelineLayout(SVulkan::FShader* VS, SVulkan::FShader* PS, std::vector<VkDescriptorSetLayout>& OutLayouts)

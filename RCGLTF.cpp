@@ -105,7 +105,6 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 {
 	FPSOCache::FVertexDecl VertexDecl;
 	uint32 BindingIndex = 0;
-
 	for (auto Pair : GLTFPrim.attributes)
 	{
 		std::string Name = Pair.first;
@@ -136,11 +135,27 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		++BindingIndex;
 	}
 
-/*
-	bUseColorStream = (GLTFPrim.attributes.find("COLOR_0") != GLTFPrim.attributes.end());
-	bHasNormals = (GLTFPrim.attributes.find("NORMAL") != GLTFPrim.attributes.end());
-	bHasTexCoords = (GLTFPrim.attributes.find("TEXCOORD_0") != GLTFPrim.attributes.end());
-*/
+	auto AddDummyStream = [&](const char* Semantic, VkFormat Format)
+	{
+		if (GLTFPrim.attributes.find(Semantic) == GLTFPrim.attributes.end())
+		{
+#if SCENE_USE_SINGLE_BUFFERS
+			VertexDecl.AddAttribute(BindingIndex, BindingIndex, Format, 0, Semantic);
+			OutPrim.VertexBuffers.push_back(PSOCache.ZeroBuffer);
+			VertexDecl.AddBinding(BindingIndex, PSOCache.ZeroBuffer.Size);
+			++BindingIndex;
+#else
+#error
+#endif
+		}
+	};
+
+	//AddDummyStream("POSITION");
+	AddDummyStream("NORMAL", VK_FORMAT_R8G8B8_UNORM);
+	AddDummyStream("TANGENT", VK_FORMAT_R8G8B8A8_UNORM);
+	AddDummyStream("TEXCOORD_0", VK_FORMAT_R8G8_UNORM);
+	AddDummyStream("COLOR", VK_FORMAT_R8G8B8A8_UNORM);
+
 	return PSOCache.FindOrAddVertexDecl(VertexDecl);
 }
 

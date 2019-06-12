@@ -10,28 +10,6 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 	VkDebugUtilsMessageTypeFlagsEXT MessageType, const VkDebugUtilsMessengerCallbackDataEXT* CallbackData,
 	void* UserData)
 {
-	//#todo-rco
-	if (MessageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
-	{
-		if (MessageType == VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT)
-		{
-/*
-			if (!strcmp("vkQueuePresentKHR: Presenting image without calling vkGetPhysicalDeviceSurfaceSupportKHR", CallbackData->pMessage))
-			{
-				return VK_FALSE;
-			}
-*/
-		}
-	}
-
-	if (CallbackData->pMessageIdName)
-	{
-		if (!strcmp(CallbackData->pMessageIdName, "UNASSIGNED-CoreValidation-Shader-InputNotProduced"))
-		{
-			return VK_FALSE;
-		}
-	}
-
 	std::string s = "***";
 	s += (MessageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) ? "[Valid]" : "";
 	s += (MessageType & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT) ? "[Gen]" : "";
@@ -46,6 +24,27 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 		s += CallbackData->pMessage;
 	}
 	s += "\n";
+
+	if (MessageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+	{
+		if (MessageType == VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT)
+		{
+//			if (!strcmp("vkQueuePresentKHR: Presenting image without calling vkGetPhysicalDeviceSurfaceSupportKHR", CallbackData->pMessage))
+			{
+				return VK_FALSE;
+			}
+		}
+	}
+
+/*
+	if (CallbackData->pMessageIdName)
+	{
+		if (!strcmp(CallbackData->pMessageIdName, "UNASSIGNED-CoreValidation-Shader-InputNotProduced"))
+		{
+			return VK_FALSE;
+		}
+	}
+*/
 
 	::OutputDebugStringA(s.c_str());
 	return VK_FALSE;
@@ -63,7 +62,7 @@ void SVulkan::InitDebugCallback()
 	Info.messageType = 0
 		| VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
 		| VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
-		//| VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT
+		| VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT
 		;
 	Info.pfnUserCallback = DebugReport;
 
