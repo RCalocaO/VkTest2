@@ -858,23 +858,34 @@ static void SetupShaders(FApp& App)
 	});
 
 	{
+		FPSOCache::FVertexDecl Decl;
+		Decl.AddAttribute(0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0, "Position");
+		Decl.AddBinding(0, 4 * sizeof(float));
+/*
 		VkVertexInputAttributeDescription VertexAttrDesc;
 		ZeroMem(VertexAttrDesc);
 		VertexAttrDesc.format = VK_FORMAT_R32G32B32A32_SFLOAT;
 		VkVertexInputBindingDescription VertexBindDesc;
 		ZeroMem(VertexBindDesc);
 		VertexBindDesc.stride = 4 * sizeof(float);
+*/
 		App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO("VBClipVSRedPSO", VBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 		{
 			VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
-			VertexInputInfo->vertexAttributeDescriptionCount = 1;
-			VertexInputInfo->pVertexAttributeDescriptions = &VertexAttrDesc;
-			VertexInputInfo->vertexBindingDescriptionCount = 1;
-			VertexInputInfo->pVertexBindingDescriptions = &VertexBindDesc;
+			VertexInputInfo->vertexAttributeDescriptionCount = (uint32)Decl.AttrDescs.size();
+			VertexInputInfo->pVertexAttributeDescriptions = Decl.AttrDescs.data();
+			VertexInputInfo->vertexBindingDescriptionCount = (uint32)Decl.BindingDescs.size();
+			VertexInputInfo->pVertexBindingDescriptions = Decl.BindingDescs.data();
 		});
 	}
 
 	{
+		FPSOCache::FVertexDecl Decl;
+		Decl.AddAttribute(0, 0, VK_FORMAT_R32G32_SFLOAT, IM_OFFSETOF(ImDrawVert, pos), "pos");
+		Decl.AddAttribute(0, 1, VK_FORMAT_R32G32_SFLOAT, IM_OFFSETOF(ImDrawVert, uv), "uv");
+		Decl.AddAttribute(0, 2, VK_FORMAT_R8G8B8A8_UNORM, IM_OFFSETOF(ImDrawVert, col), "col");
+		Decl.AddBinding(0, sizeof(ImDrawVert));
+/*
 		VkVertexInputAttributeDescription VertexAttrDesc[3];
 		ZeroMem(VertexAttrDesc);
 		VertexAttrDesc[0].format = VK_FORMAT_R32G32_SFLOAT;
@@ -889,20 +900,21 @@ static void SetupShaders(FApp& App)
 		VkVertexInputBindingDescription VertexBindDesc[1];
 		ZeroMem(VertexBindDesc);
 		VertexBindDesc[0].stride = sizeof(ImDrawVert);
+*/
+		GPSOCache.FindOrAddVertexDecl(Decl);
 
 		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass, [&](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 		{
 			VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
-			VertexInputInfo->vertexAttributeDescriptionCount = 3;
-			VertexInputInfo->pVertexAttributeDescriptions = VertexAttrDesc;
-			VertexInputInfo->vertexBindingDescriptionCount = 1;
-			VertexInputInfo->pVertexBindingDescriptions = VertexBindDesc;
+			VertexInputInfo->vertexAttributeDescriptionCount = (uint32)Decl.AttrDescs.size();
+			VertexInputInfo->pVertexAttributeDescriptions = Decl.AttrDescs.data();
+			VertexInputInfo->vertexBindingDescriptionCount = (uint32)Decl.BindingDescs.size();
+			VertexInputInfo->pVertexBindingDescriptions = Decl.BindingDescs.data();
 		});
 	}
 
 	App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, [&](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
-		check(GPSOCache.VertexDecls.size() == 1);
 		check(App.Scene.Meshes.size() == 1);
 		check(App.Scene.Meshes[0].Prims.size() == 1);
 		FPSOCache::FVertexDecl* NewDecl = FixGLTFVertexDecl(TestGLTFVS->Shader, App.Scene.Meshes[0].Prims[0].VertexDecl);
