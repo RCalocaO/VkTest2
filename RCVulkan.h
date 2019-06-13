@@ -9,6 +9,7 @@
 #include <sstream>
 #include <direct.h>
 #include <list>
+#include <set>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -28,6 +29,16 @@ enum class EMemLocation
 	CPU,
 	CPU_TO_GPU,
 	GPU,
+};
+
+enum class EShaderStages
+{
+	Vertex = 0,
+	Domain = 1,
+	Hull = 2,
+	Pixel = 3,
+
+	Compute = 0,
 };
 
 #if USE_VMA
@@ -236,7 +247,7 @@ struct SVulkan
 		VkPipelineLayout Layout = VK_NULL_HANDLE;
 
 		std::vector<VkDescriptorSetLayout> SetLayouts;
-		std::vector<SVulkan::FShader*> Shaders;
+		std::map<EShaderStages, SVulkan::FShader*> Shaders;
 	};
 
 	struct FComputePSO : public FPSO
@@ -247,6 +258,8 @@ struct SVulkan
 	struct FGfxPSO : public FPSO
 	{
 		std::vector<SpvReflectDescriptorSet*> VS;
+		std::vector<SpvReflectDescriptorSet*> HS;
+		std::vector<SpvReflectDescriptorSet*> DS;
 		std::vector<SpvReflectDescriptorSet*> PS;
 	};
 
@@ -2038,12 +2051,124 @@ struct FPSOCache
 			PipelineLayout = VK_NULL_HANDLE;
 			DSLayouts.clear();
 		}
+
+		std::vector<SVulkan::FShader*> Shaders;
 	};
-	std::map<SVulkan::FShader*, std::map<SVulkan::FShader*, FLayout>> PipelineLayouts;
+	std::vector<FLayout> PipelineLayouts;
 	std::vector<SVulkan::FPSO> PSOs;
 
 	SVulkan::SDevice* Device =  nullptr;
 	FBufferWithMem ZeroBuffer;
+
+	struct FGfxPSOEntry
+	{
+		VkGraphicsPipelineCreateInfo GfxPipelineInfo;
+		VkPipelineInputAssemblyStateCreateInfo IAInfo;
+		VkPipelineVertexInputStateCreateInfo VertexInputInfo;
+		VkPipelineShaderStageCreateInfo StageInfos[5];
+		VkPipelineRasterizationStateCreateInfo RasterizerInfo;
+		VkPipelineColorBlendAttachmentState BlendAttachState;
+		VkPipelineColorBlendStateCreateInfo BlendInfo;
+		VkPipelineDepthStencilStateCreateInfo DepthStateInfo;
+		VkPipelineMultisampleStateCreateInfo MSInfo;
+		VkPipelineDynamicStateCreateInfo DynamicInfo;
+		VkPipelineViewportStateCreateInfo ViewportState;
+		VkDynamicState DynamicStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+		VkViewport Viewport;
+		VkRect2D Scissor;
+		std::string Name = "<Unknown>";
+
+		FGfxPSOEntry()
+		{
+			ZeroVulkanMem(GfxPipelineInfo, VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO);
+			
+			ZeroVulkanMem(IAInfo, VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO);
+			IAInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+			ZeroVulkanMem(VertexInputInfo, VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
+
+			ZeroMem(StageInfos);
+			
+			ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
+			RasterizerInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+			RasterizerInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
+			RasterizerInfo.lineWidth = 1.0f;
+
+			ZeroMem(BlendAttachState);
+			BlendAttachState.blendEnable = VK_TRUE;
+			BlendAttachState.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+			BlendAttachState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			BlendAttachState.colorBlendOp = VK_BLEND_OP_ADD;
+			BlendAttachState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			BlendAttachState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+			BlendAttachState.alphaBlendOp = VK_BLEND_OP_ADD;
+			BlendAttachState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+			ZeroVulkanMem(BlendInfo, VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO);
+			BlendInfo.attachmentCount = 1;
+
+			ZeroVulkanMem(DepthStateInfo, VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO);
+			DepthStateInfo.front = DepthStateInfo.back;
+
+			ZeroVulkanMem(MSInfo, VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO);
+			MSInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+			ZeroVulkanMem(DynamicInfo, VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO);
+			DynamicInfo.dynamicStateCount = sizeof(DynamicStates) / sizeof(DynamicStates[0]);
+
+			ZeroMem(Viewport);
+			Viewport.width = 1280;
+			Viewport.height = 720;
+			Viewport.maxDepth = 1;
+
+			ZeroMem(Scissor);
+			Scissor.extent.width = (uint32)Viewport.width;
+			Scissor.extent.height = (uint32)Viewport.height;
+
+			ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
+			ViewportState.scissorCount = 1;
+			ViewportState.pScissors = &Scissor;
+			ViewportState.viewportCount = 1;
+			ViewportState.pViewports = &Viewport;
+		}
+
+		void AddShader(FShaderInfo* SI, VkShaderStageFlagBits Stage)
+		{
+			ZeroVulkanMem(StageInfos[GfxPipelineInfo.stageCount], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
+			StageInfos[GfxPipelineInfo.stageCount].stage = Stage;
+			StageInfos[GfxPipelineInfo.stageCount].module = SI->Shader->ShaderModule;
+			StageInfos[GfxPipelineInfo.stageCount].pName = SI->EntryPoint.c_str();
+
+
+			++GfxPipelineInfo.stageCount;
+		}
+
+		void Finalize(VkRenderPass RenderPass, FVertexDecl* VertexDecl)
+		{
+			GfxPipelineInfo.pInputAssemblyState = &IAInfo;
+			GfxPipelineInfo.pVertexInputState = &VertexInputInfo;
+			GfxPipelineInfo.pStages = StageInfos;
+			GfxPipelineInfo.pRasterizationState = &RasterizerInfo;
+			BlendInfo.pAttachments = &BlendAttachState;
+			GfxPipelineInfo.pColorBlendState = &BlendInfo;
+			ViewportState.pScissors = &Scissor;
+			ViewportState.pViewports = &Viewport;
+			GfxPipelineInfo.pViewportState = &ViewportState;
+			GfxPipelineInfo.pDepthStencilState = &DepthStateInfo;
+			GfxPipelineInfo.pMultisampleState = &MSInfo;
+			DynamicInfo.pDynamicStates = DynamicStates;
+			GfxPipelineInfo.pDynamicState = &DynamicInfo;
+			GfxPipelineInfo.renderPass = RenderPass;
+
+			if (VertexDecl)
+			{
+				VertexInputInfo.vertexAttributeDescriptionCount = (uint32)VertexDecl->AttrDescs.size();
+				VertexInputInfo.pVertexAttributeDescriptions = VertexDecl->AttrDescs.data();
+				VertexInputInfo.vertexBindingDescriptionCount = (uint32)VertexDecl->BindingDescs.size();
+				VertexInputInfo.pVertexBindingDescriptions = VertexDecl->BindingDescs.data();
+			}
+		}
+	};
 
 	void Init(SVulkan::SDevice* InDevice)
 	{
@@ -2056,29 +2181,53 @@ struct FPSOCache
 		}
 	}
 
-	VkPipelineLayout GetOrCreatePipelineLayout(SVulkan::FShader* VS, SVulkan::FShader* PS, std::vector<VkDescriptorSetLayout>& OutLayouts)
+	VkPipelineLayout GetOrCreatePipelineLayout(SVulkan::FShader* VS, SVulkan::FShader* HS, SVulkan::FShader* DS, SVulkan::FShader* PS, std::vector<VkDescriptorSetLayout>& OutLayouts)
 	{
-		auto& VSList = PipelineLayouts[VS];
-		auto Found = VSList.find(PS);
-		if (Found != VSList.end())
+		std::vector<SVulkan::FShader*> Shaders;
+		Shaders.push_back(VS);
+		if (HS && DS)
 		{
-			OutLayouts = Found->second.DSLayouts;
-			return Found->second.PipelineLayout;
+			Shaders.push_back(HS);
+			Shaders.push_back(DS);
+		}
+		if (PS)
+		{
+			Shaders.push_back(PS);
+		}
+
+		for (const FLayout& Layout : PipelineLayouts)
+		{
+			if (Layout.Shaders == Shaders)
+			{
+				return Layout.PipelineLayout;
+			}
 		}
 
 		VkPipelineLayoutCreateInfo Info;
 		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
 		std::map<uint32, std::vector<VkDescriptorSetLayoutBinding>> LayoutBindings = VS->SetInfoBindings;
-		if (PS)
+
+		auto AddBindings = [&](SVulkan::FShader* Shader)
 		{
-			for (auto Pair : PS->SetInfoBindings)
+			for (auto Pair : Shader->SetInfoBindings)
 			{
 				auto& SetBindings = LayoutBindings[Pair.first];
 				SetBindings.insert(SetBindings.end(), Pair.second.begin(), Pair.second.end());
 			}
+		};
+
+		if (HS && DS)
+		{
+			AddBindings(HS);
+			AddBindings(DS);
 		}
 
-		auto& Layout = VSList[PS];
+		if (PS)
+		{
+			AddBindings(PS);
+		}
+
+		FLayout Layout;
 
 		for (auto Pair : LayoutBindings)
 		{
@@ -2098,6 +2247,10 @@ struct FPSOCache
 		OutLayouts = Layout.DSLayouts;
 
 		VERIFY_VKRESULT(vkCreatePipelineLayout(Device->Device, &Info, nullptr, &Layout.PipelineLayout));
+
+		Layout.Shaders = Shaders;
+		PipelineLayouts.push_back(Layout);
+
 		return Layout.PipelineLayout;
 	}
 
@@ -2115,138 +2268,50 @@ struct FPSOCache
 			check(PS->Shader && PS->Shader->ShaderModule);
 		}
 
-		VkGraphicsPipelineCreateInfo GfxPipelineInfo;
-		ZeroVulkanMem(GfxPipelineInfo, VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO);
+		FGfxPSOEntry Entry;
 
-		GfxPipelineInfo.renderPass = RenderPass->RenderPass;
-
-		VkPipelineInputAssemblyStateCreateInfo IAInfo;
-		ZeroVulkanMem(IAInfo, VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO);
-		IAInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-		GfxPipelineInfo.pInputAssemblyState = &IAInfo;
-
-		VkPipelineVertexInputStateCreateInfo VertexInputInfo;
-		ZeroVulkanMem(VertexInputInfo, VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO);
-		GfxPipelineInfo.pVertexInputState = &VertexInputInfo;
-
-		VkPipelineShaderStageCreateInfo StageInfos[5];
-		ZeroVulkanMem(StageInfos[0], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
-		StageInfos[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		StageInfos[0].module = VS->Shader->ShaderModule;
-		StageInfos[0].pName = VS->EntryPoint.c_str();
-		GfxPipelineInfo.stageCount = 1;
+		Entry.AddShader(VS, VK_SHADER_STAGE_VERTEX_BIT);
 
 		if (HS && DS)
 		{
-			ZeroVulkanMem(StageInfos[GfxPipelineInfo.stageCount], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
-			StageInfos[GfxPipelineInfo.stageCount].stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
-			StageInfos[GfxPipelineInfo.stageCount].module = HS->Shader->ShaderModule;
-			StageInfos[GfxPipelineInfo.stageCount].pName = HS->EntryPoint.c_str();
-			++GfxPipelineInfo.stageCount;
-
-			ZeroVulkanMem(StageInfos[GfxPipelineInfo.stageCount], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
-			StageInfos[GfxPipelineInfo.stageCount].stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
-			StageInfos[GfxPipelineInfo.stageCount].module = DS->Shader->ShaderModule;
-			StageInfos[GfxPipelineInfo.stageCount].pName = DS->EntryPoint.c_str();
-			++GfxPipelineInfo.stageCount;
+			Entry.AddShader(HS,  VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
+			Entry.AddShader(DS, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
 		}
 
 		if (PS)
 		{
-			ZeroVulkanMem(StageInfos[GfxPipelineInfo.stageCount], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
-			StageInfos[GfxPipelineInfo.stageCount].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-			StageInfos[GfxPipelineInfo.stageCount].module = PS->Shader->ShaderModule;
-			StageInfos[GfxPipelineInfo.stageCount].pName = PS->EntryPoint.c_str();
-			++GfxPipelineInfo.stageCount;
+			Entry.AddShader(PS,  VK_SHADER_STAGE_FRAGMENT_BIT);
 		}
-
-		GfxPipelineInfo.pStages = StageInfos;
 
 		SVulkan::FGfxPSO PSO;
 		PSO.VS = VS->Shader->DescSetInfo;
+		if (HS && DS)
+		{
+			PSO.HS = HS->Shader->DescSetInfo;
+			PSO.DS = DS->Shader->DescSetInfo;
+		}
 		if (PS)
 		{
 			PSO.PS = PS->Shader->DescSetInfo;
 		}
-		PSO.Layout = GetOrCreatePipelineLayout(VS->Shader, PS ? PS->Shader : nullptr, PSO.SetLayouts);
-		PSO.Shaders.push_back(VS->Shader);
+		PSO.Layout = GetOrCreatePipelineLayout(VS->Shader, HS ? HS->Shader : nullptr, DS ? DS->Shader : nullptr, PS ? PS->Shader : nullptr, PSO.SetLayouts);
+		PSO.Shaders[EShaderStages::Vertex] = VS->Shader;
+		if (HS && DS)
+		{
+			PSO.Shaders[EShaderStages::Hull] = HS->Shader;
+			PSO.Shaders[EShaderStages::Domain] = DS->Shader;
+		}
 		if (PS)
 		{
-			PSO.Shaders.push_back(PS->Shader);
+			PSO.Shaders[EShaderStages::Pixel] = PS->Shader;
 		}
 
-		VkPipelineRasterizationStateCreateInfo RasterizerInfo;
-		ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
-		RasterizerInfo.cullMode = VK_CULL_MODE_BACK_BIT;
-		RasterizerInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
-		RasterizerInfo.lineWidth = 1.0f;
-		GfxPipelineInfo.pRasterizationState = &RasterizerInfo;
+		Entry.GfxPipelineInfo.layout = PSO.Layout;
 
-		VkPipelineColorBlendAttachmentState BlendAttachState;
-		ZeroMem(BlendAttachState);
-		BlendAttachState.blendEnable = VK_TRUE;
-		BlendAttachState.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-		BlendAttachState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		BlendAttachState.colorBlendOp = VK_BLEND_OP_ADD;
-		BlendAttachState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		BlendAttachState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-		BlendAttachState.alphaBlendOp = VK_BLEND_OP_ADD;
-		BlendAttachState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		Entry.Finalize(RenderPass->RenderPass, VertexDeclHandle == -1 ? nullptr : &VertexDecls[VertexDeclHandle]);
+		Callback(Entry.GfxPipelineInfo);
 
-		VkPipelineColorBlendStateCreateInfo BlendInfo;
-		ZeroVulkanMem(BlendInfo, VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO);
-		BlendInfo.attachmentCount = 1;
-		BlendInfo.pAttachments = &BlendAttachState;
-		GfxPipelineInfo.pColorBlendState = &BlendInfo;
-
-		VkViewport Viewport;
-		ZeroMem(Viewport);
-		Viewport.width = 1280;
-		Viewport.height = 960;
-		Viewport.maxDepth = 1;
-		VkRect2D Scissor;
-		Scissor.extent.width = (uint32)Viewport.width;
-		Scissor.extent.height = (uint32)Viewport.height;
-
-		VkPipelineViewportStateCreateInfo ViewportState;
-		ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
-		ViewportState.scissorCount = 1;
-		ViewportState.viewportCount = 1;
-		ViewportState.pScissors = &Scissor;
-		ViewportState.pViewports = &Viewport;
-		GfxPipelineInfo.pViewportState = &ViewportState;
-
-		GfxPipelineInfo.layout = PSO.Layout;
-
-		VkPipelineDepthStencilStateCreateInfo DepthStateInfo;
-		ZeroVulkanMem(DepthStateInfo, VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO);
-		DepthStateInfo.front = DepthStateInfo.back;
-		GfxPipelineInfo.pDepthStencilState = &DepthStateInfo;
-
-		VkPipelineMultisampleStateCreateInfo MSInfo;
-		ZeroVulkanMem(MSInfo, VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO);
-		MSInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-		GfxPipelineInfo.pMultisampleState = &MSInfo;
-
-		VkDynamicState DynamicStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-		VkPipelineDynamicStateCreateInfo DynamicInfo;
-		ZeroVulkanMem(DynamicInfo, VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO);
-		DynamicInfo.dynamicStateCount = sizeof(DynamicStates) / sizeof(DynamicStates[0]);
-		DynamicInfo.pDynamicStates = DynamicStates;
-		GfxPipelineInfo.pDynamicState = &DynamicInfo;
-
-		if (VertexDeclHandle != -1)
-		{
-			FVertexDecl& Decl = VertexDecls[VertexDeclHandle];
-			VertexInputInfo.vertexAttributeDescriptionCount = (uint32)Decl.AttrDescs.size();
-			VertexInputInfo.pVertexAttributeDescriptions = Decl.AttrDescs.data();
-			VertexInputInfo.vertexBindingDescriptionCount = (uint32)Decl.BindingDescs.size();
-			VertexInputInfo.pVertexBindingDescriptions = Decl.BindingDescs.data();
-		}
-
-		Callback(GfxPipelineInfo);
-
-		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &PSO.Pipeline));
+		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &Entry.GfxPipelineInfo, nullptr, &PSO.Pipeline));
 		PSOs.push_back(PSO);
 
 		Device->SetDebugName(PSO.Pipeline, Name);
@@ -2289,8 +2354,8 @@ struct FPSOCache
 
 		SVulkan::FComputePSO PSO;
 		PSO.CS = CS->Shader->DescSetInfo;
-		PSO.Layout = GetOrCreatePipelineLayout(CS->Shader, nullptr, PSO.SetLayouts);
-		PSO.Shaders.push_back(CS->Shader);
+		PSO.Layout = GetOrCreatePipelineLayout(CS->Shader, nullptr, nullptr, nullptr, PSO.SetLayouts);
+		PSO.Shaders[EShaderStages::Compute] = CS->Shader;
 
 		PipelineInfo.layout = PSO.Layout;
 
@@ -2302,12 +2367,9 @@ struct FPSOCache
 
 	void Destroy()
 	{
-		for (auto VSPair : PipelineLayouts)
+		for (auto PL : PipelineLayouts)
 		{
-			for (auto PSPair : VSPair.second)
-			{
-				PSPair.second.Destroy(Device->Device);
-			}
+			PL.Destroy(Device->Device);
 		}
 
 		PipelineLayouts.clear();
@@ -2400,9 +2462,9 @@ struct FDescriptorCache
 			{
 				std::map<VkDescriptorType, uint32> TypeCounts;
 				NumDescriptorsPerSet.push_back(0);
-				for (auto* Shader : PSO.Shaders)
+				for (auto OuterPair : PSO.Shaders)
 				{
-					for (auto Pair : Shader->SetInfoBindings)
+					for (auto Pair : OuterPair.second->SetInfoBindings)
 					{
 						for (VkDescriptorSetLayoutBinding Binding : Pair.second)
 						{
