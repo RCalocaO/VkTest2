@@ -326,13 +326,13 @@ struct FApp
 				//DescriptorWrites.pNext = NULL;
 				//DescriptorWrites.dstSet = 0;  // dstSet is ignored by the extension
 				DescriptorWrites[0].descriptorCount = 1;
-				DescriptorWrites[0].descriptorType = (VkDescriptorType)ImGUIPSO.VS[0]->bindings[0]->descriptor_type;
+				DescriptorWrites[0].descriptorType = (VkDescriptorType)ImGUIPSO.Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
 				VkDescriptorBufferInfo BInfo;
 				ZeroMem(BInfo);
 				BInfo.buffer = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
 				BInfo.range = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Size;
 				DescriptorWrites[0].pBufferInfo = &BInfo;
-				DescriptorWrites[0].dstBinding = ImGUIPSO.VS[0]->bindings[0]->binding;
+				DescriptorWrites[0].dstBinding = ImGUIPSO.Reflection[EShaderStages::Vertex]->bindings[0]->binding;
 
 				VkDescriptorImageInfo IInfo;
 				ZeroMem(IInfo);
@@ -342,15 +342,15 @@ struct FApp
 
 				ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 				DescriptorWrites[1].descriptorCount = 1;
-				DescriptorWrites[1].descriptorType = (VkDescriptorType)ImGUIPSO.PS[0]->bindings[0]->descriptor_type;
+				DescriptorWrites[1].descriptorType = (VkDescriptorType)ImGUIPSO.Reflection[EShaderStages::Pixel]->bindings[0]->descriptor_type;
 				DescriptorWrites[1].pImageInfo = &IInfo;
-				DescriptorWrites[1].dstBinding = ImGUIPSO.PS[0]->bindings[0]->binding;
+				DescriptorWrites[1].dstBinding = ImGUIPSO.Reflection[EShaderStages::Pixel]->bindings[0]->binding;
 
 				ZeroVulkanMem(DescriptorWrites[2], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 				DescriptorWrites[2].descriptorCount = 1;
-				DescriptorWrites[2].descriptorType = (VkDescriptorType)ImGUIPSO.PS[0]->bindings[1]->descriptor_type;
+				DescriptorWrites[2].descriptorType = (VkDescriptorType)ImGUIPSO.Reflection[EShaderStages::Pixel]->bindings[1]->descriptor_type;
 				DescriptorWrites[2].pImageInfo = &IInfo;
-				DescriptorWrites[2].dstBinding = ImGUIPSO.PS[0]->bindings[1]->binding;
+				DescriptorWrites[2].dstBinding = ImGUIPSO.Reflection[EShaderStages::Pixel]->bindings[1]->binding;
 
 				{
 					float* ScaleTranslate = (float*)ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Lock();
@@ -484,13 +484,13 @@ struct FApp
 					DescriptorWrites[0].descriptorCount = 1;
 					DescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 					DescriptorWrites[0].pImageInfo = &ImageInfo[0];
-					DescriptorWrites[0].dstBinding = TestGLTFPSO.PS[0]->bindings[0]->binding;
+					DescriptorWrites[0].dstBinding = TestGLTFPSO.Reflection[EShaderStages::Pixel]->bindings[0]->binding;
 
 					ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 					DescriptorWrites[1].descriptorCount = 1;
 					DescriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 					DescriptorWrites[1].pImageInfo = &ImageInfo[1];
-					DescriptorWrites[1].dstBinding = TestGLTFPSO.PS[0]->bindings[1]->binding;
+					DescriptorWrites[1].dstBinding = TestGLTFPSO.Reflection[EShaderStages::Pixel]->bindings[1]->binding;
 
 					GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, &DescriptorWrites[0], TestGLTFPSO);
 				}
@@ -571,20 +571,20 @@ static double Render(FApp& App)
 		VkWriteDescriptorSet DescriptorWrites[2];
 		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 		DescriptorWrites[0].descriptorCount = 1;
-		DescriptorWrites[0].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.VS[0]->bindings[0]->descriptor_type;
+		DescriptorWrites[0].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
 		DescriptorWrites[0].pTexelBufferView = &App.ClipVB.View;
 		//DescriptorWrites.pBufferInfo = &info.uniform_data.buffer_info;  // populated by init_uniform_buffer()
-		DescriptorWrites[0].dstBinding = App.DataClipVSRedPSO.VS[0]->bindings[0]->binding;
+		DescriptorWrites[0].dstBinding = App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->binding;
 
 		ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 		DescriptorWrites[1].descriptorCount = 1;
-		DescriptorWrites[1].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.PS[0]->bindings[0]->descriptor_type;
+		DescriptorWrites[1].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.Reflection[EShaderStages::Pixel]->bindings[0]->descriptor_type;
 		VkDescriptorBufferInfo BufferInfo;
 		ZeroMem(BufferInfo);
 		BufferInfo.buffer = App.ColorUB.Buffer.Buffer;
 		BufferInfo.range =  App.ColorUB.Size;
 		DescriptorWrites[1].pBufferInfo = &BufferInfo;
-		DescriptorWrites[1].dstBinding = App.DataClipVSColorPSO.PS[0]->bindings[0]->binding;
+		DescriptorWrites[1].dstBinding = App.DataClipVSColorPSO.Reflection[EShaderStages::Pixel]->bindings[0]->binding;
 
 		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, App.DataClipVSColorPSO);
 	}
@@ -597,9 +597,9 @@ static double Render(FApp& App)
 		//DescriptorWrites.pNext = NULL;
 		//DescriptorWrites.dstSet = 0;  // dstSet is ignored by the extension
 		DescriptorWrites.descriptorCount = 1;
-		DescriptorWrites.descriptorType = (VkDescriptorType)App.DataClipVSRedPSO.VS[0]->bindings[0]->descriptor_type;
+		DescriptorWrites.descriptorType = (VkDescriptorType)App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
 		DescriptorWrites.pTexelBufferView = &App.ClipVB.View;
-		DescriptorWrites.dstBinding = App.DataClipVSRedPSO.VS[0]->bindings[0]->binding;
+		DescriptorWrites.dstBinding = App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->binding;
 
 		GDescriptorCache.UpdateDescriptors(CmdBuffer, 1, &DescriptorWrites, App.DataClipVSRedPSO);
 	}
@@ -627,19 +627,19 @@ static double Render(FApp& App)
 		VkWriteDescriptorSet DescriptorWrites[2];
 		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 		DescriptorWrites[0].descriptorCount = 1;
-		DescriptorWrites[0].descriptorType = (VkDescriptorType)App.TestCSPSO.CS[0]->bindings[0]->descriptor_type;
+		DescriptorWrites[0].descriptorType = (VkDescriptorType)App.TestCSPSO.Reflection->bindings[0]->descriptor_type;
 		DescriptorWrites[0].pTexelBufferView = &App.TestCSBuffer.View;
-		DescriptorWrites[0].dstBinding = App.TestCSPSO.CS[0]->bindings[0]->binding;
+		DescriptorWrites[0].dstBinding = App.TestCSPSO.Reflection->bindings[0]->binding;
 
 		ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 		DescriptorWrites[1].descriptorCount = 1;
-		DescriptorWrites[1].descriptorType = (VkDescriptorType)App.TestCSPSO.CS[0]->bindings[1]->descriptor_type;
+		DescriptorWrites[1].descriptorType = (VkDescriptorType)App.TestCSPSO.Reflection->bindings[1]->descriptor_type;
 		VkDescriptorBufferInfo BufferInfo;
 		ZeroMem(BufferInfo);
 		BufferInfo.buffer = App.TestCSUB.Buffer.Buffer;
 		BufferInfo.range =  App.TestCSUB.Size;
 		DescriptorWrites[1].pBufferInfo = &BufferInfo;
-		DescriptorWrites[1].dstBinding = App.TestCSPSO.CS[0]->bindings[1]->binding;
+		DescriptorWrites[1].dstBinding = App.TestCSPSO.Reflection->bindings[1]->binding;
 
 		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, App.TestCSPSO);
 

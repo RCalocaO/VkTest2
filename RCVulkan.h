@@ -167,7 +167,7 @@ struct SVulkan
 		std::vector<char> SpirV;
 		VkDevice Device;
 		SpvReflectShaderModule Module;
-		std::vector<SpvReflectDescriptorSet*> DescSetInfo;
+		SpvReflectDescriptorSet* DescSetInfo = nullptr;
 
 		bool Create(VkDevice InDevice, VkShaderStageFlagBits Stage)
 		{
@@ -194,11 +194,14 @@ struct SVulkan
 			check(Result == SPV_REFLECT_RESULT_SUCCESS);
 			uint32 NumDescSets = 0;
 			spvReflectEnumerateDescriptorSets(&Module, &NumDescSets, nullptr);
-			DescSetInfo.resize(NumDescSets);
-			spvReflectEnumerateDescriptorSets(&Module, &NumDescSets, DescSetInfo.data());
+			check(NumDescSets == 0 || NumDescSets == 1);
+			//DescSetInfo.resize(NumDescSets);
+			spvReflectEnumerateDescriptorSets(&Module, &NumDescSets, &DescSetInfo);
 
-			for (auto& SetInfo : DescSetInfo)
+			//for (auto& SetInfo : DescSetInfo)
+			if (DescSetInfo)
 			{
+				auto& SetInfo = DescSetInfo;
 				std::vector<VkDescriptorSetLayoutBinding>& InfoBindings = SetInfoBindings[SetInfo->set];
 				for (uint32 Index = 0; Index < SetInfo->binding_count; ++Index)
 				{
@@ -252,15 +255,18 @@ struct SVulkan
 
 	struct FComputePSO : public FPSO
 	{
-		std::vector<SpvReflectDescriptorSet*> CS;
+		SpvReflectDescriptorSet* Reflection;
 	};
 
 	struct FGfxPSO : public FPSO
 	{
-		std::vector<SpvReflectDescriptorSet*> VS;
-		std::vector<SpvReflectDescriptorSet*> HS;
-		std::vector<SpvReflectDescriptorSet*> DS;
-		std::vector<SpvReflectDescriptorSet*> PS;
+		std::map<EShaderStages, SpvReflectDescriptorSet*> Reflection;
+
+		void AddShader(EShaderStages Stage, SVulkan::FShader* Shader)
+		{
+			Reflection[Stage] = Shader->DescSetInfo;
+			Shaders[Stage] = Shader;
+		}
 	};
 
 	struct FFence
@@ -2274,37 +2280,27 @@ struct FPSOCache
 
 		if (HS && DS)
 		{
-			Entry.AddShader(HS,  VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
+			Entry.AddShader(HS, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
 			Entry.AddShader(DS, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
 		}
 
 		if (PS)
 		{
-			Entry.AddShader(PS,  VK_SHADER_STAGE_FRAGMENT_BIT);
+			Entry.AddShader(PS, VK_SHADER_STAGE_FRAGMENT_BIT);
 		}
 
 		SVulkan::FGfxPSO PSO;
-		PSO.VS = VS->Shader->DescSetInfo;
+		PSO.AddShader(EShaderStages::Vertex, VS->Shader);
 		if (HS && DS)
 		{
-			PSO.HS = HS->Shader->DescSetInfo;
-			PSO.DS = DS->Shader->DescSetInfo;
+			PSO.AddShader(EShaderStages::Hull, HS->Shader);
+			PSO.AddShader(EShaderStages::Domain, DS->Shader);
 		}
 		if (PS)
 		{
-			PSO.PS = PS->Shader->DescSetInfo;
+			PSO.AddShader(EShaderStages::Pixel, PS->Shader);
 		}
 		PSO.Layout = GetOrCreatePipelineLayout(VS->Shader, HS ? HS->Shader : nullptr, DS ? DS->Shader : nullptr, PS ? PS->Shader : nullptr, PSO.SetLayouts);
-		PSO.Shaders[EShaderStages::Vertex] = VS->Shader;
-		if (HS && DS)
-		{
-			PSO.Shaders[EShaderStages::Hull] = HS->Shader;
-			PSO.Shaders[EShaderStages::Domain] = DS->Shader;
-		}
-		if (PS)
-		{
-			PSO.Shaders[EShaderStages::Pixel] = PS->Shader;
-		}
 
 		Entry.GfxPipelineInfo.layout = PSO.Layout;
 
@@ -2353,7 +2349,7 @@ struct FPSOCache
 		PipelineInfo.stage.pName = CS->EntryPoint.c_str();
 
 		SVulkan::FComputePSO PSO;
-		PSO.CS = CS->Shader->DescSetInfo;
+		PSO.Reflection = CS->Shader->DescSetInfo;
 		PSO.Layout = GetOrCreatePipelineLayout(CS->Shader, nullptr, nullptr, nullptr, PSO.SetLayouts);
 		PSO.Shaders[EShaderStages::Compute] = CS->Shader;
 
