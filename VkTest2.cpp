@@ -428,53 +428,6 @@ struct FApp
 	bool bHasNormals = false;
 	bool bHasTexCoords = false;
 
-#if 0
-	void AddDefaultVertexInputs(SVulkan::SDevice& Device)
-	{
-/*
-		auto AddDefaultStream = [&](const char* Name, VkFormat Format, uint32 Stride)
-		{
-			VkVertexInputAttributeDescription AttrDesc;
-			ZeroMem(AttrDesc);
-			AttrDesc.binding = BindingIndex;
-			AttrDesc.format = Format;
-			AttrDesc.location = OutPrim.VertexBuffers.size();
-			AttrDesc.offset = 0;
-			VertexDecl.AttrDescs.push_back(AttrDesc);
-
-			VkVertexInputBindingDescription BindingDesc;
-			ZeroMem(BindingDesc);
-			BindingDesc.binding = BindingIndex;
-			BindingDesc.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
-			BindingDesc.stride = Stride;
-			VertexDecl.BindingDescs.push_back(BindingDesc);
-
-			VertexDecl.Names.push_back(Name);
-
-			OutPrim.VertexOffsets.push_back(0);
-			OutPrim.VertexBuffers.push_back(Scene.Buffers.size());
-			FBufferWithMem DefaultBuffer;
-			DefaultBuffer.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Stride);
-			Scene.Buffers.push_back(DefaultBuffer);
-
-			++BindingIndex;
-		};
-
-		if (!bUseColorStream)
-		{
-			AddDefaultStream("COLOR_0", VK_FORMAT_R8G8B8A8_UNORM, 4);
-		}
-		if (!bHasNormals)
-		{
-			AddDefaultStream("NORMAL", VK_FORMAT_R32G32B32_SFLOAT, 3 * 4);
-		}
-		if (!bHasTexCoords)
-		{
-			AddDefaultStream("TEXCOORD_0", VK_FORMAT_R32G32_SFLOAT, 2 * 4);
-		}*/
-	}
-#endif
-
 	std::string LoadedGLTF;
 	FPendingOpsManager PendingOpsMgr;
 
@@ -774,7 +727,7 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
 {
 }
 
-static FPSOCache::FVertexDecl* FixGLTFVertexDecl(SVulkan::FShader* Shader, int32& PrimVertexDeclHandle)
+static void FixGLTFVertexDecl(SVulkan::FShader* Shader, int32& PrimVertexDeclHandle)
 {
 	SpvReflectShaderModule Module;
 
@@ -819,8 +772,6 @@ static FPSOCache::FVertexDecl* FixGLTFVertexDecl(SVulkan::FShader* Shader, int32
 	spvReflectDestroyShaderModule(&Module);
 
 	PrimVertexDeclHandle = GPSOCache.FindOrAddVertexDecl(NewDecl);
-
-	return &GPSOCache.VertexDecls[PrimVertexDeclHandle];
 }
 
 static void SetupShaders(FApp& App)
@@ -861,14 +812,6 @@ static void SetupShaders(FApp& App)
 		FPSOCache::FVertexDecl Decl;
 		Decl.AddAttribute(0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0, "Position");
 		Decl.AddBinding(0, 4 * sizeof(float));
-/*
-		VkVertexInputAttributeDescription VertexAttrDesc;
-		ZeroMem(VertexAttrDesc);
-		VertexAttrDesc.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-		VkVertexInputBindingDescription VertexBindDesc;
-		ZeroMem(VertexBindDesc);
-		VertexBindDesc.stride = 4 * sizeof(float);
-*/
 		int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(Decl);
 		App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO("VBClipVSRedPSO", VBClipVS, RedPS, RenderPass,  VertexDeclHandle);
 	}
@@ -879,22 +822,6 @@ static void SetupShaders(FApp& App)
 		Decl.AddAttribute(0, 1, VK_FORMAT_R32G32_SFLOAT, IM_OFFSETOF(ImDrawVert, uv), "uv");
 		Decl.AddAttribute(0, 2, VK_FORMAT_R8G8B8A8_UNORM, IM_OFFSETOF(ImDrawVert, col), "col");
 		Decl.AddBinding(0, sizeof(ImDrawVert));
-/*
-		VkVertexInputAttributeDescription VertexAttrDesc[3];
-		ZeroMem(VertexAttrDesc);
-		VertexAttrDesc[0].format = VK_FORMAT_R32G32_SFLOAT;
-		VertexAttrDesc[1].offset = IM_OFFSETOF(ImDrawVert, pos);
-		VertexAttrDesc[1].format = VK_FORMAT_R32G32_SFLOAT;
-		VertexAttrDesc[1].offset = IM_OFFSETOF(ImDrawVert, uv);
-		VertexAttrDesc[1].location = 1;
-		VertexAttrDesc[2].format = VK_FORMAT_R8G8B8A8_UNORM;
-		VertexAttrDesc[2].offset = IM_OFFSETOF(ImDrawVert, col);
-		VertexAttrDesc[2].location = 2;
-
-		VkVertexInputBindingDescription VertexBindDesc[1];
-		ZeroMem(VertexBindDesc);
-		VertexBindDesc[0].stride = sizeof(ImDrawVert);
-*/
 		int32 VertexDecl = GPSOCache.FindOrAddVertexDecl(Decl);
 		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass, VertexDecl);
 	}
@@ -902,7 +829,7 @@ static void SetupShaders(FApp& App)
 	{
 		check(App.Scene.Meshes.size() == 1);
 		check(App.Scene.Meshes[0].Prims.size() == 1);
-		/*FPSOCache::FVertexDecl* NewDecl = */FixGLTFVertexDecl(TestGLTFVS->Shader, App.Scene.Meshes[0].Prims[0].VertexDecl);
+		FixGLTFVertexDecl(TestGLTFVS->Shader, App.Scene.Meshes[0].Prims[0].VertexDecl);
 		App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, App.Scene.Meshes[0].Prims[0].VertexDecl);
 	}
 }
