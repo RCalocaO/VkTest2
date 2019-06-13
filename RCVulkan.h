@@ -2102,7 +2102,7 @@ struct FPSOCache
 	}
 
 	template <typename TFunction>
-	SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
+	SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle, TFunction Callback)
 	{
 		check(VS->Shader && VS->Shader->ShaderModule);
 		if (HS || DS)
@@ -2235,6 +2235,15 @@ struct FPSOCache
 		DynamicInfo.pDynamicStates = DynamicStates;
 		GfxPipelineInfo.pDynamicState = &DynamicInfo;
 
+		if (VertexDeclHandle != -1)
+		{
+			FVertexDecl& Decl = VertexDecls[VertexDeclHandle];
+			VertexInputInfo.vertexAttributeDescriptionCount = (uint32)Decl.AttrDescs.size();
+			VertexInputInfo.pVertexAttributeDescriptions = Decl.AttrDescs.data();
+			VertexInputInfo.vertexBindingDescriptionCount = (uint32)Decl.BindingDescs.size();
+			VertexInputInfo.pVertexBindingDescriptions = Decl.BindingDescs.data();
+		}
+
 		Callback(GfxPipelineInfo);
 
 		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &GfxPipelineInfo, nullptr, &PSO.Pipeline));
@@ -2246,14 +2255,14 @@ struct FPSOCache
 	}
 
 	template <typename TFunction>
-	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
+	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle, TFunction Callback)
 	{
-		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, Callback);
+		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, VertexDeclHandle, Callback);
 	}
 
-	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
+	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle = -1)
 	{
-		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, 
+		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, VertexDeclHandle,
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 			{
 			});
@@ -2261,7 +2270,7 @@ struct FPSOCache
 
 	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
 	{
-		return CreateGfxPSO(Name, VS, HS, DS, PS, RenderPass,
+		return CreateGfxPSO(Name, VS, HS, DS, PS, RenderPass, -1,
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 		{
 		});

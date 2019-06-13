@@ -851,7 +851,7 @@ static void SetupShaders(FApp& App)
 //	App.DataClipVSColorTessPSO = GPSOCache.CreateGfxPSO(DataClipVS, DataClipHS, DataClipDS, ColorPS, RenderPass);
 	App.NoVBClipVSRedPSO = GPSOCache.CreateGfxPSO("NoVBClipVSRedPSO", NoVBClipVS, RedPS, RenderPass);
 	App.DataClipVSRedPSO = GPSOCache.CreateGfxPSO("DataClipVSRedPSO", DataClipVS, RedPS, RenderPass);
-	App.PassThroughVSRedPSPSO = GPSOCache.CreateGfxPSO("PassThroughVSRedPSPSO", PassThroughVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	App.PassThroughVSRedPSPSO = GPSOCache.CreateGfxPSO("PassThroughVSRedPSPSO", PassThroughVS, RedPS, RenderPass, -1, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
 		RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
@@ -869,14 +869,8 @@ static void SetupShaders(FApp& App)
 		ZeroMem(VertexBindDesc);
 		VertexBindDesc.stride = 4 * sizeof(float);
 */
-		App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO("VBClipVSRedPSO", VBClipVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-		{
-			VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
-			VertexInputInfo->vertexAttributeDescriptionCount = (uint32)Decl.AttrDescs.size();
-			VertexInputInfo->pVertexAttributeDescriptions = Decl.AttrDescs.data();
-			VertexInputInfo->vertexBindingDescriptionCount = (uint32)Decl.BindingDescs.size();
-			VertexInputInfo->pVertexBindingDescriptions = Decl.BindingDescs.data();
-		});
+		int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(Decl);
+		App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO("VBClipVSRedPSO", VBClipVS, RedPS, RenderPass,  VertexDeclHandle);
 	}
 
 	{
@@ -901,29 +895,16 @@ static void SetupShaders(FApp& App)
 		ZeroMem(VertexBindDesc);
 		VertexBindDesc[0].stride = sizeof(ImDrawVert);
 */
-		GPSOCache.FindOrAddVertexDecl(Decl);
-
-		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass, [&](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-		{
-			VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
-			VertexInputInfo->vertexAttributeDescriptionCount = (uint32)Decl.AttrDescs.size();
-			VertexInputInfo->pVertexAttributeDescriptions = Decl.AttrDescs.data();
-			VertexInputInfo->vertexBindingDescriptionCount = (uint32)Decl.BindingDescs.size();
-			VertexInputInfo->pVertexBindingDescriptions = Decl.BindingDescs.data();
-		});
+		int32 VertexDecl = GPSOCache.FindOrAddVertexDecl(Decl);
+		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass, VertexDecl);
 	}
 
-	App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, [&](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		check(App.Scene.Meshes.size() == 1);
 		check(App.Scene.Meshes[0].Prims.size() == 1);
-		FPSOCache::FVertexDecl* NewDecl = FixGLTFVertexDecl(TestGLTFVS->Shader, App.Scene.Meshes[0].Prims[0].VertexDecl);
-		VkPipelineVertexInputStateCreateInfo* VertexInputInfo = (VkPipelineVertexInputStateCreateInfo*)GfxPipelineInfo.pVertexInputState;
-		VertexInputInfo->vertexAttributeDescriptionCount = (uint32)NewDecl->AttrDescs.size();
-		VertexInputInfo->pVertexAttributeDescriptions = NewDecl->AttrDescs.data();
-		VertexInputInfo->vertexBindingDescriptionCount = (uint32)NewDecl->BindingDescs.size();
-		VertexInputInfo->pVertexBindingDescriptions = NewDecl->BindingDescs.data();
-	});
+		/*FPSOCache::FVertexDecl* NewDecl = */FixGLTFVertexDecl(TestGLTFVS->Shader, App.Scene.Meshes[0].Prims[0].VertexDecl);
+		App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, App.Scene.Meshes[0].Prims[0].VertexDecl);
+	}
 }
 
 static void ErrorCallback(int Error, const char* Msg)
@@ -943,6 +924,7 @@ static GLFWwindow* Init(FApp& App)
 	uint32 ResY = RCUtils::FCmdLine::Get().TryGetIntPrefix("-resy=", 1080);
 
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
+	glfwHideWindow(Window);
 	check(Window);
 
 	if (RCUtils::FCmdLine::Get().Contains("-waitfordebugger"))
@@ -982,6 +964,7 @@ static GLFWwindow* Init(FApp& App)
 	//IO.ImeWindowHandle = Window;
 
 	App.SetupImGuiAndResources(Device);
+	glfwShowWindow(Window);
 
 	return Window;
 }
