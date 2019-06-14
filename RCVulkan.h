@@ -2191,7 +2191,7 @@ struct FPSOCache
 		}
 	};
 
-	SVulkan::FGfxPSO* GetGfxPSO(FPSOHandle Handle)
+	SVulkan::FGfxPSO* GetGfxPSO(FPSOHandle Handle, int32 VertexDeclHandle = -1)
 	{
 		check(Handle.Index != -1);
 		return &GfxPSOs[Handle.Index];
@@ -2459,6 +2459,10 @@ struct FDescriptorCache
 
 			void Alloc(FDescriptorSets& OutSets, SVulkan::FCmdBuffer* CmdBuffer)
 			{
+				if (Layouts->size() == 0)
+				{
+					return;
+				}
 				check(!FreeSets.empty());
 				OutSets = FreeSets.back();
 				FreeSets.resize(FreeSets.size() - 1);
@@ -2701,11 +2705,11 @@ struct FStagingBufferManager
 			}
 			else
 			{
-				check(0);
+				//check(0);
 			}
 		}
 
-		check(UsedEntries.empty());
+		//check(UsedEntries.empty());
 
 		for (FStagingBuffer* Buffer : FreeEntries)
 		{
@@ -2749,7 +2753,7 @@ struct FStagingBufferManager
 
 		FStagingBuffer* Entry = new FStagingBuffer;
 		Entry->Buffer = new FBufferWithMem;
-		Entry->Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, EMemLocation::CPU, Size, true);
+		Entry->Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, EMemLocation::CPU, Size, true);
 		Entry->CmdBuffer = CurrentCmdBuffer;
 		Entry->Fence = CurrentCmdBuffer ? CurrentCmdBuffer->Fence.Counter : 0;
 		UsedEntries.push_back(Entry);

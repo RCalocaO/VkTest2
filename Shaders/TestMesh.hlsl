@@ -13,9 +13,6 @@ cbuffer ObjUB : register(b1)
 SamplerState SS : register(s2);
 Texture2D Tex : register(t3);
 
-
-
-
 struct FGLTFVS
 {
 	// Use GLTF semantic names for easier binding
@@ -38,7 +35,8 @@ struct FGLTFPS
 FGLTFPS TestGLTFVS(FGLTFVS In)
 {
 	FGLTFPS Out = (FGLTFPS)0;
-	Out.Pos = float4(In.POSITION, 1);
+	float4 Pos = mul(ViewMtx, float4(In.POSITION, 1));
+	Out.Pos = mul(ProjectionMtx, Pos);
 	Out.Normal = In.NORMAL;
 	Out.Tangent = In.TANGENT;
 	Out.UV0 = In.TEXCOORD_0;

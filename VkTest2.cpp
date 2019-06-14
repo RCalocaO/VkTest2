@@ -442,13 +442,27 @@ struct FApp
 
 	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
 	{
+		int W = 0, H = 1;
+		glfwGetWindowSize(Window, &W, &H);
+		float FOVRadians = tan(ToRadians(60.0f));
+
+		struct FUB
+		{
+			FMatrix4x4 ViewMtx;
+			FMatrix4x4 ProjMtx;
+		} UB;
+		UB.ViewMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
+		UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, 1.0f, 1000.0f);
+
+		FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(UB), CmdBuffer);
+		*(FUB*)Buffer->Buffer->Lock() = UB;
+		Buffer->Buffer->Unlock();
+
 		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO);
 		for (auto& Mesh : Scene.Meshes)
 		{
 			for (auto& Prim : Mesh.Prims)
 			{
-				//GetPSO(Prim.VertexDecl);
-
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 				std::vector<VkBuffer> VBs;
 #if SCENE_USE_SINGLE_BUFFERS
@@ -481,7 +495,12 @@ struct FApp
 					ImageInfo[1].imageView = Scene.Images.empty() ? WhiteTexture.View : Scene.Images[0].View;
 					ImageInfo[1].sampler = ImGuiFontSampler;
 
-					VkWriteDescriptorSet DescriptorWrites[2];
+					VkDescriptorBufferInfo BufferInfo;
+					ZeroMem(BufferInfo);
+					BufferInfo.buffer = Buffer->Buffer->Buffer.Buffer;
+					BufferInfo.range = Buffer->Buffer->Size;
+
+					VkWriteDescriptorSet DescriptorWrites[3];
 					ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 					DescriptorWrites[0].descriptorCount = 1;
 					DescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -494,7 +513,13 @@ struct FApp
 					DescriptorWrites[1].pImageInfo = &ImageInfo[1];
 					DescriptorWrites[1].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[1]->binding;
 
-					GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, &DescriptorWrites[0], PSO);
+					ZeroVulkanMem(DescriptorWrites[2], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+					DescriptorWrites[2].descriptorCount = 1;
+					DescriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+					DescriptorWrites[2].pBufferInfo = &BufferInfo;
+					DescriptorWrites[2].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[0]->binding;
+
+					GDescriptorCache.UpdateDescriptors(CmdBuffer, 3, &DescriptorWrites[0], PSO);
 				}
 
 
@@ -835,10 +860,12 @@ static void SetupShaders(FApp& App)
 	}
 
 	{
-		check(App.Scene.Meshes.size() == 1);
-		check(App.Scene.Meshes[0].Prims.size() == 1);
-		FixGLTFVertexDecl(TestGLTFVS->Shader, App.Scene.Meshes[0].Prims[0].VertexDecl);
-		App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, App.Scene.Meshes[0].Prims[0].VertexDecl);
+		for (auto& Mesh : App.Scene.Meshes)
+		{
+			check(Mesh.Prims.size() == 1);
+			FixGLTFVertexDecl(TestGLTFVS->Shader, Mesh.Prims[0].VertexDecl);
+			App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, Mesh.Prims[0].VertexDecl);
+		}
 	}
 }
 
