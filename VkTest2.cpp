@@ -36,15 +36,15 @@ extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& 
 struct FApp
 {
 	uint32 FrameIndex = 0;
-	SVulkan::FGfxPSO PassThroughVSRedPSPSO;
-	//SVulkan::FGfxPSO DataClipVSColorTessPSO;
-	SVulkan::FGfxPSO NoVBClipVSRedPSO;
-	SVulkan::FGfxPSO DataClipVSRedPSO;
-	SVulkan::FGfxPSO DataClipVSColorPSO;
-	SVulkan::FGfxPSO VBClipVSRedPSO;
-	SVulkan::FGfxPSO TestGLTFPSO;
+	FPSOCache::FPSOHandle PassThroughVSRedPSPSO;
+	//FPSOCache::FPSOHandle DataClipVSColorTessPSO;
+	FPSOCache::FPSOHandle NoVBClipVSRedPSO;
+	FPSOCache::FPSOHandle DataClipVSRedPSO;
+	FPSOCache::FPSOHandle DataClipVSColorPSO;
+	FPSOCache::FPSOHandle VBClipVSRedPSO;
+	FPSOCache::FPSOHandle TestGLTFPSO;
 	FBufferWithMemAndView ClipVB;
-	SVulkan::FComputePSO TestCSPSO;
+	FPSOCache::FPSOHandle TestCSPSO;
 	FBufferWithMemAndView TestCSBuffer;
 	FBufferWithMem TestCSUB;
 	FBufferWithMem ColorUB;
@@ -62,7 +62,7 @@ struct FApp
 	FBufferWithMem ImGuiVB[NUM_IMGUI_BUFFERS];
 	FBufferWithMem ImGuiIB[NUM_IMGUI_BUFFERS];
 	FBufferWithMem ImGuiScaleTranslateUB[NUM_IMGUI_BUFFERS];
-	SVulkan::FGfxPSO ImGUIPSO;
+	FPSOCache::FPSOHandle ImGUIPSO;
 	double Time = 0;
 	bool MouseJustPressed[5] = {false, false, false, false, false};
 	GLFWcursor* MouseCursors[ImGuiMouseCursor_COUNT] = {0};
@@ -320,19 +320,20 @@ struct FApp
 			ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 			ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 
+			SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(ImGUIPSO);
 			{
 				VkWriteDescriptorSet DescriptorWrites[3];
 				ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 				//DescriptorWrites.pNext = NULL;
 				//DescriptorWrites.dstSet = 0;  // dstSet is ignored by the extension
 				DescriptorWrites[0].descriptorCount = 1;
-				DescriptorWrites[0].descriptorType = (VkDescriptorType)ImGUIPSO.Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
+				DescriptorWrites[0].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
 				VkDescriptorBufferInfo BInfo;
 				ZeroMem(BInfo);
 				BInfo.buffer = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
 				BInfo.range = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Size;
 				DescriptorWrites[0].pBufferInfo = &BInfo;
-				DescriptorWrites[0].dstBinding = ImGUIPSO.Reflection[EShaderStages::Vertex]->bindings[0]->binding;
+				DescriptorWrites[0].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[0]->binding;
 
 				VkDescriptorImageInfo IInfo;
 				ZeroMem(IInfo);
@@ -342,15 +343,15 @@ struct FApp
 
 				ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 				DescriptorWrites[1].descriptorCount = 1;
-				DescriptorWrites[1].descriptorType = (VkDescriptorType)ImGUIPSO.Reflection[EShaderStages::Pixel]->bindings[0]->descriptor_type;
+				DescriptorWrites[1].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Pixel]->bindings[0]->descriptor_type;
 				DescriptorWrites[1].pImageInfo = &IInfo;
-				DescriptorWrites[1].dstBinding = ImGUIPSO.Reflection[EShaderStages::Pixel]->bindings[0]->binding;
+				DescriptorWrites[1].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[0]->binding;
 
 				ZeroVulkanMem(DescriptorWrites[2], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 				DescriptorWrites[2].descriptorCount = 1;
-				DescriptorWrites[2].descriptorType = (VkDescriptorType)ImGUIPSO.Reflection[EShaderStages::Pixel]->bindings[1]->descriptor_type;
+				DescriptorWrites[2].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Pixel]->bindings[1]->descriptor_type;
 				DescriptorWrites[2].pImageInfo = &IInfo;
-				DescriptorWrites[2].dstBinding = ImGUIPSO.Reflection[EShaderStages::Pixel]->bindings[1]->binding;
+				DescriptorWrites[2].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[1]->binding;
 
 				{
 					float* ScaleTranslate = (float*)ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Lock();
@@ -372,11 +373,11 @@ struct FApp
 					//BufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
 					//vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &BufferBarrier, 0, nullptr);
 				}
-				GDescriptorCache.UpdateDescriptors(CmdBuffer, 3, DescriptorWrites, ImGUIPSO);
+				GDescriptorCache.UpdateDescriptors(CmdBuffer, 3, DescriptorWrites, PSO);
 			}
 
 			CmdBuffer->BeginRenderPass(Framebuffer);
-			vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ImGUIPSO.Pipeline);
+			vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 
 			{
 				VkViewport Viewport;
@@ -441,13 +442,14 @@ struct FApp
 
 	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
 	{
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO);
 		for (auto& Mesh : Scene.Meshes)
 		{
 			for (auto& Prim : Mesh.Prims)
 			{
 				//GetPSO(Prim.VertexDecl);
 
-				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, TestGLTFPSO.Pipeline);
+				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 				std::vector<VkBuffer> VBs;
 #if SCENE_USE_SINGLE_BUFFERS
 				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, Prim.IndexBuffer.Buffer.Buffer, 0, Prim.IndexType);
@@ -484,15 +486,15 @@ struct FApp
 					DescriptorWrites[0].descriptorCount = 1;
 					DescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 					DescriptorWrites[0].pImageInfo = &ImageInfo[0];
-					DescriptorWrites[0].dstBinding = TestGLTFPSO.Reflection[EShaderStages::Pixel]->bindings[0]->binding;
+					DescriptorWrites[0].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[0]->binding;
 
 					ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 					DescriptorWrites[1].descriptorCount = 1;
 					DescriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 					DescriptorWrites[1].pImageInfo = &ImageInfo[1];
-					DescriptorWrites[1].dstBinding = TestGLTFPSO.Reflection[EShaderStages::Pixel]->bindings[1]->binding;
+					DescriptorWrites[1].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[1]->binding;
 
-					GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, &DescriptorWrites[0], TestGLTFPSO);
+					GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, &DescriptorWrites[0], PSO);
 				}
 
 
@@ -558,38 +560,42 @@ static double Render(FApp& App)
 	CmdBuffer->BeginRenderPass(Framebuffer);
 	if (0)
 	{
-		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSRedPSO.Pipeline);
+		//vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSRedPSO.Pipeline);
 	}
 	else if (0)
 	{
-		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.PassThroughVSRedPSPSO.Pipeline);
+		//vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.PassThroughVSRedPSPSO.Pipeline);
 	}
 	else if (1)
 	{
-		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSColorPSO.Pipeline);
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(App.DataClipVSColorPSO);
+
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 
 		VkWriteDescriptorSet DescriptorWrites[2];
 		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 		DescriptorWrites[0].descriptorCount = 1;
-		DescriptorWrites[0].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
+		DescriptorWrites[0].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
 		DescriptorWrites[0].pTexelBufferView = &App.ClipVB.View;
 		//DescriptorWrites.pBufferInfo = &info.uniform_data.buffer_info;  // populated by init_uniform_buffer()
-		DescriptorWrites[0].dstBinding = App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->binding;
+		DescriptorWrites[0].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[0]->binding;
 
 		ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 		DescriptorWrites[1].descriptorCount = 1;
-		DescriptorWrites[1].descriptorType = (VkDescriptorType)App.DataClipVSColorPSO.Reflection[EShaderStages::Pixel]->bindings[0]->descriptor_type;
+		DescriptorWrites[1].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Pixel]->bindings[0]->descriptor_type;
 		VkDescriptorBufferInfo BufferInfo;
 		ZeroMem(BufferInfo);
 		BufferInfo.buffer = App.ColorUB.Buffer.Buffer;
 		BufferInfo.range =  App.ColorUB.Size;
 		DescriptorWrites[1].pBufferInfo = &BufferInfo;
-		DescriptorWrites[1].dstBinding = App.DataClipVSColorPSO.Reflection[EShaderStages::Pixel]->bindings[0]->binding;
+		DescriptorWrites[1].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[0]->binding;
 
-		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, App.DataClipVSColorPSO);
+		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, PSO);
 	}
+/*
 	else if (1)
 	{
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetPSO(App.DataClipVSRedPSO);
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Pipeline);
 
 		VkWriteDescriptorSet DescriptorWrites;
@@ -609,6 +615,7 @@ static double Render(FApp& App)
 		VkDeviceSize Offsets = 0;
 		vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &App.ClipVB.Buffer.Buffer, &Offsets);
 	}
+*/
 	GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
 
 	vkCmdDraw(CmdBuffer->CmdBuffer, 3, 1, 0, 0);
@@ -621,27 +628,28 @@ static double Render(FApp& App)
 	CmdBuffer->EndRenderPass();
 
 	{
-		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, App.TestCSPSO.Pipeline);
+		SVulkan::FComputePSO* PSO = GPSOCache.GetComputePSO(App.TestCSPSO);
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, PSO->Pipeline);
 		GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
 
 		VkWriteDescriptorSet DescriptorWrites[2];
 		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 		DescriptorWrites[0].descriptorCount = 1;
-		DescriptorWrites[0].descriptorType = (VkDescriptorType)App.TestCSPSO.Reflection->bindings[0]->descriptor_type;
+		DescriptorWrites[0].descriptorType = (VkDescriptorType)PSO->Reflection->bindings[0]->descriptor_type;
 		DescriptorWrites[0].pTexelBufferView = &App.TestCSBuffer.View;
-		DescriptorWrites[0].dstBinding = App.TestCSPSO.Reflection->bindings[0]->binding;
+		DescriptorWrites[0].dstBinding = PSO->Reflection->bindings[0]->binding;
 
 		ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 		DescriptorWrites[1].descriptorCount = 1;
-		DescriptorWrites[1].descriptorType = (VkDescriptorType)App.TestCSPSO.Reflection->bindings[1]->descriptor_type;
+		DescriptorWrites[1].descriptorType = (VkDescriptorType)PSO->Reflection->bindings[1]->descriptor_type;
 		VkDescriptorBufferInfo BufferInfo;
 		ZeroMem(BufferInfo);
 		BufferInfo.buffer = App.TestCSUB.Buffer.Buffer;
 		BufferInfo.range =  App.TestCSUB.Size;
 		DescriptorWrites[1].pBufferInfo = &BufferInfo;
-		DescriptorWrites[1].dstBinding = App.TestCSPSO.Reflection->bindings[1]->binding;
+		DescriptorWrites[1].dstBinding = PSO->Reflection->bindings[1]->binding;
 
-		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, App.TestCSPSO);
+		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, PSO);
 
 		for (int32 Index = 0; Index < 256; ++Index)
 		{

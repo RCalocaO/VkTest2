@@ -2061,10 +2061,26 @@ struct FPSOCache
 		std::vector<SVulkan::FShader*> Shaders;
 	};
 	std::vector<FLayout> PipelineLayouts;
-	std::vector<SVulkan::FPSO> PSOs;
+	std::vector<SVulkan::FGfxPSO> GfxPSOs;
+	std::vector<SVulkan::FComputePSO> ComputePSOs;
 
 	SVulkan::SDevice* Device =  nullptr;
 	FBufferWithMem ZeroBuffer;
+
+	struct FPSOHandle
+	{
+		int32 Index;
+
+		FPSOHandle()
+			: Index(-1)
+		{
+		}
+
+		FPSOHandle(size_t In)
+		{
+			Index = (int32)In;
+		}
+	};
 
 	struct FGfxPSOEntry
 	{
@@ -2145,7 +2161,6 @@ struct FPSOCache
 			StageInfos[GfxPipelineInfo.stageCount].module = SI->Shader->ShaderModule;
 			StageInfos[GfxPipelineInfo.stageCount].pName = SI->EntryPoint.c_str();
 
-
 			++GfxPipelineInfo.stageCount;
 		}
 
@@ -2175,6 +2190,18 @@ struct FPSOCache
 			}
 		}
 	};
+
+	SVulkan::FGfxPSO* GetGfxPSO(FPSOHandle Handle)
+	{
+		check(Handle.Index != -1);
+		return &GfxPSOs[Handle.Index];
+	}
+
+	SVulkan::FComputePSO* GetComputePSO(FPSOHandle Handle)
+	{
+		check(Handle.Index != -1);
+		return &ComputePSOs[Handle.Index];
+	}
 
 	void Init(SVulkan::SDevice* InDevice)
 	{
@@ -2261,7 +2288,7 @@ struct FPSOCache
 	}
 
 	template <typename TFunction>
-	SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle, TFunction Callback)
+	FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle, TFunction Callback)
 	{
 		check(VS->Shader && VS->Shader->ShaderModule);
 		if (HS || DS)
@@ -2308,20 +2335,20 @@ struct FPSOCache
 		Callback(Entry.GfxPipelineInfo);
 
 		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &Entry.GfxPipelineInfo, nullptr, &PSO.Pipeline));
-		PSOs.push_back(PSO);
+		GfxPSOs.push_back(PSO);
 
 		Device->SetDebugName(PSO.Pipeline, Name);
 
-		return PSO;
+		return FPSOHandle(GfxPSOs.size() - 1);
 	}
 
 	template <typename TFunction>
-	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle, TFunction Callback)
+	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle, TFunction Callback)
 	{
 		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, VertexDeclHandle, Callback);
 	}
 
-	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle = -1)
+	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle = -1)
 	{
 		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, VertexDeclHandle,
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
@@ -2329,7 +2356,7 @@ struct FPSOCache
 			});
 	}
 
-	inline SVulkan::FGfxPSO CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
+	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
 	{
 		return CreateGfxPSO(Name, VS, HS, DS, PS, RenderPass, -1,
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
@@ -2337,7 +2364,7 @@ struct FPSOCache
 		});
 	}
 
-	SVulkan::FComputePSO CreateComputePSO(const char* Name, FShaderInfo* CS)
+	FPSOHandle CreateComputePSO(const char* Name, FShaderInfo* CS)
 	{
 		check(CS->Shader && CS->Shader->ShaderModule);
 
@@ -2356,10 +2383,20 @@ struct FPSOCache
 		PipelineInfo.layout = PSO.Layout;
 
 		VERIFY_VKRESULT(vkCreateComputePipelines(Device->Device, VK_NULL_HANDLE, 1, &PipelineInfo, nullptr, &PSO.Pipeline));
-		PSOs.push_back(PSO);
+		ComputePSOs.push_back(PSO);
 		Device->SetDebugName(PSO.Pipeline, Name);
-		return PSO;
+		return FPSOHandle(ComputePSOs.size() - 1);
 	}
+
+	template <typename TPSO>
+	static void FreePSOs(VkDevice Device, std::vector<TPSO>& PSOs)
+	{
+		for (auto& PSO : PSOs)
+		{
+			vkDestroyPipeline(Device, PSO.Pipeline, nullptr);
+		}
+		PSOs.clear();
+	};
 
 	void Destroy()
 	{
@@ -2370,11 +2407,8 @@ struct FPSOCache
 
 		PipelineLayouts.clear();
 
-		for (auto& PSO : PSOs)
-		{
-			vkDestroyPipeline(Device->Device, PSO.Pipeline, nullptr);
-		}
-		PSOs.clear();
+		FreePSOs(Device->Device, GfxPSOs);
+		FreePSOs(Device->Device, ComputePSOs);
 	}
 };
 
@@ -2449,16 +2483,16 @@ struct FDescriptorCache
 		const uint32 NumEntries = 32;
 		std::vector<VkDescriptorPoolSize> PoolSizes;
 
-		void Init(VkDevice InDevice, SVulkan::FPSO& PSO)
+		void Init(VkDevice InDevice, SVulkan::FPSO* PSO)
 		{
 			Device = InDevice;
 
-			Layouts = PSO.SetLayouts;
+			Layouts = PSO->SetLayouts;
 
 			{
 				std::map<VkDescriptorType, uint32> TypeCounts;
 				NumDescriptorsPerSet.push_back(0);
-				for (auto OuterPair : PSO.Shaders)
+				for (auto OuterPair : PSO->Shaders)
 				{
 					for (auto Pair : OuterPair.second->SetInfoBindings)
 					{
@@ -2593,45 +2627,43 @@ struct FDescriptorCache
 		PSODescriptors.clear();
 	}
 
-	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FGfxPSO& InPSO)
+	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FGfxPSO* InPSO)
 	{
 		if (Device->bPushDescriptor)
 		{
-			vkCmdPushDescriptorSetKHR(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO.Layout, 0, NumWrites, DescriptorWrites);
+			vkCmdPushDescriptorSetKHR(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO->Layout, 0, NumWrites, DescriptorWrites);
 		}
 		else
 		{
-			SVulkan::FPSO* PSO = &InPSO;
-			if (PSODescriptors.find(PSO) == PSODescriptors.end())
+			if (PSODescriptors.find(InPSO) == PSODescriptors.end())
 			{
-				PSODescriptors[PSO].Init(Device->Device, InPSO);
+				PSODescriptors[InPSO].Init(Device->Device, InPSO);
 			}
 
-			auto Sets = PSODescriptors[PSO].AllocSets(CmdBuffer);
-			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[PSO].NumDescriptorsPerSet);
+			auto Sets = PSODescriptors[InPSO].AllocSets(CmdBuffer);
+			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[InPSO].NumDescriptorsPerSet);
 			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
-			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
+			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO->Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
 		}
 	}
 
-	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FComputePSO& InPSO)
+	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FComputePSO* InPSO)
 	{
 		if (Device->bPushDescriptor)
 		{
-			vkCmdPushDescriptorSetKHR(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, NumWrites, DescriptorWrites);
+			vkCmdPushDescriptorSetKHR(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO->Layout, 0, NumWrites, DescriptorWrites);
 		}
 		else
 		{
-			SVulkan::FPSO* PSO = &InPSO;
-			if (PSODescriptors.find(PSO) == PSODescriptors.end())
+			if (PSODescriptors.find(InPSO) == PSODescriptors.end())
 			{
-				PSODescriptors[PSO].Init(Device->Device, InPSO);
+				PSODescriptors[InPSO].Init(Device->Device, InPSO);
 			}
 
-			auto Sets = PSODescriptors[PSO].AllocSets(CmdBuffer);
-			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[PSO].NumDescriptorsPerSet);
+			auto Sets = PSODescriptors[InPSO].AllocSets(CmdBuffer);
+			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[InPSO].NumDescriptorsPerSet);
 			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
-			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO.Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
+			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO->Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
 		}
 	}
 };

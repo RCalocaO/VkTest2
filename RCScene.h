@@ -47,7 +47,7 @@ struct FScene
 				Prim.IndexBuffer.Destroy();
 				for (auto& VB : Prim.VertexBuffers)
 				{
-					VB.Destroy();
+//					VB.Destroy();
 				}
 			}
 		}
