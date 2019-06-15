@@ -1,6 +1,9 @@
 
 
 #include "VkTest2.h"
+
+#pragma optimize( "", on)
+
 #include "RCVulkan.h"
 #include "RCScene.h"
 

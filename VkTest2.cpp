@@ -30,6 +30,8 @@ static FDescriptorCache GDescriptorCache;
 static FStagingBufferManager GStagingBufferMgr;
 
 
+static FVector3 g_vMove = {0, 0, 0};
+
 extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
 
 
@@ -440,6 +442,16 @@ struct FApp
 		}
 	}
 
+	struct  
+	{
+		FVector4 Pos = {54, 0, -129, 1};
+	} Camera;
+
+	void UpdateMatrices(const FVector3& Delta)
+	{
+		Camera.Pos += Delta;
+	}
+
 	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
 	{
 		int W = 0, H = 1;
@@ -452,6 +464,7 @@ struct FApp
 			FMatrix4x4 ProjMtx;
 		} UB;
 		UB.ViewMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
+		UB.ViewMtx.Rows[3] = Camera.Pos;
 		UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, 1.0f, 1000.0f);
 
 		FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(UB), CmdBuffer);
@@ -543,6 +556,13 @@ static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 	Range.layerCount = 1;
 	Range.levelCount = 1;
 	vkCmdClearColorImage(CmdBuffer, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &ClearColors, 1, &Range);
+}
+
+static void UpdateInput(FApp& App)
+{
+	App.UpdateMatrices(g_vMove);
+
+	g_vMove = FVector3::GetZero();
 }
 
 static double Render(FApp& App)
@@ -756,8 +776,31 @@ static double Render(FApp& App)
 }
 
 
-static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, int Mods)
 {
+	switch (Key)
+	{
+	case 266:
+		++g_vMove.y;
+		break;
+	case 267:
+		--g_vMove.y;
+		break;
+	case 'W':
+		++g_vMove.z;
+		break;
+	case 'S':
+		--g_vMove.z;
+		break;
+	case 'A':
+		++g_vMove.x;
+		break;
+	case 'D':
+		--g_vMove.x;
+		break;
+	default:
+		break;
+	}
 }
 
 static void FixGLTFVertexDecl(SVulkan::FShader* Shader, int32& PrimVertexDeclHandle)
@@ -964,6 +1007,8 @@ int main()
 		double CpuBegin = glfwGetTime() * 1000.0;
 
 		glfwPollEvents();
+
+		UpdateInput(App);
 
 		App.GpuDelta = Render(App);
 
