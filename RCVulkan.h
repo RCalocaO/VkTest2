@@ -2490,7 +2490,7 @@ struct FDescriptorCache
 		void Init(VkDevice InDevice, SVulkan::FPSO* PSO)
 		{
 			Device = InDevice;
-
+			check(PSO->SetLayouts.size() > 0);
 			Layouts = PSO->SetLayouts;
 
 			{

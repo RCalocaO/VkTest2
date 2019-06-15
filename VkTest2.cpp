@@ -34,6 +34,22 @@ static FVector3 g_vMove = {0, 0, 0};
 
 extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
 
+FVector3 TryGetVector3Prefix(const char* Prefix, FVector3 Value)
+{
+	check(Prefix);
+	uint32 PrefixLength = (uint32)strlen(Prefix);
+	for (const auto& Arg : RCUtils::FCmdLine::Get().Args)
+	{
+		if (!_strnicmp(Arg.c_str(), Prefix, PrefixLength))
+		{
+			const char* Vector3String = Arg.c_str() + PrefixLength;
+			sscanf(Vector3String, "%f,%f,%f", &Value.x, &Value.y, &Value.z);
+			break;
+		}
+	}
+
+	return Value;
+}
 
 struct FApp
 {
@@ -444,7 +460,7 @@ struct FApp
 
 	struct  
 	{
-		FVector4 Pos = {54, 0, -129, 1};
+		FVector4 Pos = {0, 0, 0, 1};
 	} Camera;
 
 	void UpdateMatrices(const FVector3& Delta)
@@ -471,11 +487,11 @@ struct FApp
 		*(FUB*)Buffer->Buffer->Lock() = UB;
 		Buffer->Buffer->Unlock();
 
-		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO);
 		for (auto& Mesh : Scene.Meshes)
 		{
 			for (auto& Prim : Mesh.Prims)
 			{
+				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, Prim.VertexDecl);
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 				std::vector<VkBuffer> VBs;
 #if SCENE_USE_SINGLE_BUFFERS
@@ -704,7 +720,7 @@ static double Render(FApp& App)
 
 	App.GPUTiming.EndTimestamp(CmdBuffer);
 
-
+#if 0
 	if (ImGui::BeginMainMenuBar())
 	{
 		{
@@ -731,6 +747,24 @@ static double Render(FApp& App)
 */
 
 		ImGui::EndMainMenuBar();
+	}
+#endif
+	if (ImGui::Begin("Test"))
+	{
+		if (!App.LoadedGLTF.empty())
+		{			
+			ImGui::MenuItem(RCUtils::GetBaseName(App.LoadedGLTF, true).c_str(), nullptr, false, false);
+		}
+		char s[64];
+		sprintf(s, "FPS %3.2f", (float)(1000.0 / App.CpuDelta));
+		float Value = (float)(1000.0 / App.CpuDelta);
+		ImGui::SliderFloat("FPS", &Value, 0, 60);
+		Value = (float)App.CpuDelta;
+		ImGui::SliderFloat("CPU", &Value, 0, 66);
+		Value = (float)App.GpuDelta;
+		ImGui::SliderFloat("GPU", &Value, 0, 66);
+		ImGui::Text("Pos: %.2f, %.2f, %.2f", App.Camera.Pos.x, App.Camera.Pos.y, App.Camera.Pos.z);
+		ImGui::End();
 	}
 
 /*
@@ -927,6 +961,8 @@ static GLFWwindow* Init(FApp& App)
 
 	uint32 ResX = RCUtils::FCmdLine::Get().TryGetIntPrefix("-resx=", 1920);
 	uint32 ResY = RCUtils::FCmdLine::Get().TryGetIntPrefix("-resy=", 1080);
+
+	g_vMove = TryGetVector3Prefix("-pos=", FVector3::GetZero());
 
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
 	glfwHideWindow(Window);
