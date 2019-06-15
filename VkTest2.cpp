@@ -474,23 +474,26 @@ struct FApp
 		glfwGetWindowSize(Window, &W, &H);
 		float FOVRadians = tan(ToRadians(60.0f));
 
-		struct FUB
+		for (auto& Instance : Scene.Instances)
 		{
-			FMatrix4x4 ViewMtx;
-			FMatrix4x4 ProjMtx;
-		} UB;
-		UB.ViewMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
-		UB.ViewMtx.Rows[3] = Camera.Pos;
-		UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, 1.0f, 1000.0f);
-
-		FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(UB), CmdBuffer);
-		*(FUB*)Buffer->Buffer->Lock() = UB;
-		Buffer->Buffer->Unlock();
-
-		for (auto& Mesh : Scene.Meshes)
-		{
+			auto& Mesh = Scene.Meshes[Instance.Mesh];
 			for (auto& Prim : Mesh.Prims)
 			{
+				struct FUB
+				{
+					FMatrix4x4 WorldMtx;
+					FMatrix4x4 ViewMtx;
+					FMatrix4x4 ProjMtx;
+				} UB;
+				UB.WorldMtx = FMatrix4x4::GetIdentity();
+				UB.WorldMtx.Rows[3] = Instance.Pos;
+				UB.ViewMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
+				UB.ViewMtx.Rows[3] = Camera.Pos;
+				UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, 1.0f, 1000.0f);
+				FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(UB), CmdBuffer);
+				*(FUB*)Buffer->Buffer->Lock() = UB;
+				Buffer->Buffer->Unlock();
+
 				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, Prim.VertexDecl);
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 				std::vector<VkBuffer> VBs;

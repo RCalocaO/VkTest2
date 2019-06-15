@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "../RCUtils/RCUtilsMath.h"
+
 #define SCENE_USE_SINGLE_BUFFERS	1
 
 
@@ -36,6 +38,14 @@ struct FScene
 	};
 
 	std::vector<FMesh> Meshes;
+
+	struct FInstance
+	{
+		FVector4 Pos =  {0, 0, 0, 1};
+		uint32 Mesh = 0;
+	};
+
+	std::vector<FInstance> Instances;
 
 	void Destroy()
 	{

@@ -1,5 +1,6 @@
 cbuffer ViewUB : register(b0)
 {
+	float4x4 WorldMtx;
 	float4x4 ViewMtx;
 	float4x4 ProjectionMtx;
 };
@@ -35,7 +36,8 @@ struct FGLTFPS
 FGLTFPS TestGLTFVS(FGLTFVS In)
 {
 	FGLTFPS Out = (FGLTFPS)0;
-	float4 Pos = mul(ViewMtx, float4(In.POSITION, 1));
+	float4 Pos = mul(WorldMtx, float4(In.POSITION, 1));
+	Pos = mul(ViewMtx, Pos);
 	Out.Pos = mul(ProjectionMtx, Pos);
 	Out.Normal = In.NORMAL;
 	Out.Tangent = In.TANGENT;

@@ -269,6 +269,29 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 				Scene.Images.push_back(Image);
 			}
 		}
+
+		uint32 Index = 0;
+		for (tinygltf::Node Node : Model.nodes)
+		{
+			FScene::FInstance Instance;
+			Instance.Mesh = Node.mesh;
+			if (Node.translation.size() != 0)
+			{
+				check(Node.translation.size() == 3);
+				Instance.Pos.Set((float)Node.translation[0], (float)Node.translation[1], (float)Node.translation[2], 1);
+			}
+			Scene.Instances.push_back(Instance);
+		}
+
+		if (Model.nodes.size() == 0)
+		{
+			for (int32 Index = 0; Index < (int32)Scene.Meshes.size(); ++Index)
+			{
+				FScene::FInstance Instance;
+				Instance.Mesh = Index;
+				Scene.Instances.push_back(Instance);
+			}
+		}
 	}
 
 	return true;
