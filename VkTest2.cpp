@@ -240,7 +240,6 @@ struct FApp
 		ImGui::NewFrame();
 	}
 
-
 	void UpdateMousePosAndButtons()
 	{
 		ImGuiIO& io = ImGui::GetIO();
@@ -274,7 +273,9 @@ struct FApp
 	{
 		ImGuiIO& io = ImGui::GetIO();
 		if ((io.ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange) || glfwGetInputMode(Window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
+		{
 			return;
+		}
 
 		ImGuiMouseCursor imgui_cursor = ImGui::GetMouseCursor();
 		if (imgui_cursor == ImGuiMouseCursor_None || io.MouseDrawCursor)
@@ -775,9 +776,10 @@ static double Render(FApp& App)
 		ImGui::SliderFloat("CPU", &Value, 0, 66);
 		Value = (float)App.GpuDelta;
 		ImGui::SliderFloat("GPU", &Value, 0, 66);
+		ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
 		ImGui::Text("Pos: %.2f, %.2f, %.2f", App.Camera.Pos.x, App.Camera.Pos.y, App.Camera.Pos.z);
-		ImGui::End();
 	}
+	ImGui::End();
 
 /*
 	{
@@ -799,6 +801,7 @@ static double Render(FApp& App)
 		//ImGui::ShowDemoWindow();
 	}
 */
+	ImGui::ShowDemoWindow();
 
 	ImGui::Render();
 
@@ -822,36 +825,63 @@ static double Render(FApp& App)
 }
 
 
+static void CharCallback(GLFWwindow* Window, unsigned int Char)
+{
+	ImGuiIO& io = ImGui::GetIO();
+	io.AddInputCharacter(Char);
+}
+
 static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, int Mods)
 {
-	switch (Key)
+	ImGuiIO& io = ImGui::GetIO();
+	if (io.WantCaptureKeyboard)
 	{
-	case 262:
-		++g_vRot.y;
-		break;
-	case 263:
-		--g_vRot.y;
-		break;
-	case 266:
-		++g_vMove.y;
-		break;
-	case 267:
-		--g_vMove.y;
-		break;
-	case 'W':
-		++g_vMove.z;
-		break;
-	case 'S':
-		--g_vMove.z;
-		break;
-	case 'A':
-		++g_vMove.x;
-		break;
-	case 'D':
-		--g_vMove.x;
-		break;
-	default:
-		break;
+		if (Action == GLFW_PRESS)
+		{
+			io.KeysDown[Key] = true;
+		}
+		if (Action == GLFW_RELEASE)
+		{
+			io.KeysDown[Key] = false;
+		}
+
+		// Modifiers are not reliable across systems
+		io.KeyCtrl = io.KeysDown[GLFW_KEY_LEFT_CONTROL] || io.KeysDown[GLFW_KEY_RIGHT_CONTROL];
+		io.KeyShift = io.KeysDown[GLFW_KEY_LEFT_SHIFT] || io.KeysDown[GLFW_KEY_RIGHT_SHIFT];
+		io.KeyAlt = io.KeysDown[GLFW_KEY_LEFT_ALT] || io.KeysDown[GLFW_KEY_RIGHT_ALT];
+		io.KeySuper = io.KeysDown[GLFW_KEY_LEFT_SUPER] || io.KeysDown[GLFW_KEY_RIGHT_SUPER];
+	}
+	else
+	{
+		switch (Key)
+		{
+		case 262:
+			++g_vRot.y;
+			break;
+		case 263:
+			--g_vRot.y;
+			break;
+		case 266:
+			++g_vMove.y;
+			break;
+		case 267:
+			--g_vMove.y;
+			break;
+		case 'W':
+			++g_vMove.z;
+			break;
+		case 'S':
+			--g_vMove.z;
+			break;
+		case 'A':
+			++g_vMove.x;
+			break;
+		case 'D':
+			--g_vMove.x;
+			break;
+		default:
+			break;
+		}
 	}
 }
 
@@ -1005,6 +1035,7 @@ static GLFWwindow* Init(FApp& App)
 	GStagingBufferMgr.Init(&Device);
 
 	glfwSetKeyCallback(Window, KeyCallback);
+	glfwSetCharCallback(Window, CharCallback);
 
 	const char* Filename = nullptr;
 	if (RCUtils::FCmdLine::Get().TryGetStringFromPrefix("-gltf=", Filename))
