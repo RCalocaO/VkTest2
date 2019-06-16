@@ -273,14 +273,17 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 		uint32 Index = 0;
 		for (tinygltf::Node Node : Model.nodes)
 		{
-			FScene::FInstance Instance;
-			Instance.Mesh = Node.mesh;
-			if (Node.translation.size() != 0)
+			if (Node.mesh != -1)
 			{
-				check(Node.translation.size() == 3);
-				Instance.Pos.Set((float)Node.translation[0], (float)Node.translation[1], (float)Node.translation[2], 1);
+				FScene::FInstance Instance;
+				Instance.Mesh = Node.mesh;
+				if (Node.translation.size() != 0)
+				{
+					check(Node.translation.size() == 3);
+					Instance.Pos.Set((float)Node.translation[0], (float)Node.translation[1], (float)Node.translation[2], 1);
+				}
+				Scene.Instances.push_back(Instance);
 			}
-			Scene.Instances.push_back(Instance);
 		}
 
 		if (Model.nodes.size() == 0)

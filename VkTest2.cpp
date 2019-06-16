@@ -29,8 +29,8 @@ static FDescriptorCache GDescriptorCache;
 
 static FStagingBufferManager GStagingBufferMgr;
 
-
 static FVector3 g_vMove = {0, 0, 0};
+static FVector3 g_vRot = {0, 0, 0};
 
 extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
 
@@ -458,14 +458,19 @@ struct FApp
 		}
 	}
 
-	struct  
+	struct
 	{
+		FVector4 Right = {1, 0, 0 ,0};
+		FVector4 Up = {0, 1, 0, 0};
+		FVector4 Aim = {0, 0, 1, 0};
 		FVector4 Pos = {0, 0, 0, 1};
 	} Camera;
 
-	void UpdateMatrices(const FVector3& Delta)
+	void UpdateMatrices(const FVector3& DeltaPos, const FVector3& DeltaRot)
 	{
-		Camera.Pos += Delta;
+		Camera.Pos += DeltaPos;
+		FMatrix4x4 Rot = FMatrix4x4::GetRotationY(ToRadians(DeltaRot.y));
+		(FMatrix4x4&)Camera *= Rot;
 	}
 
 	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
@@ -486,8 +491,11 @@ struct FApp
 					FMatrix4x4 ProjMtx;
 				} UB;
 				UB.WorldMtx = FMatrix4x4::GetIdentity();
+				UB.WorldMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
 				UB.WorldMtx.Rows[3] = Instance.Pos;
-				UB.ViewMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
+				UB.ViewMtx.Rows[0] = Camera.Right;
+				UB.ViewMtx.Rows[1] = Camera.Up;
+				UB.ViewMtx.Rows[2] = Camera.Aim;
 				UB.ViewMtx.Rows[3] = Camera.Pos;
 				UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, 1.0f, 1000.0f);
 				FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(UB), CmdBuffer);
@@ -579,9 +587,10 @@ static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 
 static void UpdateInput(FApp& App)
 {
-	App.UpdateMatrices(g_vMove);
+	App.UpdateMatrices(g_vMove, g_vRot);
 
 	g_vMove = FVector3::GetZero();
+	g_vRot = FVector3::GetZero();
 }
 
 static double Render(FApp& App)
@@ -817,6 +826,12 @@ static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, i
 {
 	switch (Key)
 	{
+	case 262:
+		++g_vRot.y;
+		break;
+	case 263:
+		--g_vRot.y;
+		break;
 	case 266:
 		++g_vMove.y;
 		break;
