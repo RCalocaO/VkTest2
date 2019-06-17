@@ -81,6 +81,7 @@ struct FApp
 	FBufferWithMem ImGuiIB[NUM_IMGUI_BUFFERS];
 	FBufferWithMem ImGuiScaleTranslateUB[NUM_IMGUI_BUFFERS];
 	FPSOCache::FPSOHandle ImGUIPSO;
+	int32 ImGUIVertexDecl = -1;
 	double Time = 0;
 	bool MouseJustPressed[5] = {false, false, false, false, false};
 	GLFWcursor* MouseCursors[ImGuiMouseCursor_COUNT] = {0};
@@ -339,7 +340,7 @@ struct FApp
 			ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 			ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 
-			SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(ImGUIPSO);
+			SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(ImGUIPSO, ImGUIVertexDecl);
 			{
 				VkWriteDescriptorSet DescriptorWrites[3];
 				ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -461,17 +462,24 @@ struct FApp
 
 	struct
 	{
-		FVector4 Right = {1, 0, 0 ,0};
-		FVector4 Up = {0, 1, 0, 0};
-		FVector4 Aim = {0, 0, 1, 0};
-		FVector4 Pos = {0, 0, 0, 1};
+		//FVector3 Origin = {0, 0, 0};
+		//FVector3 Angles = {0, 0, 0};
+		FMatrix4x4 ViewMtx;
+		FVector3 Pos = {0, 0, 0};
 	} Camera;
 
 	void UpdateMatrices(const FVector3& DeltaPos, const FVector3& DeltaRot)
 	{
+/*
+		Camera.Angles += DeltaRot;
+		float xa = cos(ToRadians(Angles.x));
+		float ya = sin(ToRadians(Angles.x));
+*/
 		Camera.Pos += DeltaPos;
-		FMatrix4x4 Rot = FMatrix4x4::GetRotationY(ToRadians(DeltaRot.y));
-		(FMatrix4x4&)Camera *= Rot;
+		Camera.ViewMtx = FMatrix4x4::GetIdentity();
+		Camera.ViewMtx.Rows[3] += Camera.Pos;
+		//FMatrix4x4 Rot = FMatrix4x4::GetRotationY(ToRadians(DeltaRot.y));
+		//(FMatrix4x4&)Camera *= Rot;
 	}
 
 	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
@@ -494,10 +502,13 @@ struct FApp
 				UB.WorldMtx = FMatrix4x4::GetIdentity();
 				UB.WorldMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
 				UB.WorldMtx.Rows[3] = Instance.Pos;
+				UB.ViewMtx = Camera.ViewMtx;
+/*
 				UB.ViewMtx.Rows[0] = Camera.Right;
 				UB.ViewMtx.Rows[1] = Camera.Up;
 				UB.ViewMtx.Rows[2] = Camera.Aim;
 				UB.ViewMtx.Rows[3] = Camera.Pos;
+*/
 				UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, 1.0f, 1000.0f);
 				FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(UB), CmdBuffer);
 				*(FUB*)Buffer->Buffer->Lock() = UB;
@@ -777,7 +788,6 @@ static double Render(FApp& App)
 		Value = (float)App.GpuDelta;
 		ImGui::SliderFloat("GPU", &Value, 0, 66);
 		ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
-		ImGui::Text("Pos: %.2f, %.2f, %.2f", App.Camera.Pos.x, App.Camera.Pos.y, App.Camera.Pos.z);
 	}
 	ImGui::End();
 
@@ -853,34 +863,37 @@ static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, i
 	}
 	else
 	{
-		switch (Key)
+		if (Action == GLFW_PRESS)
 		{
-		case 262:
-			++g_vRot.y;
-			break;
-		case 263:
-			--g_vRot.y;
-			break;
-		case 266:
-			++g_vMove.y;
-			break;
-		case 267:
-			--g_vMove.y;
-			break;
-		case 'W':
-			++g_vMove.z;
-			break;
-		case 'S':
-			--g_vMove.z;
-			break;
-		case 'A':
-			++g_vMove.x;
-			break;
-		case 'D':
-			--g_vMove.x;
-			break;
-		default:
-			break;
+			switch (Key)
+			{
+			case 262:
+				++g_vRot.y;
+				break;
+			case 263:
+				--g_vRot.y;
+				break;
+			case 266:
+				++g_vMove.y;
+				break;
+			case 267:
+				--g_vMove.y;
+				break;
+			case 'W':
+				++g_vMove.z;
+				break;
+			case 'S':
+				--g_vMove.z;
+				break;
+			case 'A':
+				++g_vMove.x;
+				break;
+			case 'D':
+				--g_vMove.x;
+				break;
+			default:
+				break;
+			}
 		}
 	}
 }
@@ -960,18 +973,18 @@ static void SetupShaders(FApp& App)
 //	App.DataClipVSColorTessPSO = GPSOCache.CreateGfxPSO(DataClipVS, DataClipHS, DataClipDS, ColorPS, RenderPass);
 	App.NoVBClipVSRedPSO = GPSOCache.CreateGfxPSO("NoVBClipVSRedPSO", NoVBClipVS, RedPS, RenderPass);
 	App.DataClipVSRedPSO = GPSOCache.CreateGfxPSO("DataClipVSRedPSO", DataClipVS, RedPS, RenderPass);
-	App.PassThroughVSRedPSPSO = GPSOCache.CreateGfxPSO("PassThroughVSRedPSPSO", PassThroughVS, RedPS, RenderPass, -1, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+	App.PassThroughVSRedPSPSO = GPSOCache.CreateGfxPSO("PassThroughVSRedPSPSO", PassThroughVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 	{
 		VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
 		RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
 	});
 
 	{
-		FPSOCache::FVertexDecl Decl;
-		Decl.AddAttribute(0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0, "Position");
-		Decl.AddBinding(0, 4 * sizeof(float));
-		int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(Decl);
-		App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO("VBClipVSRedPSO", VBClipVS, RedPS, RenderPass,  VertexDeclHandle);
+		//FPSOCache::FVertexDecl Decl;
+		//Decl.AddAttribute(0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0, "Position");
+		//Decl.AddBinding(0, 4 * sizeof(float));
+		//int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(Decl);
+		//App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO("VBClipVSRedPSO", VBClipVS, RedPS, RenderPass,  VertexDeclHandle);
 	}
 
 	{
@@ -980,16 +993,18 @@ static void SetupShaders(FApp& App)
 		Decl.AddAttribute(0, 1, VK_FORMAT_R32G32_SFLOAT, IM_OFFSETOF(ImDrawVert, uv), "uv");
 		Decl.AddAttribute(0, 2, VK_FORMAT_R8G8B8A8_UNORM, IM_OFFSETOF(ImDrawVert, col), "col");
 		Decl.AddBinding(0, sizeof(ImDrawVert));
-		int32 VertexDecl = GPSOCache.FindOrAddVertexDecl(Decl);
-		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass, VertexDecl);
+		App.ImGUIVertexDecl = GPSOCache.FindOrAddVertexDecl(Decl);
+		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass);
 	}
 
 	{
+		App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass);
 		for (auto& Mesh : App.Scene.Meshes)
 		{
-			check(Mesh.Prims.size() == 1);
-			FixGLTFVertexDecl(TestGLTFVS->Shader, Mesh.Prims[0].VertexDecl);
-			App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, Mesh.Prims[0].VertexDecl);
+			for (auto& Prim : Mesh.Prims)
+			{
+				FixGLTFVertexDecl(TestGLTFVS->Shader, Prim.VertexDecl);
+			}
 		}
 	}
 }

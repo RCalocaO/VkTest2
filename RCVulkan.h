@@ -246,6 +246,7 @@ struct SVulkan
 
 	struct FPSO
 	{
+		std::string Name;
 		VkPipeline Pipeline = VK_NULL_HANDLE;
 		VkPipelineLayout Layout = VK_NULL_HANDLE;
 
@@ -2037,7 +2038,7 @@ struct FPSOCache
 		}
 
 		VertexDecls.push_back(VertexDecl);
-
+		check(Index == (int32)VertexDecls.size() - 1);
 		return Index;
 	}
 
@@ -2061,7 +2062,7 @@ struct FPSOCache
 		std::vector<SVulkan::FShader*> Shaders;
 	};
 	std::vector<FLayout> PipelineLayouts;
-	std::vector<SVulkan::FGfxPSO> GfxPSOs;
+	std::map<int32, std::map<int32, SVulkan::FGfxPSO>> GfxPSOs;
 	std::vector<SVulkan::FComputePSO> ComputePSOs;
 
 	SVulkan::SDevice* Device =  nullptr;
@@ -2149,23 +2150,45 @@ struct FPSOCache
 
 			ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
 			ViewportState.scissorCount = 1;
-			ViewportState.pScissors = &Scissor;
 			ViewportState.viewportCount = 1;
-			ViewportState.pViewports = &Viewport;
 		}
 
-		void AddShader(FShaderInfo* SI, VkShaderStageFlagBits Stage)
+		std::map<EShaderStages, SpvReflectDescriptorSet*> Reflection;
+		std::map<EShaderStages, SVulkan::FShader*> Shaders;
+		std::vector<VkDescriptorSetLayout> SetLayouts;
+
+		void AddShader(EShaderStages Stage, FShaderInfo* SI, VkShaderStageFlagBits Flag)
 		{
+			Reflection[Stage] = SI->Shader->DescSetInfo;
+			Shaders[Stage] = SI->Shader;
+
 			ZeroVulkanMem(StageInfos[GfxPipelineInfo.stageCount], VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
-			StageInfos[GfxPipelineInfo.stageCount].stage = Stage;
+			StageInfos[GfxPipelineInfo.stageCount].stage = Flag;
 			StageInfos[GfxPipelineInfo.stageCount].module = SI->Shader->ShaderModule;
 			StageInfos[GfxPipelineInfo.stageCount].pName = SI->EntryPoint.c_str();
 
 			++GfxPipelineInfo.stageCount;
 		}
 
-		void Finalize(VkRenderPass RenderPass, FVertexDecl* VertexDecl)
+		void Finalize(/*VkRenderPass RenderPass, */FVertexDecl* VertexDecl)
 		{
+			//GfxPipelineInfo.renderPass = RenderPass;
+
+			if (VertexDecl)
+			{
+				VertexInputInfo.vertexAttributeDescriptionCount = (uint32)VertexDecl->AttrDescs.size();
+				VertexInputInfo.pVertexAttributeDescriptions = VertexDecl->AttrDescs.data();
+				VertexInputInfo.vertexBindingDescriptionCount = (uint32)VertexDecl->BindingDescs.size();
+				VertexInputInfo.pVertexBindingDescriptions = VertexDecl->BindingDescs.data();
+			}
+		}
+
+		void FixPointers()
+		{
+
+			ViewportState.pScissors = &Scissor;
+			ViewportState.pViewports = &Viewport;
+
 			GfxPipelineInfo.pInputAssemblyState = &IAInfo;
 			GfxPipelineInfo.pVertexInputState = &VertexInputInfo;
 			GfxPipelineInfo.pStages = StageInfos;
@@ -2179,24 +2202,32 @@ struct FPSOCache
 			GfxPipelineInfo.pMultisampleState = &MSInfo;
 			DynamicInfo.pDynamicStates = DynamicStates;
 			GfxPipelineInfo.pDynamicState = &DynamicInfo;
-			GfxPipelineInfo.renderPass = RenderPass;
-
-			if (VertexDecl)
-			{
-				VertexInputInfo.vertexAttributeDescriptionCount = (uint32)VertexDecl->AttrDescs.size();
-				VertexInputInfo.pVertexAttributeDescriptions = VertexDecl->AttrDescs.data();
-				VertexInputInfo.vertexBindingDescriptionCount = (uint32)VertexDecl->BindingDescs.size();
-				VertexInputInfo.pVertexBindingDescriptions = VertexDecl->BindingDescs.data();
-			}
 		}
 	};
 
-	SVulkan::FGfxPSO* GetGfxPSO(FPSOHandle Handle, int32 VertexDeclHandle = -1)
-	{
-		check(Handle.Index != -1);
-		return &GfxPSOs[Handle.Index];
-	}
+	std::vector<FGfxPSOEntry> GfxPSOEntries;
 
+	SVulkan::FGfxPSO* GetGfxPSO(FPSOHandle GfxEntryHandle, int32 VertexDeclHandle = -1)
+	{
+		check(GfxEntryHandle.Index != -1);
+		auto& VertexDeclMap = GfxPSOs[GfxEntryHandle.Index];
+		auto FoundVertexDecl = VertexDeclMap.find(VertexDeclHandle);
+		if (FoundVertexDecl == VertexDeclMap.end())
+		{
+			FGfxPSOEntry Entry = GfxPSOEntries[GfxEntryHandle.Index];
+			Entry.FixPointers();
+			SVulkan::FGfxPSO PSO;
+			PSO.Reflection = Entry.Reflection;
+			PSO.Shaders = Entry.Shaders;
+			PSO.SetLayouts = Entry.SetLayouts;
+			PSO.Layout = Entry.GfxPipelineInfo.layout;
+			Entry.Finalize(/*RenderPass->RenderPass, */VertexDeclHandle == -1 ? nullptr : &VertexDecls[VertexDeclHandle]);
+			VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &Entry.GfxPipelineInfo, nullptr, &PSO.Pipeline));
+			VertexDeclMap[VertexDeclHandle] = PSO;
+			Device->SetDebugName(PSO.Pipeline, Entry.Name.c_str());
+		}
+		return &VertexDeclMap[VertexDeclHandle];
+	}
 	SVulkan::FComputePSO* GetComputePSO(FPSOHandle Handle)
 	{
 		check(Handle.Index != -1);
@@ -2277,6 +2308,7 @@ struct FPSOCache
 		Info.setLayoutCount = (uint32)Layout.DSLayouts.size();
 		Info.pSetLayouts = Layout.DSLayouts.data();
 
+		check(Layout.DSLayouts.size() > 0 || LayoutBindings.size() == 0);
 		OutLayouts = Layout.DSLayouts;
 
 		VERIFY_VKRESULT(vkCreatePipelineLayout(Device->Device, &Info, nullptr, &Layout.PipelineLayout));
@@ -2288,7 +2320,7 @@ struct FPSOCache
 	}
 
 	template <typename TFunction>
-	FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle, TFunction Callback)
+	FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
 	{
 		check(VS->Shader && VS->Shader->ShaderModule);
 		if (HS || DS)
@@ -2303,19 +2335,20 @@ struct FPSOCache
 
 		FGfxPSOEntry Entry;
 
-		Entry.AddShader(VS, VK_SHADER_STAGE_VERTEX_BIT);
+		Entry.AddShader(EShaderStages::Vertex, VS, VK_SHADER_STAGE_VERTEX_BIT);
 
 		if (HS && DS)
 		{
-			Entry.AddShader(HS, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
-			Entry.AddShader(DS, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+			Entry.AddShader(EShaderStages::Hull, HS, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
+			Entry.AddShader(EShaderStages::Domain, DS, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
 		}
 
 		if (PS)
 		{
-			Entry.AddShader(PS, VK_SHADER_STAGE_FRAGMENT_BIT);
+			Entry.AddShader(EShaderStages::Pixel, PS, VK_SHADER_STAGE_FRAGMENT_BIT);
 		}
 
+/*
 		SVulkan::FGfxPSO PSO;
 		PSO.AddShader(EShaderStages::Vertex, VS->Shader);
 		if (HS && DS)
@@ -2327,30 +2360,32 @@ struct FPSOCache
 		{
 			PSO.AddShader(EShaderStages::Pixel, PS->Shader);
 		}
-		PSO.Layout = GetOrCreatePipelineLayout(VS->Shader, HS ? HS->Shader : nullptr, DS ? DS->Shader : nullptr, PS ? PS->Shader : nullptr, PSO.SetLayouts);
+*/
+		auto Layout = GetOrCreatePipelineLayout(VS->Shader, HS ? HS->Shader : nullptr, DS ? DS->Shader : nullptr, PS ? PS->Shader : nullptr, Entry.SetLayouts);
 
-		Entry.GfxPipelineInfo.layout = PSO.Layout;
-
-		Entry.Finalize(RenderPass->RenderPass, VertexDeclHandle == -1 ? nullptr : &VertexDecls[VertexDeclHandle]);
+		Entry.GfxPipelineInfo.layout = /*PSO.*/Layout;
+		Entry.GfxPipelineInfo.renderPass = RenderPass->RenderPass;
+		Entry.FixPointers();
 		Callback(Entry.GfxPipelineInfo);
+		Entry.Name = Name;
+		GfxPSOEntries.push_back(Entry);
 
-		VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &Entry.GfxPipelineInfo, nullptr, &PSO.Pipeline));
-		GfxPSOs.push_back(PSO);
+		//VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &Entry.GfxPipelineInfo, nullptr, &PSO.Pipeline));
+		//GfxPSOs.push_back(PSO);
 
-		Device->SetDebugName(PSO.Pipeline, Name);
-
-		return FPSOHandle(GfxPSOs.size() - 1);
+		//Device->SetDebugName(PSO.Pipeline, Name);
+		return FPSOHandle(GfxPSOEntries.size() - 1);
 	}
 
 	template <typename TFunction>
-	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle, TFunction Callback)
+	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
 	{
-		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, VertexDeclHandle, Callback);
+		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, Callback);
 	}
 
-	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, int32 VertexDeclHandle = -1)
+	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
 	{
-		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, VertexDeclHandle,
+		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass,
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 			{
 			});
@@ -2358,7 +2393,7 @@ struct FPSOCache
 
 	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
 	{
-		return CreateGfxPSO(Name, VS, HS, DS, PS, RenderPass, -1,
+		return CreateGfxPSO(Name, VS, HS, DS, PS, RenderPass,
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 		{
 		});
@@ -2383,6 +2418,7 @@ struct FPSOCache
 		PipelineInfo.layout = PSO.Layout;
 
 		VERIFY_VKRESULT(vkCreateComputePipelines(Device->Device, VK_NULL_HANDLE, 1, &PipelineInfo, nullptr, &PSO.Pipeline));
+		PSO.Name = Name;
 		ComputePSOs.push_back(PSO);
 		Device->SetDebugName(PSO.Pipeline, Name);
 		return FPSOHandle(ComputePSOs.size() - 1);
@@ -2407,7 +2443,14 @@ struct FPSOCache
 
 		PipelineLayouts.clear();
 
-		FreePSOs(Device->Device, GfxPSOs);
+		for (auto& OuterPair : GfxPSOs)
+		{
+			for (auto& InnerPar : OuterPair.second)
+			{
+				vkDestroyPipeline(Device->Device, InnerPar.second.Pipeline, nullptr);
+			}
+		}
+		GfxPSOs.clear();
 		FreePSOs(Device->Device, ComputePSOs);
 	}
 };
