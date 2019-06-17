@@ -668,6 +668,7 @@ struct SVulkan
 				//VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME,
 				//VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
 				//VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+				VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME,
 			};
 
 			VerifyExtensions(ExtensionProperties, DeviceExtensions);
@@ -702,8 +703,15 @@ struct SVulkan
 				QueueInfos.push_back(Info);
 			}
 
-			VkPhysicalDeviceFeatures Features;
-			vkGetPhysicalDeviceFeatures(PhysicalDevice, &Features);
+			VkPhysicalDeviceFeatures2 Features;
+			ZeroVulkanMem(Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+			vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
+
+			VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT Divisor;
+			ZeroVulkanMem(Divisor, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT);
+			Divisor.vertexAttributeInstanceRateDivisor = VK_TRUE;
+			Divisor.vertexAttributeInstanceRateZeroDivisor = VK_TRUE;
+			Features.pNext = &Divisor;
 
 			VkDeviceCreateInfo CreateInfo;
 			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
@@ -711,9 +719,11 @@ struct SVulkan
 			CreateInfo.pQueueCreateInfos = QueueInfos.data();
 			CreateInfo.ppEnabledExtensionNames = DeviceExtensions.data();
 			CreateInfo.enabledExtensionCount = (uint32)DeviceExtensions.size();
-			CreateInfo.pEnabledFeatures = &Features;
+			//CreateInfo.pEnabledFeatures = &Features.features;
 			::OutputDebugStringA("Enabled Device Extensions:\n");
 			PrintList(DeviceExtensions);
+
+			CreateInfo.pNext = &Features;
 
 			VERIFY_VKRESULT(vkCreateDevice(PhysicalDevice, &CreateInfo, nullptr, &Device));
 
@@ -1997,6 +2007,7 @@ struct FPSOCache
 		std::vector<std::string> Names;
 
 		std::vector<VkVertexInputBindingDescription> BindingDescs;
+		std::vector<VkVertexInputBindingDivisorDescriptionEXT> Divisors;
 
 		void AddAttribute(uint32 BindingIndex, uint32 Location, VkFormat Format, uint32 AttributeOffset, const char* Name)
 		{
@@ -2009,11 +2020,11 @@ struct FPSOCache
 			Names.push_back(Name);
 		}
 
-		void AddBinding(uint32 BindingIndex, uint32 Stride)
+		void AddBinding(uint32 BindingIndex, uint32 Stride, bool bInstance = false)
 		{
 			VkVertexInputBindingDescription Desc;
 			Desc.binding = BindingIndex;
-			Desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+			Desc.inputRate = bInstance ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX;
 			Desc.stride = Stride;
 			BindingDescs.push_back(Desc);
 		}
@@ -2096,6 +2107,7 @@ struct FPSOCache
 		VkPipelineMultisampleStateCreateInfo MSInfo;
 		VkPipelineDynamicStateCreateInfo DynamicInfo;
 		VkPipelineViewportStateCreateInfo ViewportState;
+		VkPipelineVertexInputDivisorStateCreateInfoEXT VertexInputDivisor;
 		VkDynamicState DynamicStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
 		VkViewport Viewport;
 		VkRect2D Scissor;
@@ -2151,6 +2163,8 @@ struct FPSOCache
 			ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
 			ViewportState.scissorCount = 1;
 			ViewportState.viewportCount = 1;
+
+			ZeroVulkanMem(VertexInputDivisor, VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT);
 		}
 
 		std::map<EShaderStages, SpvReflectDescriptorSet*> Reflection;
@@ -2180,12 +2194,13 @@ struct FPSOCache
 				VertexInputInfo.pVertexAttributeDescriptions = VertexDecl->AttrDescs.data();
 				VertexInputInfo.vertexBindingDescriptionCount = (uint32)VertexDecl->BindingDescs.size();
 				VertexInputInfo.pVertexBindingDescriptions = VertexDecl->BindingDescs.data();
+				VertexInputDivisor.vertexBindingDivisorCount = (uint32)VertexDecl->Divisors.size();
+				VertexInputDivisor.pVertexBindingDivisors = VertexDecl->Divisors.data();
 			}
 		}
 
 		void FixPointers()
 		{
-
 			ViewportState.pScissors = &Scissor;
 			ViewportState.pViewports = &Viewport;
 
@@ -2202,6 +2217,7 @@ struct FPSOCache
 			GfxPipelineInfo.pMultisampleState = &MSInfo;
 			DynamicInfo.pDynamicStates = DynamicStates;
 			GfxPipelineInfo.pDynamicState = &DynamicInfo;
+			VertexInputInfo.pNext = &VertexInputDivisor;
 		}
 	};
 

@@ -145,7 +145,8 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 #if SCENE_USE_SINGLE_BUFFERS
 			VertexDecl.AddAttribute(BindingIndex, BindingIndex, Format, 0, Semantic);
 			OutPrim.VertexBuffers.push_back(PSOCache.ZeroBuffer);
-			VertexDecl.AddBinding(BindingIndex, PSOCache.ZeroBuffer.Size);
+			VertexDecl.AddBinding(BindingIndex, PSOCache.ZeroBuffer.Size, true);
+			VertexDecl.Divisors.push_back({BindingIndex, 0});
 			++BindingIndex;
 #else
 #error

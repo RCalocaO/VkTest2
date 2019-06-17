@@ -36,15 +36,13 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 		}
 	}
 
-/*
 	if (CallbackData->pMessageIdName)
 	{
-		if (!strcmp(CallbackData->pMessageIdName, "UNASSIGNED-CoreValidation-Shader-InputNotProduced"))
+		if (!strcmp(CallbackData->pMessageIdName, "UNASSIGNED-GPU-Assisted Validation Setup Error."))
 		{
 			return VK_FALSE;
 		}
 	}
-*/
 
 	::OutputDebugStringA(s.c_str());
 	return VK_FALSE;
