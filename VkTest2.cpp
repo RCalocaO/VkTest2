@@ -484,6 +484,7 @@ struct FApp
 
 	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
 	{
+
 		int W = 0, H = 1;
 		glfwGetWindowSize(Window, &W, &H);
 		float FOVRadians = tan(ToRadians(60.0f));
@@ -544,7 +545,7 @@ struct FApp
 					ImageInfo[0].sampler = ImGuiFontSampler;
 
 					ImageInfo[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					ImageInfo[1].imageView = Scene.Images.empty() ? WhiteTexture.View : Scene.Images[0].View;
+					ImageInfo[1].imageView = Scene.Textures.empty() ? WhiteTexture.View : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image.View;
 					ImageInfo[1].sampler = ImGuiFontSampler;
 
 					VkDescriptorBufferInfo BufferInfo;

@@ -559,7 +559,7 @@ struct SVulkan
 		uint32 TransferQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		VkPhysicalDeviceMemoryProperties MemProperties;
-
+		bool bHasMarkerExtension = false;
 #if USE_VMA
 		VmaAllocator VMAAllocator = VK_NULL_HANDLE;
 #else
@@ -1563,6 +1563,37 @@ struct SVulkan
 		Instance = VK_NULL_HANDLE;
 	}
 };
+
+struct FMarkerScope
+{
+	VkCommandBuffer CmdBuffer;
+	bool bHasMarkerExtension;
+	FMarkerScope(SVulkan::SDevice* Device, SVulkan::FCmdBuffer* InCmdBuffer, const char* Name)
+		: CmdBuffer(InCmdBuffer->CmdBuffer)
+	{
+		bHasMarkerExtension = Device->bHasMarkerExtension;
+		if (bHasMarkerExtension)
+		{
+			VkDebugMarkerMarkerInfoEXT Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEBUG_MARKER_MARKER_INFO_EXT);
+			Info.pMarkerName = Name;
+			Info.color[0] = 1.0f;
+			Info.color[1] = 1.0f;
+			Info.color[2] = 1.0f;
+			Info.color[3] = 1.0f;
+			vkCmdDebugMarkerBeginEXT(CmdBuffer, &Info);
+		}
+	}
+
+	~FMarkerScope()
+	{
+		if (bHasMarkerExtension)
+		{
+			vkCmdDebugMarkerEndEXT(CmdBuffer);
+		}
+	}
+};
+
 
 struct FBufferWithMem
 {

@@ -191,13 +191,21 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 	std::string Warnings;
 	if (Loader.LoadASCIIFromFile(&Model, &Error, &Warnings, Filename))
 	{
+		for (tinygltf::Material& GLTFMaterial : Model.materials)
+		{
+			FScene::FMaterial Mtl;
+			Mtl.Name = GLTFMaterial.name;
+			Mtl.BaseColor = (int32)GLTFMaterial.values["baseColorTexture"].json_double_value["index"];
+
+			Scene.Materials.push_back(Mtl);
+		}
+
 		for (tinygltf::Mesh& GLTFMesh : Model.meshes)
 		{
 			FScene::FMesh Mesh;
 			for (tinygltf::Primitive& GLTFPrim : GLTFMesh.primitives)
 			{
 				FScene::FPrim Prim;
-
 				tinygltf::Accessor& Indices = Model.accessors[GLTFPrim.indices];
 				check(Indices.type == TINYGLTF_TYPE_SCALAR);
 
@@ -250,8 +258,8 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 			check(GLTFImage.bufferView == -1);
 			check(!GLTFImage.image.empty());
 			{
-				FImageWithMemAndView Image;
-				Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, EMemLocation::GPU, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM);
+				FScene::FTexture Texture;
+				Texture.Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, EMemLocation::GPU, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM);
 
 				SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
@@ -262,7 +270,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 				memcpy(Data, GLTFImage.image.data(), Size);
 				TempBuffer->Buffer->Unlock();
 
-				Device.TransitionImage(CmdBuffer, Image.Image.Image,
+				Device.TransitionImage(CmdBuffer, Texture.GetImage(),
 					VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
 					VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
 					VK_IMAGE_ASPECT_COLOR_BIT);
@@ -274,9 +282,9 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 				Region.imageExtent.depth = 1;
 				Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 				Region.imageSubresource.layerCount = 1;
-				vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, TempBuffer->Buffer->Buffer.Buffer, Image.Image.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+				vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, TempBuffer->Buffer->Buffer.Buffer, Texture.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
 
-				Device.TransitionImage(CmdBuffer, Image.Image.Image,
+				Device.TransitionImage(CmdBuffer, Texture.GetImage(),
 					VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
 					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
 					VK_IMAGE_ASPECT_COLOR_BIT);
@@ -286,7 +294,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 
 				//StagingMgr->ReleaseBuffer(TempBuffer);
 
-				Scene.Images.push_back(Image);
+				Scene.Textures.push_back(Texture);
 			}
 		}
 

@@ -10,7 +10,6 @@
 struct FScene
 {
 	std::vector<FBufferWithMem> Buffers;
-	std::vector<FImageWithMemAndView> Images;
 	//std::vector<VkVertexInputAttributeDescription> AttrDescs;
 	//std::vector<VkVertexInputBindingDescription> BindingDescs;
 
@@ -47,6 +46,24 @@ struct FScene
 
 	std::vector<FInstance> Instances;
 
+	struct FMaterial
+	{
+		std::string Name;
+		int32 BaseColor = -1;
+	};
+	std::vector<FMaterial> Materials;
+
+	struct FTexture
+	{
+		FImageWithMemAndView Image;
+
+		VkImage GetImage()
+		{
+			return Image.Image.Image;
+		}
+	};
+	std::vector<FTexture> Textures;
+
 	void Destroy()
 	{
 #if SCENE_USE_SINGLE_BUFFERS
@@ -67,9 +84,9 @@ struct FScene
 			Buffer.Destroy();
 		}
 
-		for (auto& Image : Images)
+		for (auto& Texture : Textures)
 		{
-			Image.Destroy();
+			Texture.Image.Destroy();
 		}
 	}
 };
