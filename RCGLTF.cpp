@@ -108,6 +108,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 {
 	FPSOCache::FVertexDecl VertexDecl;
 	uint32 BindingIndex = 0;
+	uint32 MaxSize = 0;
 	for (auto Pair : GLTFPrim.attributes)
 	{
 		std::string Name = Pair.first;
@@ -118,6 +119,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		VertexDecl.AddAttribute(BindingIndex, BindingIndex, GetFormat(Accessor.componentType, Accessor.type), 0, Name.c_str());
 
 		uint32 Size = (uint32)BufferView.byteLength;
+		MaxSize = MaxSize > Size ? MaxSize : Size;
 		OutPrim.VertexBuffers.push_back(FBufferWithMem());
 		FBufferWithMem& VB = OutPrim.VertexBuffers.back();
 		VB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, Size, true);
@@ -133,7 +135,12 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		OutPrim.VertexBuffers.push_back(BufferView.buffer);
 		VertexDecl.AddAttribute(BindingIndex, UINT32_MAX, GetFormat(Accessor.componentType, Accessor.type), 0, Name.c_str());
 #endif
-		VertexDecl.AddBinding(BindingIndex, (uint32)BufferView.byteStride);
+		uint32 Stride = (uint32)(BufferView.byteLength / Accessor.count);
+		if (BufferView.byteStride != 0)
+		{
+			check(BufferView.byteStride == Stride);
+		}
+		VertexDecl.AddBinding(BindingIndex, Stride);
 
 		++BindingIndex;
 	}
@@ -144,9 +151,21 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		{
 #if SCENE_USE_SINGLE_BUFFERS
 			VertexDecl.AddAttribute(BindingIndex, BindingIndex, Format, 0, Semantic);
+#if USE_VULKAN_VERTEX_DIVISOR
 			OutPrim.VertexBuffers.push_back(PSOCache.ZeroBuffer);
 			VertexDecl.AddBinding(BindingIndex, PSOCache.ZeroBuffer.Size, true);
 			VertexDecl.Divisors.push_back({BindingIndex, 0});
+#else
+			OutPrim.VertexBuffers.push_back(FBufferWithMem());
+			FBufferWithMem& VB = OutPrim.VertexBuffers.back();
+			VB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, MaxSize, true);
+			{
+				float* DestData = (float*)VB.Lock();
+				memset(DestData, 0xff, MaxSize);
+				VB.Unlock();
+			}
+			VertexDecl.AddBinding(BindingIndex, MaxSize, true);
+#endif
 			++BindingIndex;
 #else
 #error

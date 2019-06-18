@@ -668,7 +668,9 @@ struct SVulkan
 				//VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME,
 				//VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
 				//VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+#if USE_VULKAN_VERTEX_DIVISOR
 				VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME,
+#endif
 			};
 
 			VerifyExtensions(ExtensionProperties, DeviceExtensions);
@@ -707,12 +709,13 @@ struct SVulkan
 			ZeroVulkanMem(Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
 			vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
+#if USE_VULKAN_VERTEX_DIVISOR
 			VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT Divisor;
 			ZeroVulkanMem(Divisor, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT);
 			Divisor.vertexAttributeInstanceRateDivisor = VK_TRUE;
 			Divisor.vertexAttributeInstanceRateZeroDivisor = VK_TRUE;
 			Features.pNext = &Divisor;
-
+#endif
 			VkDeviceCreateInfo CreateInfo;
 			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
 			CreateInfo.queueCreateInfoCount = (uint32)QueueInfos.size();
@@ -2007,8 +2010,9 @@ struct FPSOCache
 		std::vector<std::string> Names;
 
 		std::vector<VkVertexInputBindingDescription> BindingDescs;
+#if USE_VULKAN_VERTEX_DIVISOR
 		std::vector<VkVertexInputBindingDivisorDescriptionEXT> Divisors;
-
+#endif
 		void AddAttribute(uint32 BindingIndex, uint32 Location, VkFormat Format, uint32 AttributeOffset, const char* Name)
 		{
 			VkVertexInputAttributeDescription Attr;
@@ -2107,7 +2111,9 @@ struct FPSOCache
 		VkPipelineMultisampleStateCreateInfo MSInfo;
 		VkPipelineDynamicStateCreateInfo DynamicInfo;
 		VkPipelineViewportStateCreateInfo ViewportState;
+#if USE_VULKAN_VERTEX_DIVISOR
 		VkPipelineVertexInputDivisorStateCreateInfoEXT VertexInputDivisor;
+#endif
 		VkDynamicState DynamicStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
 		VkViewport Viewport;
 		VkRect2D Scissor;
@@ -2163,8 +2169,9 @@ struct FPSOCache
 			ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
 			ViewportState.scissorCount = 1;
 			ViewportState.viewportCount = 1;
-
+#if USE_VULKAN_VERTEX_DIVISOR
 			ZeroVulkanMem(VertexInputDivisor, VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT);
+#endif
 		}
 
 		std::map<EShaderStages, SpvReflectDescriptorSet*> Reflection;
@@ -2194,8 +2201,10 @@ struct FPSOCache
 				VertexInputInfo.pVertexAttributeDescriptions = VertexDecl->AttrDescs.data();
 				VertexInputInfo.vertexBindingDescriptionCount = (uint32)VertexDecl->BindingDescs.size();
 				VertexInputInfo.pVertexBindingDescriptions = VertexDecl->BindingDescs.data();
+#if USE_VULKAN_VERTEX_DIVISOR
 				VertexInputDivisor.vertexBindingDivisorCount = (uint32)VertexDecl->Divisors.size();
 				VertexInputDivisor.pVertexBindingDivisors = VertexDecl->Divisors.data();
+#endif
 			}
 		}
 
@@ -2217,7 +2226,9 @@ struct FPSOCache
 			GfxPipelineInfo.pMultisampleState = &MSInfo;
 			DynamicInfo.pDynamicStates = DynamicStates;
 			GfxPipelineInfo.pDynamicState = &DynamicInfo;
+#if USE_VULKAN_VERTEX_DIVISOR
 			VertexInputInfo.pNext = &VertexInputDivisor;
+#endif
 		}
 	};
 
