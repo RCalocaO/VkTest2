@@ -484,7 +484,6 @@ struct FApp
 
 	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
 	{
-
 		int W = 0, H = 1;
 		glfwGetWindowSize(Window, &W, &H);
 		float FOVRadians = tan(ToRadians(60.0f));
@@ -990,7 +989,7 @@ static void SetupShaders(FApp& App)
 
 	App.TestCSPSO = GPSOCache.CreateComputePSO("TestCSPSO", TestCS);
 
-	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
+	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(FAttachmentInfo(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE));
 
 	VkViewport Viewport = GVulkan.Swapchain.GetViewport();
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();

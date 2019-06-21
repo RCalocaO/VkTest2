@@ -78,6 +78,22 @@ inline VkMemoryPropertyFlags GetVulkanMemLocation(EMemLocation Location)
 #endif
 
 
+struct FAttachmentInfo
+{
+	VkFormat Format = VK_FORMAT_UNDEFINED;
+	VkAttachmentLoadOp LoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	VkAttachmentStoreOp StoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+	FAttachmentInfo() = default;
+
+	FAttachmentInfo(VkFormat InFormat, VkAttachmentLoadOp InLoadOp, VkAttachmentStoreOp InStoreOp)
+		: Format(InFormat)
+		, LoadOp(InLoadOp)
+		, StoreOp(InStoreOp)
+	{
+	}
+};
+
 struct SVulkan
 {
 	VkInstance Instance = VK_NULL_HANDLE;
@@ -1097,34 +1113,47 @@ struct SVulkan
 		VkRenderPass RenderPass = VK_NULL_HANDLE;
 		VkDevice Device = VK_NULL_HANDLE;
 
-		void Create(VkDevice InDevice, VkFormat Format, VkAttachmentLoadOp LoadOp, VkAttachmentStoreOp StoreOp)
+		void Create(VkDevice InDevice, const FAttachmentInfo& Color, const FAttachmentInfo& Depth)
 		{
 			Device = InDevice;
 
-			VkAttachmentReference ColorAttachment;
-			ZeroMem(ColorAttachment);
-			ColorAttachment.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			const bool bHasDepth = Depth.Format != VK_FORMAT_UNDEFINED;
+			VkAttachmentReference AttachmentReferences[2];
+			ZeroMem(AttachmentReferences);
+			check(Color.Format != VK_FORMAT_UNDEFINED);
+			AttachmentReferences[0].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 			VkSubpassDescription SubPassDesc;
 			ZeroMem(SubPassDesc);
 			SubPassDesc.colorAttachmentCount = 1;
-			SubPassDesc.pColorAttachments = &ColorAttachment;
+			SubPassDesc.pColorAttachments = &AttachmentReferences[0];
 
-			VkAttachmentDescription Attachments;
+			VkAttachmentDescription Attachments[2];
 			ZeroMem(Attachments);
-			Attachments.format = Format;
-			Attachments.samples = VK_SAMPLE_COUNT_1_BIT;
-			Attachments.loadOp = LoadOp;
-			Attachments.storeOp = StoreOp;
-			Attachments.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-			Attachments.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			Attachments[0].format = Color.Format;
+			Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+			Attachments[0].loadOp = Color.LoadOp;
+			Attachments[0].storeOp = Color.StoreOp;
+			Attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			if (bHasDepth)
+			{
+				AttachmentReferences[1].layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+				SubPassDesc.pDepthStencilAttachment = &AttachmentReferences[1];
+				Attachments[1].format = Depth.Format;
+				Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+				Attachments[1].loadOp = Depth.LoadOp;
+				Attachments[1].storeOp = Depth.StoreOp;
+				Attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+				Attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			}
 
 			VkRenderPassCreateInfo CreateInfo;
 			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO);
 			CreateInfo.subpassCount = 1;
 			CreateInfo.pSubpasses = &SubPassDesc;
-			CreateInfo.attachmentCount = 1;
-			CreateInfo.pAttachments = &Attachments;
+			CreateInfo.attachmentCount = bHasDepth ? 2 : 1;
+			CreateInfo.pAttachments = Attachments;
 
 			VERIFY_VKRESULT(vkCreateRenderPass(Device, &CreateInfo, nullptr, &RenderPass));
 		}
@@ -1982,20 +2011,36 @@ struct FRenderTargetCache
 		Device = InDevice;
 	}
 
-	SVulkan::FRenderPass* GetOrCreateRenderPass(VkFormat Format, VkAttachmentLoadOp LoadOp, VkAttachmentStoreOp StoreOp)
+	SVulkan::FRenderPass* GetOrCreateRenderPass(const FAttachmentInfo& Color, const FAttachmentInfo& Depth = FAttachmentInfo())
 	{
-		uint64 Key = (uint64)Format << (uint64)32;
-		Key = Key | ((uint64)LoadOp << 24);
-		Key = Key | ((uint64)StoreOp << 16);
-		auto Found = RenderPasses.find(Key);
+		union
+		{
+			uint64 Packed;
+			struct
+			{
+				uint64 ColorFormat : 8;
+				uint64 ColorLoad : 4;
+				uint64 ColorStore : 4;
+				uint64 DepthFormat : 8;
+				uint64 DepthLoad : 4;
+				uint64 DepthStore : 4;
+			};
+		} Key;
+		Key.ColorFormat = (uint64)Color.Format;
+		Key.ColorLoad = (uint64)Color.LoadOp;
+		Key.ColorStore = (uint64)Color.StoreOp;
+		Key.DepthFormat = (uint64)Depth.Format;
+		Key.DepthLoad = (uint64)Depth.LoadOp;
+		Key.DepthStore = (uint64)Depth.StoreOp;
+		auto Found = RenderPasses.find(Key.Packed);
 		if (Found != RenderPasses.end())
 		{
 			return Found->second;
 		}
 
 		SVulkan::FRenderPass* RenderPass = new SVulkan::FRenderPass();
-		RenderPass->Create(Device, Format, LoadOp, StoreOp);
-		RenderPasses[Key] = RenderPass;
+		RenderPass->Create(Device, Color, Depth);
+		RenderPasses[Key.Packed] = RenderPass;
 		return RenderPass;
 	}
 
@@ -2006,7 +2051,8 @@ struct FRenderTargetCache
 			return Framebuffers[Swapchain->ImageIndex];
 		}
 
-		SVulkan::FRenderPass* RenderPass = GetOrCreateRenderPass(Swapchain->Format, LoadOp, StoreOp);
+		FAttachmentInfo ColorInfo ={Swapchain->Format, LoadOp, StoreOp};
+		SVulkan::FRenderPass* RenderPass = GetOrCreateRenderPass(ColorInfo);
 
 		SVulkan::FFramebuffer* FB = new SVulkan::FFramebuffer();
 		VkViewport Viewport = Swapchain->GetViewport();
