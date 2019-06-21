@@ -845,7 +845,28 @@ static void CharCallback(GLFWwindow* Window, unsigned int Char)
 static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, int Mods)
 {
 	ImGuiIO& io = ImGui::GetIO();
-	if (io.WantCaptureKeyboard)
+
+	auto IsModifierKey = [](int Key)
+	{
+		switch (Key)
+		{
+		case GLFW_KEY_LEFT_CONTROL:
+		case GLFW_KEY_RIGHT_CONTROL:
+		case GLFW_KEY_LEFT_SHIFT:
+		case GLFW_KEY_RIGHT_SHIFT:
+		case GLFW_KEY_LEFT_ALT:
+		case GLFW_KEY_RIGHT_ALT:
+		case GLFW_KEY_LEFT_SUPER:
+		case GLFW_KEY_RIGHT_SUPER:
+			break;
+		default:
+			return false;
+		}
+
+		return true;
+	};
+
+	if (IsModifierKey(Key) || io.WantCaptureKeyboard)
 	{
 		if (Action == GLFW_PRESS)
 		{
@@ -864,33 +885,37 @@ static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, i
 	}
 	else
 	{
-		if (Action == GLFW_PRESS)
+		if (Action == GLFW_PRESS || Action == GLFW_REPEAT)
 		{
+			float Delta = io.KeyShift ? 5.0f : 1.0f;
 			switch (Key)
 			{
-			case 262:
-				++g_vRot.y;
+			case GLFW_KEY_LEFT_SHIFT:
+			case GLFW_KEY_RIGHT_SHIFT:
 				break;
-			case 263:
-				--g_vRot.y;
+			case GLFW_KEY_RIGHT:
+				g_vRot.y += Delta;
 				break;
-			case 266:
-				++g_vMove.y;
+			case GLFW_KEY_LEFT:
+				g_vRot.y -= Delta;
 				break;
-			case 267:
-				--g_vMove.y;
+			case GLFW_KEY_PAGE_UP:
+				g_vMove.y += Delta;
 				break;
-			case 'W':
-				++g_vMove.z;
+			case GLFW_KEY_PAGE_DOWN:
+				g_vMove.y -= Delta;
 				break;
-			case 'S':
-				--g_vMove.z;
+			case GLFW_KEY_W:
+				g_vMove.z += Delta;
 				break;
-			case 'A':
-				++g_vMove.x;
+			case GLFW_KEY_S:
+				g_vMove.z -= Delta;
 				break;
-			case 'D':
-				--g_vMove.x;
+			case GLFW_KEY_A:
+				g_vMove.x += Delta;
+				break;
+			case GLFW_KEY_D:
+				g_vMove.x -= Delta;
 				break;
 			default:
 				break;

@@ -135,11 +135,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		OutPrim.VertexBuffers.push_back(BufferView.buffer);
 		VertexDecl.AddAttribute(BindingIndex, UINT32_MAX, GetFormat(Accessor.componentType, Accessor.type), 0, Name.c_str());
 #endif
-		uint32 Stride = (uint32)(BufferView.byteLength / Accessor.count);
-		if (BufferView.byteStride != 0)
-		{
-			check(BufferView.byteStride == Stride);
-		}
+		uint32 Stride = BufferView.byteStride == 0 ? (uint32)(BufferView.byteLength / Accessor.count) : BufferView.byteStride;
 		VertexDecl.AddBinding(BindingIndex, Stride);
 
 		++BindingIndex;
