@@ -152,12 +152,13 @@ struct SVulkan
 		VkDevice Device = VK_NULL_HANDLE;
 		uint32 Width = 0;
 		uint32 Height = 0;
+		VkFormat Format = VK_FORMAT_UNDEFINED;
 
-		static VkImageCreateInfo SetupCreateInfo(VkImageUsageFlags UsageFlags, VkFormat Format, uint32 InWidth, uint32 InHeight)
+		static VkImageCreateInfo SetupCreateInfo(VkImageUsageFlags UsageFlags, VkFormat InFormat, uint32 InWidth, uint32 InHeight)
 		{
 			VkImageCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO);
-			Info.format = Format;
+			Info.format = InFormat;
 			Info.extent.width = InWidth;
 			Info.extent.height = InHeight;
 			Info.extent.depth = 1;
@@ -171,11 +172,12 @@ struct SVulkan
 
 #if USE_VMA
 #else
-		void Create(VkDevice InDevice, VkImageUsageFlags UsageFlags, VkFormat Format, uint32 InWidth, uint32 InHeight)
+		void Create(VkDevice InDevice, VkImageUsageFlags UsageFlags, VkFormat InFormat, uint32 InWidth, uint32 InHeight)
 		{
 			Device = InDevice;
 			Width = InWidth;
 			Height = InHeight;
+			Format = InFormat;
 
 			VkImageCreateInfo Info = SetupCreateInfo(UsageFlags, Format, Width, Height);
 			VERIFY_VKRESULT(vkCreateImage(Device, &Info, nullptr, &Image));
@@ -1162,6 +1164,7 @@ struct SVulkan
 			if (bHasDepth)
 			{
 				AttachmentReferences[1].layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+				AttachmentReferences[1].attachment = 1;
 				SubPassDesc.pDepthStencilAttachment = &AttachmentReferences[1];
 				Attachments[1].format = Depth.Format;
 				Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1832,10 +1835,10 @@ struct FImageWithMemAndView : public FImageWithMem
 	VkImageView View = VK_NULL_HANDLE;
 
 	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags, 
-		EMemLocation Location, uint32 Width, uint32 Height, VkFormat ViewFormat)
+		EMemLocation Location, uint32 Width, uint32 Height, VkFormat ViewFormat, VkImageAspectFlags Aspect = VK_IMAGE_ASPECT_COLOR_BIT)
 	{
 		FImageWithMem::Create(InDevice, Format, UsageFlags, Location, Width, Height);
-		View = InDevice.CreateImageView(Image.Image, ViewFormat, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D);
+		View = InDevice.CreateImageView(Image.Image, ViewFormat, Aspect, VK_IMAGE_VIEW_TYPE_2D);
 	}
 
 	void Destroy()

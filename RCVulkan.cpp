@@ -54,6 +54,23 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 		case VK_OBJECT_TYPE_BUFFER:
 			s += "\tBuffer ";
 			break;
+		case VK_OBJECT_TYPE_BUFFER_VIEW:
+			s += "\tBufferView ";
+			break;
+		case VK_OBJECT_TYPE_IMAGE:
+			s += "\tImage ";
+			break;
+		case VK_OBJECT_TYPE_IMAGE_VIEW:
+			s += "\tImageView ";
+			break;
+		case VK_OBJECT_TYPE_RENDER_PASS:
+			s += "\tRenderpass ";
+			break;
+		case VK_OBJECT_TYPE_FRAMEBUFFER:
+			s += "\tFramebuffer ";
+			break;
+		case VK_OBJECT_TYPE_UNKNOWN:
+			continue;
 		default:
 			check(0);
 		}

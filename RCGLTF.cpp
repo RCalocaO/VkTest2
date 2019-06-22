@@ -136,6 +136,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		VertexDecl.AddAttribute(BindingIndex, UINT32_MAX, GetFormat(Accessor.componentType, Accessor.type), 0, Name.c_str());
 #endif
 		uint32 Stride = BufferView.byteStride == 0 ? (uint32)(BufferView.byteLength / Accessor.count) : (uint32)BufferView.byteStride;
+		check(Stride <= 256);
 		VertexDecl.AddBinding(BindingIndex, Stride);
 
 		++BindingIndex;
@@ -160,7 +161,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 				memset(DestData, 0xff, MaxSize);
 				VB.Unlock();
 			}
-			VertexDecl.AddBinding(BindingIndex, MaxSize, true);
+			VertexDecl.AddBinding(BindingIndex, 16, true);
 #endif
 			++BindingIndex;
 #else

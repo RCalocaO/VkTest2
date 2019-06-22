@@ -54,6 +54,7 @@ FVector3 TryGetVector3Prefix(const char* Prefix, FVector3 Value)
 struct FApp
 {
 	uint32 FrameIndex = 0;
+	FImageWithMemAndView DepthBuffer;
 	FPSOCache::FPSOHandle PassThroughVSRedPSPSO;
 	//FPSOCache::FPSOHandle DataClipVSColorTessPSO;
 	FPSOCache::FPSOHandle NoVBClipVSRedPSO;
@@ -144,6 +145,10 @@ struct FApp
 		}
 
 		GPUTiming.Init(&Device);
+
+		int32 Width = 0, Height = 1;
+		glfwGetFramebufferSize(Window, &Width, &Height);
+		DepthBuffer.Create(*GPSOCache.Device, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::GPU, (uint32)Width, (uint32)Height, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 	}
 
 	void Destroy()
@@ -581,7 +586,7 @@ struct FApp
 	}
 };
 
-static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
+static void ClearColorImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 {
 	VkClearColorValue ClearColors;
 	ClearColors.float32[0] = Color[0];
@@ -595,6 +600,20 @@ static void ClearImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 	Range.layerCount = 1;
 	Range.levelCount = 1;
 	vkCmdClearColorImage(CmdBuffer, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &ClearColors, 1, &Range);
+}
+
+static void ClearDepthImage(VkCommandBuffer CmdBuffer, VkImage Image, float Depth, uint32 Stencil)
+{
+	VkClearDepthStencilValue ClearDS;
+	ClearDS.depth = Depth;
+	ClearDS.stencil = Stencil;
+
+	VkImageSubresourceRange Range;
+	ZeroMem(Range);
+	Range.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	Range.layerCount = 1;
+	Range.levelCount = 1;
+	vkCmdClearDepthStencilImage(CmdBuffer, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &ClearDS, 1, &Range);
 }
 
 static void UpdateInput(FApp& App)
@@ -625,7 +644,7 @@ static double Render(FApp& App)
 	IO.DeltaTime = App.LastDelta;
 
 	FRenderTargetInfo ColorInfo = GVulkan.Swapchain.GetRenderTargetInfo();
-	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(ColorInfo, FRenderTargetInfo(), (uint32)Width, (uint32)Height);
+	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(ColorInfo, FRenderTargetInfo(App.DepthBuffer.View, App.DepthBuffer.Image.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE), (uint32)Width, (uint32)Height);
 
 	App.PendingOpsMgr.ExecutePendingStagingOps(Device, CmdBuffer);
 
@@ -635,16 +654,25 @@ static double Render(FApp& App)
 		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0, 
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
 		VK_IMAGE_ASPECT_COLOR_BIT);
+	Device.TransitionImage(CmdBuffer, App.DepthBuffer.Image.Image,
+		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, 0,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 
 	static float F = 0;
 	F += 0.025f;
 	float ClearColor[4] = {0.0f, abs(sin(F)), abs(cos(F)), 0.0f};
-	ClearImage(CmdBuffer->CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
+	ClearColorImage(CmdBuffer->CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
+	ClearDepthImage(CmdBuffer->CmdBuffer, App.DepthBuffer.Image.Image, 0.0f, 0);
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 		VK_IMAGE_ASPECT_COLOR_BIT);
+	Device.TransitionImage(CmdBuffer, App.DepthBuffer.Image.Image,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 
 	CmdBuffer->BeginRenderPass(Framebuffer);
 	if (0)
@@ -993,7 +1021,7 @@ static void SetupShaders(FApp& App)
 
 	App.TestCSPSO = GPSOCache.CreateComputePSO("TestCSPSO", TestCS);
 
-	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(FAttachmentInfo(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE), FAttachmentInfo());
+	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(FAttachmentInfo(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE), FAttachmentInfo(VK_FORMAT_D32_SFLOAT_S8_UINT, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE));
 
 	VkViewport Viewport = GVulkan.Swapchain.GetViewport();
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();
@@ -1027,7 +1055,13 @@ static void SetupShaders(FApp& App)
 	}
 
 	{
-		App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass);
+		App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+		{
+			VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
+			DSInfo->depthTestEnable = VK_TRUE;
+			DSInfo->depthWriteEnable = VK_TRUE;
+			DSInfo->depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+		});
 		for (auto& Mesh : App.Scene.Meshes)
 		{
 			for (auto& Prim : Mesh.Prims)
