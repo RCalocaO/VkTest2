@@ -616,12 +616,16 @@ static double Render(FApp& App)
 	SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 	App.GPUTiming.BeginTimestamp(CmdBuffer);
 
+	float Width = GVulkan.Swapchain.GetViewport().width;
+	float Height = GVulkan.Swapchain.GetViewport().height;
+
 	ImGuiIO& IO = ImGui::GetIO();
-	IO.DisplaySize.x = GVulkan.Swapchain.GetViewport().width;
-	IO.DisplaySize.y = GVulkan.Swapchain.GetViewport().height;
+	IO.DisplaySize.x = Width;
+	IO.DisplaySize.y = Height;
 	IO.DeltaTime = App.LastDelta;
 
-	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(&GVulkan.Swapchain, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE);
+	FRenderTargetInfo ColorInfo = GVulkan.Swapchain.GetRenderTargetInfo();
+	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(ColorInfo, FRenderTargetInfo(), (uint32)Width, (uint32)Height);
 
 	App.PendingOpsMgr.ExecutePendingStagingOps(Device, CmdBuffer);
 
@@ -989,7 +993,7 @@ static void SetupShaders(FApp& App)
 
 	App.TestCSPSO = GPSOCache.CreateComputePSO("TestCSPSO", TestCS);
 
-	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(FAttachmentInfo(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE));
+	SVulkan::FRenderPass* RenderPass = GRenderTargetCache.GetOrCreateRenderPass(FAttachmentInfo(GVulkan.Swapchain.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE), FAttachmentInfo());
 
 	VkViewport Viewport = GVulkan.Swapchain.GetViewport();
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();

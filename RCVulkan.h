@@ -94,6 +94,19 @@ struct FAttachmentInfo
 	}
 };
 
+struct FRenderTargetInfo : public FAttachmentInfo
+{
+	VkImageView ImageView = VK_NULL_HANDLE;
+
+	FRenderTargetInfo() = default;
+
+	FRenderTargetInfo(VkImageView InImageView, VkFormat InFormat, VkAttachmentLoadOp InLoadOp, VkAttachmentStoreOp InStoreOp)
+		: FAttachmentInfo(InFormat, InLoadOp, InStoreOp)
+		, ImageView(InImageView)
+	{
+	}
+};
+
 struct SVulkan
 {
 	VkInstance Instance = VK_NULL_HANDLE;
@@ -1067,6 +1080,10 @@ struct SVulkan
 			return Scissor;
 		}
 
+		inline FRenderTargetInfo GetRenderTargetInfo(VkAttachmentLoadOp LoadOp = VK_ATTACHMENT_LOAD_OP_LOAD, VkAttachmentStoreOp StoreOp = VK_ATTACHMENT_STORE_OP_STORE)
+		{
+			return FRenderTargetInfo(ImageViews[ImageIndex], Format, LoadOp, StoreOp);
+		}
 
 		void Destroy()
 		{
@@ -1113,6 +1130,9 @@ struct SVulkan
 		VkRenderPass RenderPass = VK_NULL_HANDLE;
 		VkDevice Device = VK_NULL_HANDLE;
 
+		bool bClearsColor = false;
+		bool bClearsDepth = false;
+
 		void Create(VkDevice InDevice, const FAttachmentInfo& Color, const FAttachmentInfo& Depth)
 		{
 			Device = InDevice;
@@ -1127,6 +1147,9 @@ struct SVulkan
 			ZeroMem(SubPassDesc);
 			SubPassDesc.colorAttachmentCount = 1;
 			SubPassDesc.pColorAttachments = &AttachmentReferences[0];
+
+			bClearsColor = Color.LoadOp == VK_ATTACHMENT_LOAD_OP_CLEAR;
+			bClearsDepth = Depth.LoadOp == VK_ATTACHMENT_LOAD_OP_CLEAR;
 
 			VkAttachmentDescription Attachments[2];
 			ZeroMem(Attachments);
@@ -1173,29 +1196,62 @@ struct SVulkan
 		FRenderPass* RenderPass = nullptr;
 		VkDevice Device = VK_NULL_HANDLE;
 
-		void Create(VkDevice InDevice, VkImageView ImageView, uint32 InWidth, uint32 InHeight, FRenderPass* InRenderPass)
+		std::vector<VkClearValue> ClearValues;
+
+		void Create(VkDevice InDevice, VkImageView Color, VkImageView Depth, uint32 InWidth, uint32 InHeight, FRenderPass* InRenderPass)
 		{
+			check(InRenderPass);
+			check(Color != VK_NULL_HANDLE);
+
 			Device = InDevice;
 			Width = InWidth;
 			Height = InHeight;
 			RenderPass = InRenderPass;
 
+			VkImageView Views[2] = { Color, Depth };
+
 			VkFramebufferCreateInfo CreateInfo;
 			ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO);
 			CreateInfo.renderPass = RenderPass->RenderPass;
-			CreateInfo.attachmentCount = 1;
-			CreateInfo.pAttachments = &ImageView;
+			CreateInfo.attachmentCount = Depth != VK_NULL_HANDLE ? 2 : 1;
+			CreateInfo.pAttachments = Views;
 			CreateInfo.width = Width;
 			CreateInfo.height = Height;
 			CreateInfo.layers = 1;
 
 			VERIFY_VKRESULT(vkCreateFramebuffer(Device, &CreateInfo, nullptr, &Framebuffer));
+
+			if (InRenderPass->bClearsColor)
+			{
+				VkClearValue ClearColor;
+				ClearColor.color.uint32[0] = 0;
+				ClearColor.color.uint32[1] = 0;
+				ClearColor.color.uint32[2] = 0;
+				ClearColor.color.uint32[3] = 0;
+				ClearValues.push_back(ClearColor);
+			}
+			if (InRenderPass->bClearsDepth)
+			{
+				check(Depth != VK_NULL_HANDLE);
+				VkClearValue ClearDepth;
+				ClearDepth.depthStencil = { 0.0f, 0 };
+				ClearValues.push_back(ClearDepth);
+			}
 		}
 
 		void Destroy()
 		{
 			vkDestroyFramebuffer(Device, Framebuffer, nullptr);
 			Framebuffer = VK_NULL_HANDLE;
+		}
+
+		uint32 GetClearCount() const
+		{
+			return (uint32)ClearValues.size();
+		}
+		const VkClearValue* GetClearValues() const
+		{
+			return ClearValues.data();
 		}
 	};
 
@@ -2003,7 +2059,7 @@ struct FShaderLibrary
 struct FRenderTargetCache
 {
 	std::map<uint64, SVulkan::FRenderPass*> RenderPasses;
-	std::vector<SVulkan::FFramebuffer*> Framebuffers;
+	std::map<uint64, SVulkan::FFramebuffer*> Framebuffers;
 
 	VkDevice Device =  VK_NULL_HANDLE;
 	void Init(VkDevice InDevice)
@@ -2011,7 +2067,7 @@ struct FRenderTargetCache
 		Device = InDevice;
 	}
 
-	SVulkan::FRenderPass* GetOrCreateRenderPass(const FAttachmentInfo& Color, const FAttachmentInfo& Depth = FAttachmentInfo())
+	SVulkan::FRenderPass* GetOrCreateRenderPass(const FAttachmentInfo& Color, const FAttachmentInfo& Depth)
 	{
 		union
 		{
@@ -2044,29 +2100,35 @@ struct FRenderTargetCache
 		return RenderPass;
 	}
 
-	SVulkan::FFramebuffer* GetOrCreateFrameBuffer(SVulkan::FSwapchain* Swapchain, VkAttachmentLoadOp LoadOp, VkAttachmentStoreOp StoreOp)
+	SVulkan::FFramebuffer* GetOrCreateFrameBuffer(const FRenderTargetInfo& ColorInfo, const FRenderTargetInfo& DepthInfo, uint32 Width, uint32 Height)
 	{
-		if (Swapchain->ImageIndex < Framebuffers.size())
+		check(Width > 0 && Height > 0);
+
+		SVulkan::FRenderPass* RenderPass = GetOrCreateRenderPass(ColorInfo, DepthInfo);
+
+		uint64 Key = Width | ((uint64)Height << (uint64)32);
+		Key ^= (uint64)(void*)ColorInfo.ImageView << 8;
+		Key ^= (uint64)(void*)DepthInfo.ImageView << 16;
+		Key ^= (uint64)(void*)RenderPass << 12;
+
+		auto Found = Framebuffers.find(Key);
+		if (Found != Framebuffers.end())
 		{
-			return Framebuffers[Swapchain->ImageIndex];
+			return Found->second;
 		}
 
-		FAttachmentInfo ColorInfo ={Swapchain->Format, LoadOp, StoreOp};
-		SVulkan::FRenderPass* RenderPass = GetOrCreateRenderPass(ColorInfo);
-
 		SVulkan::FFramebuffer* FB = new SVulkan::FFramebuffer();
-		VkViewport Viewport = Swapchain->GetViewport();
-		FB->Create(Device, Swapchain->ImageViews[Swapchain->ImageIndex], (uint32)Viewport.width, (uint32)Viewport.height, RenderPass);
-		Framebuffers.push_back(FB);
+		FB->Create(Device, ColorInfo.ImageView, DepthInfo.ImageView, Width, Height, RenderPass);
+		Framebuffers[Key] = FB;
 		return FB;
 	}
 
 	void Destroy()
 	{
-		for (auto* FB : Framebuffers)
+		for (auto Pair : Framebuffers)
 		{
-			FB->Destroy();
-			delete FB;
+			Pair.second->Destroy();
+			delete Pair.second;
 		}
 		Framebuffers.clear();
 
@@ -2971,6 +3033,8 @@ inline void SVulkan::FCmdBuffer::BeginRenderPass(FFramebuffer* Framebuffer)
 	Info.renderArea.extent.width = Framebuffer->Width;
 	Info.renderArea.extent.height = Framebuffer->Height;
 	Info.framebuffer = Framebuffer->Framebuffer;
+	Info.clearValueCount = Framebuffer->GetClearCount();
+	Info.pClearValues = Framebuffer->GetClearValues();
 	vkCmdBeginRenderPass(CmdBuffer, &Info, VK_SUBPASS_CONTENTS_INLINE);
 	State = EState::InRenderPass;
 }

@@ -44,6 +44,25 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 		}
 	}
 
+	for (uint32 Index = 0; Index < CallbackData->objectCount; ++Index)
+	{
+		switch (CallbackData->pObjects[Index].objectType)
+		{
+		case VK_OBJECT_TYPE_COMMAND_BUFFER:
+			s += "\tCmdBuf ";
+			break;
+		case VK_OBJECT_TYPE_BUFFER:
+			s += "\tBuffer ";
+			break;
+		default:
+			check(0);
+		}
+
+		char Handle[32];
+		sprintf(Handle, "%p\n", (void*)CallbackData->pObjects[Index].objectHandle);
+		s += Handle;
+	}
+
 	::OutputDebugStringA(s.c_str());
 	return VK_FALSE;
 }
