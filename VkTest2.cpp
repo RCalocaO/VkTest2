@@ -72,6 +72,7 @@ struct FApp
 	uint32 ImGuiMaxIndices = 16384 * 3;
 	FImageWithMemAndView ImGuiFont;
 	VkSampler ImGuiFontSampler = VK_NULL_HANDLE;
+	VkSampler LinearMipSampler = VK_NULL_HANDLE;
 	FImageWithMemAndView WhiteTexture;
 	FGPUTiming GPUTiming;
 	enum
@@ -213,6 +214,15 @@ struct FApp
 			VkSamplerCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO);
 			VERIFY_VKRESULT(vkCreateSampler(Device.Device, &Info, nullptr, &ImGuiFontSampler));
+		}
+
+		{
+			VkSamplerCreateInfo Info;
+			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO);
+			Info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+			Info.magFilter = VK_FILTER_LINEAR;
+			Info.minFilter = VK_FILTER_LINEAR;
+			VERIFY_VKRESULT(vkCreateSampler(Device.Device, &Info, nullptr, &LinearMipSampler));
 		}
 	}
 
@@ -546,11 +556,11 @@ struct FApp
 					ZeroMem(ImageInfo);
 
 					ImageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					ImageInfo[0].sampler = ImGuiFontSampler;
+					ImageInfo[0].sampler = LinearMipSampler;
 
 					ImageInfo[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 					ImageInfo[1].imageView = Scene.Textures.empty() ? WhiteTexture.View : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image.View;
-					ImageInfo[1].sampler = ImGuiFontSampler;
+					ImageInfo[1].sampler = LinearMipSampler;
 
 					VkDescriptorBufferInfo BufferInfo;
 					ZeroMem(BufferInfo);
@@ -663,7 +673,7 @@ static double Render(FApp& App)
 	F += 0.025f;
 	float ClearColor[4] = {0.0f, abs(sin(F)), abs(cos(F)), 0.0f};
 	ClearColorImage(CmdBuffer->CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
-	ClearDepthImage(CmdBuffer->CmdBuffer, App.DepthBuffer.Image.Image, 0.0f, 0);
+	ClearDepthImage(CmdBuffer->CmdBuffer, App.DepthBuffer.Image.Image, 1.0f, 0);
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -1060,7 +1070,7 @@ static void SetupShaders(FApp& App)
 			VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
 			DSInfo->depthTestEnable = VK_TRUE;
 			DSInfo->depthWriteEnable = VK_TRUE;
-			DSInfo->depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+			DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 		});
 		for (auto& Mesh : App.Scene.Meshes)
 		{
