@@ -477,31 +477,25 @@ struct FApp
 
 	struct
 	{
-		//FVector3 Origin = {0, 0, 0};
-		//FVector3 Angles = {0, 0, 0};
 		FMatrix4x4 ViewMtx;
 		FVector3 Pos = {0, 0, 0};
+		FVector3 Rot ={0, 0, 0};
+		FVector3 FOVNearFar = {35.0f, 100.0f, 3000.0f};
 	} Camera;
 
-	void UpdateMatrices(const FVector3& DeltaPos, const FVector3& DeltaRot)
+	void UpdateCameraMatrices(const FVector3& DeltaPos, const FVector3& DeltaRot)
 	{
-/*
-		Camera.Angles += DeltaRot;
-		float xa = cos(ToRadians(Angles.x));
-		float ya = sin(ToRadians(Angles.x));
-*/
+		Camera.Rot += DeltaRot;
 		Camera.Pos += DeltaPos;
-		Camera.ViewMtx = FMatrix4x4::GetIdentity();
+		Camera.ViewMtx = FMatrix4x4::GetRotationY(ToRadians(Camera.Rot.y));
 		Camera.ViewMtx.Rows[3] += Camera.Pos;
-		//FMatrix4x4 Rot = FMatrix4x4::GetRotationY(ToRadians(DeltaRot.y));
-		//(FMatrix4x4&)Camera *= Rot;
 	}
 
 	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
 	{
 		int W = 0, H = 1;
 		glfwGetWindowSize(Window, &W, &H);
-		float FOVRadians = tan(ToRadians(60.0f));
+		float FOVRadians = tan(ToRadians(Camera.FOVNearFar.x));
 
 		for (auto& Instance : Scene.Instances)
 		{
@@ -518,13 +512,7 @@ struct FApp
 				UB.WorldMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
 				UB.WorldMtx.Rows[3] = Instance.Pos;
 				UB.ViewMtx = Camera.ViewMtx;
-/*
-				UB.ViewMtx.Rows[0] = Camera.Right;
-				UB.ViewMtx.Rows[1] = Camera.Up;
-				UB.ViewMtx.Rows[2] = Camera.Aim;
-				UB.ViewMtx.Rows[3] = Camera.Pos;
-*/
-				UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, 1.0f, 1000.0f);
+				UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
 				FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(UB), CmdBuffer);
 				*(FUB*)Buffer->Buffer->Lock() = UB;
 				Buffer->Buffer->Unlock();
@@ -628,7 +616,7 @@ static void ClearDepthImage(VkCommandBuffer CmdBuffer, VkImage Image, float Dept
 
 static void UpdateInput(FApp& App)
 {
-	App.UpdateMatrices(g_vMove, g_vRot);
+	App.UpdateCameraMatrices(g_vMove, g_vRot);
 
 	g_vMove = FVector3::GetZero();
 	g_vRot = FVector3::GetZero();
@@ -830,30 +818,12 @@ static double Render(FApp& App)
 		Value = (float)App.GpuDelta;
 		ImGui::SliderFloat("GPU", &Value, 0, 66);
 		ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
+		ImGui::InputFloat3("Rot", App.Camera.Rot.Values);
+		ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
 	}
 	ImGui::End();
 
-/*
-	{
-		if (ImGui::Begin("Hello, world!"))
-		{
-			if (ImGui::Button("File..."))
-			{
-				ImGui::OpenPopup("OpenFilePopup");
-			}
-			if (ImGui::BeginPopup("OpenFilePopup"))
-			{
-				//ShowExampleMenuFile();
-				ImGui::EndPopup();
-			}
-
-			ImGui::End();
-		}
-
-		//ImGui::ShowDemoWindow();
-	}
-*/
-	ImGui::ShowDemoWindow();
+	//ImGui::ShowDemoWindow();
 
 	ImGui::Render();
 
@@ -1099,6 +1069,7 @@ static GLFWwindow* Init(FApp& App)
 	uint32 ResY = RCUtils::FCmdLine::Get().TryGetIntPrefix("-resy=", 1080);
 
 	g_vMove = TryGetVector3Prefix("-pos=", FVector3::GetZero());
+	g_vRot = TryGetVector3Prefix("-rot=", FVector3::GetZero());
 
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
 	glfwHideWindow(Window);
