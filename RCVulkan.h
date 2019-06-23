@@ -152,9 +152,10 @@ struct SVulkan
 		VkDevice Device = VK_NULL_HANDLE;
 		uint32 Width = 0;
 		uint32 Height = 0;
+		uint32 NumMips = 0;
 		VkFormat Format = VK_FORMAT_UNDEFINED;
 
-		static VkImageCreateInfo SetupCreateInfo(VkImageUsageFlags UsageFlags, VkFormat InFormat, uint32 InWidth, uint32 InHeight)
+		static VkImageCreateInfo SetupCreateInfo(VkImageUsageFlags UsageFlags, VkFormat InFormat, uint32 InWidth, uint32 InHeight, uint32 InNumMips)
 		{
 			VkImageCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO);
@@ -163,7 +164,7 @@ struct SVulkan
 			Info.extent.height = InHeight;
 			Info.extent.depth = 1;
 			Info.imageType = VK_IMAGE_TYPE_2D;
-			Info.mipLevels = 1;
+			Info.mipLevels = InNumMips;
 			Info.usage = UsageFlags;
 			Info.samples = VK_SAMPLE_COUNT_1_BIT;
 			Info.arrayLayers = 1;
@@ -172,14 +173,15 @@ struct SVulkan
 
 #if USE_VMA
 #else
-		void Create(VkDevice InDevice, VkImageUsageFlags UsageFlags, VkFormat InFormat, uint32 InWidth, uint32 InHeight)
+		void Create(VkDevice InDevice, VkImageUsageFlags UsageFlags, VkFormat InFormat, uint32 InWidth, uint32 InHeight, uint32 InNumMips)
 		{
 			Device = InDevice;
 			Width = InWidth;
 			Height = InHeight;
 			Format = InFormat;
+			NumMips = InNumMips;
 
-			VkImageCreateInfo Info = SetupCreateInfo(UsageFlags, Format, Width, Height);
+			VkImageCreateInfo Info = SetupCreateInfo(UsageFlags, Format, Width, Height, NumMips);
 			VERIFY_VKRESULT(vkCreateImage(Device, &Info, nullptr, &Image));
 		}
 
@@ -650,7 +652,7 @@ struct SVulkan
 			return View;
 		}
 
-		VkImageView CreateImageView(VkImage Image, VkFormat Format, VkImageAspectFlags Aspect, VkImageViewType ViewType)
+		VkImageView CreateImageView(VkImage Image, VkFormat Format, VkImageAspectFlags Aspect, VkImageViewType ViewType, uint32 StartMip = 0, uint32 NumMips = VK_REMAINING_MIP_LEVELS)
 		{
 			VkImageViewCreateInfo Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO);
@@ -659,7 +661,8 @@ struct SVulkan
 			Info.viewType = ViewType;
 			Info.subresourceRange.aspectMask = Aspect;
 			Info.subresourceRange.layerCount = 1;
-			Info.subresourceRange.levelCount = 1;
+			Info.subresourceRange.baseMipLevel = StartMip;
+			Info.subresourceRange.levelCount = NumMips;
 
 			VkImageView ImageView = VK_NULL_HANDLE;
 			VERIFY_VKRESULT(vkCreateImageView(Device, &Info, nullptr, &ImageView));
@@ -916,7 +919,7 @@ struct SVulkan
 			Device = VK_NULL_HANDLE;
 		}
 
-		void TransitionImage(FCmdBuffer* CmdBuffer, VkImage Image, VkPipelineStageFlags SrcStageMask, VkImageLayout SrcLayout, VkAccessFlags SrcAccessMask, VkPipelineStageFlags DestStageMask, VkImageLayout DestLayout, VkAccessFlags DestAccessMask, VkImageAspectFlags AspectMask)
+		void TransitionImage(FCmdBuffer* CmdBuffer, VkImage Image, VkPipelineStageFlags SrcStageMask, VkImageLayout SrcLayout, VkAccessFlags SrcAccessMask, VkPipelineStageFlags DestStageMask, VkImageLayout DestLayout, VkAccessFlags DestAccessMask, VkImageAspectFlags AspectMask, uint32 MipIndex = 0, uint32 NumMips = VK_REMAINING_MIP_LEVELS)
 		{
 			check(CmdBuffer->IsOutsideRenderPass());
 			VkImageMemoryBarrier ImageBarrier;
@@ -928,7 +931,8 @@ struct SVulkan
 			ImageBarrier.image = Image;
 			ImageBarrier.subresourceRange.aspectMask = AspectMask;
 			ImageBarrier.subresourceRange.layerCount = 1;
-			ImageBarrier.subresourceRange.levelCount = 1;
+			ImageBarrier.subresourceRange.baseMipLevel = MipIndex;
+			ImageBarrier.subresourceRange.levelCount = NumMips;
 			vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, SrcStageMask, DestStageMask, 0, 0, nullptr, 0, nullptr, 1, &ImageBarrier);
 		}
 
@@ -1791,14 +1795,14 @@ struct FImageWithMem
 #endif
 
 	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags,
-		EMemLocation Location, uint32 Width, uint32 Height)
+		EMemLocation Location, uint32 Width, uint32 Height, uint32 NumMips = 1)
 	{
 #if USE_VMA
 		VmaMemoryUsage MemPropFlags = GetVulkanMemLocation(Location);
 		Allocator = InDevice.VMAAllocator;
 		Image.Device = InDevice.Device;
 
-		VkImageCreateInfo Info = SVulkan::FImage::SetupCreateInfo(UsageFlags, Format, Width, Height);
+		VkImageCreateInfo Info = SVulkan::FImage::SetupCreateInfo(UsageFlags, Format, Width, Height, NumMips);
 
 		VmaAllocationCreateInfo AllocCreateInfo = {};
 		AllocCreateInfo.usage = MemPropFlags;
@@ -1806,7 +1810,7 @@ struct FImageWithMem
 		VERIFY_VKRESULT(vmaCreateImage(Allocator, &Info, &AllocCreateInfo, &Image.Image, &Mem, &AllocInfo));
 #else
 		VkMemoryPropertyFlags MemPropFlags = GetVulkanMemLocation(Location);
-		Image.Create(InDevice.Device, UsageFlags, Format, Width, Height);
+		Image.Create(InDevice.Device, UsageFlags, Format, Width, Height, NumMips);
 
 		VkMemoryRequirements MemReqs;
 		vkGetImageMemoryRequirements(InDevice.Device, Image.Image, &MemReqs);
@@ -1835,10 +1839,11 @@ struct FImageWithMemAndView : public FImageWithMem
 	VkImageView View = VK_NULL_HANDLE;
 
 	void Create(SVulkan::SDevice& InDevice, VkFormat Format, VkImageUsageFlags UsageFlags, 
-		EMemLocation Location, uint32 Width, uint32 Height, VkFormat ViewFormat, VkImageAspectFlags Aspect = VK_IMAGE_ASPECT_COLOR_BIT)
+		EMemLocation Location, uint32 Width, uint32 Height, VkFormat ViewFormat, 
+		VkImageAspectFlags Aspect = VK_IMAGE_ASPECT_COLOR_BIT, uint32 NumMips = 1)
 	{
-		FImageWithMem::Create(InDevice, Format, UsageFlags, Location, Width, Height);
-		View = InDevice.CreateImageView(Image.Image, ViewFormat, Aspect, VK_IMAGE_VIEW_TYPE_2D);
+		FImageWithMem::Create(InDevice, Format, UsageFlags, Location, Width, Height, NumMips);
+		View = InDevice.CreateImageView(Image.Image, ViewFormat, Aspect, VK_IMAGE_VIEW_TYPE_2D, 0, NumMips);
 	}
 
 	void Destroy()
