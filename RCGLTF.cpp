@@ -256,7 +256,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 			check(!GLTFImage.image.empty());
 			{
 				FScene::FTexture Texture;
-				Texture.Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, EMemLocation::GPU, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM);
+				Texture.Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, EMemLocation::GPU, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, GetNumMips(GLTFImage.width, GLTFImage.height));
 
 				SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
@@ -281,6 +281,44 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 				Region.imageSubresource.layerCount = 1;
 				vkCmdCopyBufferToImage(CmdBuffer->CmdBuffer, TempBuffer->Buffer->Buffer.Buffer, Texture.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
 
+				// All mips in DST
+				uint32 RemainingMips = Texture.Image.Image.NumMips;
+				uint32 Width = GLTFImage.width;
+				uint32 Height = GLTFImage.height;
+				for (uint32 Mip = 1; Mip < Texture.Image.Image.NumMips; ++Mip)
+				{
+					// Prev mip to SRC
+					Device.TransitionImage(CmdBuffer, Texture.GetImage(),
+						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
+						VK_IMAGE_ASPECT_COLOR_BIT, Mip - 1, 1);
+					VkImageBlit Region;
+					ZeroMem(Region);
+					Region.srcOffsets[1].x = Width;
+					Region.srcOffsets[1].y = Height;
+					Region.srcOffsets[1].z = 1;
+					Width = Max(Width >> 1, 1u);
+					Height = Max(Height >> 1, 1u);
+					Region.dstOffsets[1].x = Width;
+					Region.dstOffsets[1].y = Height;
+					Region.dstOffsets[1].z = 1;
+					Region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+					Region.srcSubresource.mipLevel = Mip - 1;
+					Region.srcSubresource.layerCount = 1;
+					Region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+					Region.dstSubresource.mipLevel = Mip;
+					Region.dstSubresource.layerCount = 1;
+					vkCmdBlitImage(CmdBuffer->CmdBuffer, Texture.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+						Texture.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region, VK_FILTER_LINEAR);
+
+					// Prev mip to DST
+					Device.TransitionImage(CmdBuffer, Texture.GetImage(),
+						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
+						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+						VK_IMAGE_ASPECT_COLOR_BIT, Mip - 1, 1);
+				}
+
+				// All mips to READ
 				Device.TransitionImage(CmdBuffer, Texture.GetImage(),
 					VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
 					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
