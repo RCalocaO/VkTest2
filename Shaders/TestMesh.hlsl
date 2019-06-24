@@ -1,18 +1,14 @@
 cbuffer ViewUB : register(b0)
 {
-	float4x4 WorldMtx;
 	float4x4 ViewMtx;
 	float4x4 ProjectionMtx;
-};
-
-cbuffer ObjUB : register(b1)
-{
-	float4x4 ObjMtx;
-	float4 Tint;
+	float4x4 WorldMtx;
+	int4 Mode;
 };
 
 SamplerState SS : register(s2);
-Texture2D Tex : register(t3);
+Texture2D Base : register(t3);
+Texture2D Normal : register(t4);
 
 struct FGLTFVS
 {
@@ -48,5 +44,22 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 
 float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 {
-	return float4(Tex.Sample(SS, In.UV0).xyz, 1);// * In.Color;
+	if (Mode.x == 0)
+	{
+		return float4(Base.Sample(SS, In.UV0).xyz, 1);
+	}
+	else if (Mode.x == 1)
+	{
+		return float4(In.Color.xyz, 1);
+	}
+	else if (Mode.x == 2)
+	{
+		return float4(In.Normal * 0.5 + 0.5, 1) * In.Color;
+	}
+	else if (Mode.x == 3)
+	{
+		return float4(Base.Sample(SS, In.UV0).xyz, 1) * In.Color;
+	}
+
+	return float4(Normal.Sample(SS, In.UV0).xyz, 1);
 }

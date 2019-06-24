@@ -57,6 +57,9 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 		case VK_OBJECT_TYPE_BUFFER_VIEW:
 			s += "\tBufferView ";
 			break;
+		case VK_OBJECT_TYPE_SAMPLER:
+			s += "\tSampler ";
+			break;
 		case VK_OBJECT_TYPE_IMAGE:
 			s += "\tImage ";
 			break;
@@ -68,6 +71,12 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 			break;
 		case VK_OBJECT_TYPE_FRAMEBUFFER:
 			s += "\tFramebuffer ";
+			break;
+		case VK_OBJECT_TYPE_DESCRIPTOR_SET:
+			s += "\tDescriptorSet ";
+			break;
+		case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT:
+			s += "\tDescriptorSetLayout ";
 			break;
 		case VK_OBJECT_TYPE_UNKNOWN:
 			continue;

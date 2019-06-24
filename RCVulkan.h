@@ -2465,8 +2465,39 @@ struct FPSOCache
 			AddBindings(PS);
 		}
 
-		FLayout Layout;
+		{
+			std::map<uint32, std::vector<VkDescriptorSetLayoutBinding>> PrevLayoutBindings;
+			PrevLayoutBindings.swap(LayoutBindings);
 
+			for (auto Pair : PrevLayoutBindings)
+			{
+				uint32 Set = Pair.first;
+				auto& Bindings = Pair.second;
+				for (VkDescriptorSetLayoutBinding Binding : Bindings)
+				{
+					auto& NewBindings = LayoutBindings[Set];
+					bool bFound = false;
+					for (VkDescriptorSetLayoutBinding& FindExisting : NewBindings)
+					{
+						if (FindExisting.binding == Binding.binding)
+						{
+							check(FindExisting.descriptorCount == Binding.descriptorCount &&
+								FindExisting.binding == Binding.binding);
+							FindExisting.stageFlags |= Binding.stageFlags;
+							bFound = true;
+							break;
+						}
+					}
+
+					if (!bFound)
+					{
+						NewBindings.push_back(Binding);
+					}
+				}
+			}
+		}
+
+		FLayout Layout;
 		for (auto Pair : LayoutBindings)
 		{
 			VkDescriptorSetLayoutCreateInfo DSInfo;

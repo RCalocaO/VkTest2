@@ -31,6 +31,7 @@ static FStagingBufferManager GStagingBufferMgr;
 
 static FVector3 g_vMove = {0, 0, 0};
 static FVector3 g_vRot = {0, 0, 0};
+static int32 g_nMode = 0;
 
 extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
 
@@ -504,13 +505,15 @@ struct FApp
 			{
 				struct FUB
 				{
-					FMatrix4x4 WorldMtx;
 					FMatrix4x4 ViewMtx;
 					FMatrix4x4 ProjMtx;
+					FMatrix4x4 WorldMtx;
+					FIntVector4 Mode;
 				} UB;
 				UB.WorldMtx = FMatrix4x4::GetIdentity();
 				UB.WorldMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
 				UB.WorldMtx.Rows[3] = Instance.Pos;
+				UB.Mode.Set(g_nMode, 0, 0, 0);
 				UB.ViewMtx = Camera.ViewMtx;
 				UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
 				FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(UB), CmdBuffer);
@@ -540,7 +543,7 @@ struct FApp
 				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), Prim.VertexOffsets.data());
 #endif
 				{
-					VkDescriptorImageInfo ImageInfo[2];
+					VkDescriptorImageInfo ImageInfo[3];
 					ZeroMem(ImageInfo);
 
 					ImageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -550,31 +553,41 @@ struct FApp
 					ImageInfo[1].imageView = Scene.Textures.empty() ? WhiteTexture.View : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image.View;
 					ImageInfo[1].sampler = LinearMipSampler;
 
+					ImageInfo[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					ImageInfo[2].imageView = Scene.Textures.empty() ? WhiteTexture.View : Scene.Textures[Scene.Materials[Prim.Material].Normal].Image.View;
+					ImageInfo[2].sampler = LinearMipSampler;
+
 					VkDescriptorBufferInfo BufferInfo;
 					ZeroMem(BufferInfo);
 					BufferInfo.buffer = Buffer->Buffer->Buffer.Buffer;
 					BufferInfo.range = Buffer->Buffer->Size;
 
-					VkWriteDescriptorSet DescriptorWrites[3];
+					VkWriteDescriptorSet DescriptorWrites[4];
 					ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 					DescriptorWrites[0].descriptorCount = 1;
-					DescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-					DescriptorWrites[0].pImageInfo = &ImageInfo[0];
-					DescriptorWrites[0].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[0]->binding;
+					DescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+					DescriptorWrites[0].pBufferInfo = &BufferInfo;
+					DescriptorWrites[0].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[0]->binding;
 
 					ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 					DescriptorWrites[1].descriptorCount = 1;
-					DescriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-					DescriptorWrites[1].pImageInfo = &ImageInfo[1];
+					DescriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+					DescriptorWrites[1].pImageInfo = &ImageInfo[0];
 					DescriptorWrites[1].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[1]->binding;
 
 					ZeroVulkanMem(DescriptorWrites[2], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 					DescriptorWrites[2].descriptorCount = 1;
-					DescriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-					DescriptorWrites[2].pBufferInfo = &BufferInfo;
-					DescriptorWrites[2].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[0]->binding;
+					DescriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+					DescriptorWrites[2].pImageInfo = &ImageInfo[1];
+					DescriptorWrites[2].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[2]->binding;
 
-					GDescriptorCache.UpdateDescriptors(CmdBuffer, 3, &DescriptorWrites[0], PSO);
+					ZeroVulkanMem(DescriptorWrites[3], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+					DescriptorWrites[3].descriptorCount = 1;
+					DescriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+					DescriptorWrites[3].pImageInfo = &ImageInfo[2];
+					DescriptorWrites[3].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[3]->binding;
+
+					GDescriptorCache.UpdateDescriptors(CmdBuffer, 4, &DescriptorWrites[0], PSO);
 				}
 
 
@@ -820,6 +833,9 @@ static double Render(FApp& App)
 		ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
 		ImGui::InputFloat3("Rot", App.Camera.Rot.Values);
 		ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
+
+		const char* List[] = {"Base", "Vertex Color", "Normals", "Base * Vertex", "NormalMap"};
+		ImGui::ListBox("Show mode", &g_nMode, List, 4);
 	}
 	ImGui::End();
 
