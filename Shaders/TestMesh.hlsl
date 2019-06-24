@@ -35,7 +35,7 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	float4 Pos = mul(WorldMtx, float4(In.POSITION, 1));
 	Pos = mul(ViewMtx, Pos);
 	Out.Pos = mul(ProjectionMtx, Pos);
-	Out.Normal = In.NORMAL;
+	Out.Normal = mul((float3x3)ViewMtx, In.NORMAL);
 	Out.Tangent = In.TANGENT;
 	Out.UV0 = In.TEXCOORD_0;
 	Out.Color = In.COLOR_0;
@@ -54,7 +54,7 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	}
 	else if (Mode.x == 2)
 	{
-		return float4(In.Normal * 0.5 + 0.5, 1) * In.Color;
+		return float4(In.Normal * 0.5 + 0.5, 1);
 	}
 	else if (Mode.x == 3)
 	{
