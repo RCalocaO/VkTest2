@@ -41,9 +41,9 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	float3 vT = normalize(mul((float3x3)WorldMtx, In.TANGENT.xyz));
 	float3 vB = normalize(mul((float3x3)WorldMtx, In.TANGENT.w * cross(vN, vT)));
 
-	Out.Normal = vN;
-	Out.Tangent = vT;
-	Out.BiTangent = vB;
+	Out.Tangent =	float3(vT.x, vB.x, vN.x);
+	Out.BiTangent = float3(vT.y, vB.y, vN.y);
+	Out.Normal =	float3(vT.z, vB.z, vN.z);
 	Out.UV0 = In.TEXCOORD_0;
 	Out.Color = In.COLOR_0;
 	return Out;
@@ -73,9 +73,9 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	}
 	else if (Mode.x == 5)
 	{
-		float3x3 mTangent = float3x3(In.Tangent, In.BiTangent, In.Normal);
+		float3x3 mTangentBasis = float3x3(In.Tangent, In.BiTangent, In.Normal);
 		float3 vNormalMap = Normal.Sample(SS, In.UV0).xyz * 2 - 1;
-		vNormalMap = mul(transpose(mTangent), vNormalMap);
+		vNormalMap = mul(mTangentBasis, vNormalMap);
 		return float4(vNormalMap, 1);
 	}
 
