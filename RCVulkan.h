@@ -2182,6 +2182,22 @@ struct FPSOCache
 	};
 	std::vector<FVertexDecl> VertexDecls;
 
+	void RecompileShaders()
+	{
+		for (auto& OuterPair : GfxPSOs)
+		{
+			auto& Map = OuterPair.second;
+			for (auto& InnerPair : Map)
+			{
+				SVulkan::FGfxPSO& PSO = InnerPair.second;
+				for (auto& ShadersPair : PSO.Shaders)
+				{
+					SVulkan::FShader* Shader = ShadersPair.second;
+				}
+			}
+		}
+	}
+
 	int32 FindOrAddVertexDecl(const FVertexDecl& VertexDecl)
 	{
 		int32 Index = 0;

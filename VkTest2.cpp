@@ -834,8 +834,25 @@ static double Render(FApp& App)
 		ImGui::InputFloat3("Rot", App.Camera.Rot.Values);
 		ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
 
-		const char* List[] = {"Base", "Vertex Color", "Normals", "Base * Vertex", "NormalMap"};
-		ImGui::ListBox("Show mode", &g_nMode, List, 4);
+		const char* List[] = {
+			"BaseTexture",			// 0
+			"VertexColor",			// 1
+			"VertexNormals",		// 2
+			"Base * VertexColor",	// 3
+			"NormalMap Texture",	// 4
+			"Normal Mapping",		// 5
+			"6",
+			"7",
+			"8",
+			"9",
+
+						};
+		ImGui::ListBox("Show mode", &g_nMode, List, IM_ARRAYSIZE(List));
+
+		if (ImGui::Button("Recompile shaders"))
+		{
+			GPSOCache.RecompileShaders();
+		}
 	}
 	ImGui::End();
 

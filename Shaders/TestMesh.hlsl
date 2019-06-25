@@ -25,6 +25,7 @@ struct FGLTFPS
 	float4 Pos : SV_POSITION;
 	float3 Normal : NORMAL;
 	float3 Tangent : TANGENT;
+	float3 BiTangent : BITANGENT;
 	float2 UV0 : TEXCOORD0;
 	float4 Color : COLOR;
 };
@@ -35,8 +36,14 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	float4 Pos = mul(WorldMtx, float4(In.POSITION, 1));
 	Pos = mul(ViewMtx, Pos);
 	Out.Pos = mul(ProjectionMtx, Pos);
-	Out.Normal = mul((float3x3)ViewMtx, In.NORMAL);
-	Out.Tangent = In.TANGENT;
+
+	float3 vN = normalize(mul((float3x3)WorldMtx, In.NORMAL));
+	float3 vT = normalize(mul((float3x3)WorldMtx, In.TANGENT.xyz));
+	float3 vB = normalize(mul((float3x3)WorldMtx, In.TANGENT.w * cross(vN, vT)));
+
+	Out.Normal = vN;
+	Out.Tangent = vT;
+	Out.BiTangent = vB;
 	Out.UV0 = In.TEXCOORD_0;
 	Out.Color = In.COLOR_0;
 	return Out;
@@ -60,6 +67,17 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	{
 		return float4(Base.Sample(SS, In.UV0).xyz, 1) * In.Color;
 	}
+	else if (Mode.x == 4)
+	{
+		return float4(Normal.Sample(SS, In.UV0).xyz * 0.5 + 0.5, 1);
+	}
+	else if (Mode.x == 5)
+	{
+		float3x3 mTangent = float3x3(In.Tangent, In.BiTangent, In.Normal);
+		float3 vNormalMap = Normal.Sample(SS, In.UV0).xyz * 2 - 1;
+		vNormalMap = mul(transpose(mTangent), vNormalMap);
+		return float4(vNormalMap, 1);
+	}
 
-	return float4(Normal.Sample(SS, In.UV0).xyz, 1);
+	return float4(0, 0, 1, 0.5);
 }
