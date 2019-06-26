@@ -483,6 +483,16 @@ struct FApp
 		FVector3 Rot ={0, 0, 0};
 		FVector3 FOVNearFar = {35.0f, 100.0f, 3000.0f};
 	} Camera;
+	FVector4 LightDir = {0, 1, 0, 0};
+
+	struct FViewUB
+	{
+		FMatrix4x4 ViewMtx;
+		FMatrix4x4 ProjMtx;
+		FMatrix4x4 WorldMtx;
+		FVector4 LightDir;
+		FIntVector4 Mode;
+	};
 
 	void UpdateCameraMatrices(const FVector3& DeltaPos, const FVector3& DeltaRot)
 	{
@@ -503,22 +513,17 @@ struct FApp
 			auto& Mesh = Scene.Meshes[Instance.Mesh];
 			for (auto& Prim : Mesh.Prims)
 			{
-				struct FUB
-				{
-					FMatrix4x4 ViewMtx;
-					FMatrix4x4 ProjMtx;
-					FMatrix4x4 WorldMtx;
-					FIntVector4 Mode;
-				} UB;
-				UB.WorldMtx = FMatrix4x4::GetIdentity();
-				UB.WorldMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
-				UB.WorldMtx.Rows[3] = Instance.Pos;
-				UB.Mode.Set(g_nMode, 0, 0, 0);
-				UB.ViewMtx = Camera.ViewMtx;
-				UB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
-				FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(UB), CmdBuffer);
-				*(FUB*)Buffer->Buffer->Lock() = UB;
-				Buffer->Buffer->Unlock();
+				FViewUB ViewUB;
+				ViewUB.WorldMtx = FMatrix4x4::GetIdentity();
+				ViewUB.WorldMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
+				ViewUB.WorldMtx.Rows[3] = Instance.Pos;
+				ViewUB.Mode.Set(g_nMode, 0, 0, 0);
+				ViewUB.LightDir = LightDir.GetNormalized();
+				ViewUB.ViewMtx = Camera.ViewMtx;
+				ViewUB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
+				FStagingBuffer* ViewBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ViewUB), CmdBuffer);
+				*(FViewUB*)ViewBuffer->Buffer->Lock() = ViewUB;
+				ViewBuffer->Buffer->Unlock();
 
 				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, Prim.VertexDecl);
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
@@ -559,8 +564,8 @@ struct FApp
 
 					VkDescriptorBufferInfo BufferInfo;
 					ZeroMem(BufferInfo);
-					BufferInfo.buffer = Buffer->Buffer->Buffer.Buffer;
-					BufferInfo.range = Buffer->Buffer->Size;
+					BufferInfo.buffer = ViewBuffer->Buffer->Buffer.Buffer;
+					BufferInfo.range = ViewBuffer->Buffer->Size;
 
 					VkWriteDescriptorSet DescriptorWrites[4];
 					ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -833,18 +838,19 @@ static double Render(FApp& App)
 		ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
 		ImGui::InputFloat3("Rot", App.Camera.Rot.Values);
 		ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
+		ImGui::InputFloat3("Light Dir", App.LightDir.Values);
 
 		const char* List[] = {
-			"BaseTexture",			// 0
-			"VertexColor",			// 1
-			"VertexNormals",		// 2
-			"Base * VertexColor",	// 3
-			"NormalMap Texture",	// 4
-			"Normal Mapping",		// 5
-			"6",
-			"7",
-			"8",
-			"9",
+			"Default Lit",				// 0
+			"Base Texture",				// 1
+			"Vertex Normal Lit",		// 2
+			"Show Vertex Normals",		// 3
+			"NormalMap Texture",		// 4
+			"Normal Mapping",			// 5
+			"Simple Dir Light",			// 6
+			//"7",
+			//"8",
+			//"9",
 
 						};
 		ImGui::ListBox("Show mode", &g_nMode, List, IM_ARRAYSIZE(List));

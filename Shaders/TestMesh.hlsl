@@ -3,12 +3,13 @@ cbuffer ViewUB : register(b0)
 	float4x4 ViewMtx;
 	float4x4 ProjectionMtx;
 	float4x4 WorldMtx;
+	float4 LightDir;
 	int4 Mode;
 };
 
 SamplerState SS : register(s2);
-Texture2D Base : register(t3);
-Texture2D Normal : register(t4);
+Texture2D BaseTexture : register(t3);
+Texture2D NormalTexture : register(t4);
 
 struct FGLTFVS
 {
@@ -51,32 +52,51 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 
 float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 {
+	float4 Diffuse = BaseTexture.Sample(SS, In.UV0);
+	float3 vNormalMap = NormalTexture.Sample(SS, In.UV0).xyz * 2 - 1;
+	float3x3 mTangentBasis = float3x3(In.Tangent, In.BiTangent, In.Normal);
 	if (Mode.x == 0)
 	{
-		return float4(Base.Sample(SS, In.UV0).xyz, 1);
+		if (Diffuse.a < 1)
+		{
+			discard;
+		}
+
+		vNormalMap = mul(mTangentBasis, vNormalMap);
+		float L = max(0, dot(vNormalMap, -LightDir));
+		return float4(L * Diffuse.xyz, Diffuse.a);
 	}
 	else if (Mode.x == 1)
 	{
-		return float4(In.Color.xyz, 1);
+		if (Diffuse.a < 1)
+		{
+			discard;
+		}
+		return Diffuse;
 	}
 	else if (Mode.x == 2)
 	{
-		return float4(In.Normal * 0.5 + 0.5, 1);
+		float L = max(0, dot(In.Normal, -LightDir));
+		return float4(L, L, L, 1);
 	}
 	else if (Mode.x == 3)
 	{
-		return float4(Base.Sample(SS, In.UV0).xyz, 1) * In.Color;
+		return float4(In.Normal * 0.5 + 0.5, 1);
 	}
 	else if (Mode.x == 4)
 	{
-		return float4(Normal.Sample(SS, In.UV0).xyz * 0.5 + 0.5, 1);
+		return float4(vNormalMap, 1);
 	}
 	else if (Mode.x == 5)
 	{
-		float3x3 mTangentBasis = float3x3(In.Tangent, In.BiTangent, In.Normal);
-		float3 vNormalMap = Normal.Sample(SS, In.UV0).xyz * 2 - 1;
 		vNormalMap = mul(mTangentBasis, vNormalMap);
 		return float4(vNormalMap, 1);
+	}
+	else if (Mode.x == 6)
+	{
+		vNormalMap = mul(mTangentBasis, vNormalMap);
+		float L = max(0, dot(vNormalMap, -LightDir));
+		return float4(L, L, L, 1);
 	}
 
 	return float4(0, 0, 1, 0.5);

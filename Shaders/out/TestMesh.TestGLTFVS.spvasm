@@ -13,7 +13,8 @@ D:\Github\VkTest2\Shaders\TestMesh.hlsl
                               MemberName 38(ViewUB) 0  "ViewMtx"
                               MemberName 38(ViewUB) 1  "ProjectionMtx"
                               MemberName 38(ViewUB) 2  "WorldMtx"
-                              MemberName 38(ViewUB) 3  "Mode"
+                              MemberName 38(ViewUB) 3  "LightDir"
+                              MemberName 38(ViewUB) 4  "Mode"
                               Name 40  ""
                               Name 149  "In.POSITION"
                               Name 152  "In.NORMAL"
@@ -36,6 +37,7 @@ D:\Github\VkTest2\Shaders\TestMesh.hlsl
                               MemberDecorate 38(ViewUB) 2 Offset 128
                               MemberDecorate 38(ViewUB) 2 MatrixStride 16
                               MemberDecorate 38(ViewUB) 3 Offset 192
+                              MemberDecorate 38(ViewUB) 4 Offset 208
                               Decorate 38(ViewUB) Block
                               Decorate 40 DescriptorSet 0
                               Decorate 40 Binding 0
@@ -61,7 +63,7 @@ D:\Github\VkTest2\Shaders\TestMesh.hlsl
               31:    6(float) Constant 1065353216
               36:             TypeMatrix 8(fvec4) 4
               37:             TypeVector 26(int) 4
-      38(ViewUB):             TypeStruct 36 36 36 37(ivec4)
+      38(ViewUB):             TypeStruct 36 36 36 8(fvec4) 37(ivec4)
               39:             TypePointer Uniform 38(ViewUB)
               40:     39(ptr) Variable Uniform
               41:     26(int) Constant 2
