@@ -755,27 +755,11 @@ static double Render(FApp& App)
 	{
 		SVulkan::FComputePSO* PSO = GPSOCache.GetComputePSO(App.TestCSPSO);
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, PSO->Pipeline);
-		//GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
 
-		VkWriteDescriptorSet DescriptorWrites[2];
-		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-		DescriptorWrites[0].descriptorCount = 1;
-		DescriptorWrites[0].descriptorType = (VkDescriptorType)PSO->Reflection->bindings[0]->descriptor_type;
-		DescriptorWrites[0].pTexelBufferView = &App.TestCSBuffer.View;
-		DescriptorWrites[0].dstBinding = PSO->Reflection->bindings[0]->binding;
-
-		ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-		DescriptorWrites[1].descriptorCount = 1;
-		DescriptorWrites[1].descriptorType = (VkDescriptorType)PSO->Reflection->bindings[1]->descriptor_type;
-		VkDescriptorBufferInfo BufferInfo;
-		ZeroMem(BufferInfo);
-		BufferInfo.buffer = App.TestCSUB.Buffer.Buffer;
-		BufferInfo.range =  App.TestCSUB.Size;
-		DescriptorWrites[1].pBufferInfo = &BufferInfo;
-		DescriptorWrites[1].dstBinding = PSO->Reflection->bindings[1]->binding;
-
-		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, PSO);
-
+		FDescriptorPSOCache Cache(PSO);
+		Cache.SetBuffer("CB0", App.TestCSUB);
+		Cache.SetUAV("output", App.TestCSBuffer);
+		Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
 		for (int32 Index = 0; Index < 256; ++Index)
 		{
 			vkCmdDispatch(CmdBuffer->CmdBuffer, 256, 1, 1);

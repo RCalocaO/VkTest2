@@ -274,19 +274,19 @@ struct SVulkan
 		VkPipeline Pipeline = VK_NULL_HANDLE;
 		VkPipelineLayout Layout = VK_NULL_HANDLE;
 
+		std::map<std::string, std::pair<uint32, VkDescriptorType>> ParameterMap;
+
 		std::vector<VkDescriptorSetLayout> SetLayouts;
 		std::map<EShaderStages, SVulkan::FShader*> Shaders;
 	};
 
 	struct FComputePSO : public FPSO
 	{
-		SpvReflectDescriptorSet* Reflection;
 	};
 
 	struct FGfxPSO : public FPSO
 	{
 		std::map<EShaderStages, SpvReflectDescriptorSet*> Reflection;
-		std::map<std::string, std::pair<uint32, VkDescriptorType>> ParameterMap;
 
 		void AddShader(EShaderStages Stage, SVulkan::FShader* Shader)
 		{
@@ -2651,7 +2651,34 @@ struct FPSOCache
 		PipelineInfo.stage.pName = CS->EntryPoint.c_str();
 
 		SVulkan::FComputePSO PSO;
-		PSO.Reflection = CS->Shader->DescSetInfo;
+		{
+			SpvReflectDescriptorSet* Set = CS->Shader->DescSetInfo;
+			if (Set)
+			{
+				for (uint32 Index = 0; Index < Set->binding_count; ++Index)
+				{
+					SpvReflectDescriptorBinding* SetBinding = Set->bindings[Index];
+					std::string Name = SetBinding->resource_type == SPV_REFLECT_RESOURCE_FLAG_CBV
+						? SetBinding->type_description->type_name
+						: SetBinding->name;
+					check(Name[0]);
+
+					uint32 Binding = SetBinding->binding;
+					VkDescriptorType Type = (VkDescriptorType)SetBinding->descriptor_type;
+
+					auto Found = PSO.ParameterMap.find(Name);
+					if (Found == PSO.ParameterMap.end())
+					{
+						PSO.ParameterMap[Name] = std::pair<uint32, VkDescriptorType>(Binding, Type);
+					}
+					else
+					{
+						check(PSO.ParameterMap[Name].first == Binding);
+						check(PSO.ParameterMap[Name].second == Type);
+					}
+				}
+			}
+		}
 		PSO.Layout = GetOrCreatePipelineLayout(CS->Shader, nullptr, nullptr, nullptr, PSO.SetLayouts);
 		PSO.Shaders[EShaderStages::Compute] = CS->Shader;
 
@@ -2914,12 +2941,11 @@ struct FDescriptorCache
 		PSODescriptors.clear();
 	}
 
-
-	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FGfxPSO* InPSO)
+	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FPSO* InPSO, VkPipelineBindPoint BindPoint)
 	{
 		if (Device->bPushDescriptor)
 		{
-			vkCmdPushDescriptorSetKHR(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO->Layout, 0, NumWrites, DescriptorWrites);
+			vkCmdPushDescriptorSetKHR(CmdBuffer->CmdBuffer, BindPoint, InPSO->Layout, 0, NumWrites, DescriptorWrites);
 		}
 		else
 		{
@@ -2931,28 +2957,18 @@ struct FDescriptorCache
 			auto Sets = PSODescriptors[InPSO].AllocSets(CmdBuffer);
 			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[InPSO].NumDescriptorsPerSet);
 			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
-			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, InPSO->Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
+			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, BindPoint, InPSO->Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
 		}
 	}
 
-	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FComputePSO* InPSO)
+	inline void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FGfxPSO* InPSO)
 	{
-		if (Device->bPushDescriptor)
-		{
-			vkCmdPushDescriptorSetKHR(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO->Layout, 0, NumWrites, DescriptorWrites);
-		}
-		else
-		{
-			if (PSODescriptors.find(InPSO) == PSODescriptors.end())
-			{
-				PSODescriptors[InPSO].Init(Device->Device, InPSO);
-			}
+		UpdateDescriptors(CmdBuffer, NumWrites, DescriptorWrites, InPSO, VK_PIPELINE_BIND_POINT_GRAPHICS);
+	}
 
-			auto Sets = PSODescriptors[InPSO].AllocSets(CmdBuffer);
-			Sets.UpdateDescriptorWrites(NumWrites, DescriptorWrites, PSODescriptors[InPSO].NumDescriptorsPerSet);
-			vkUpdateDescriptorSets(Device->Device, NumWrites, DescriptorWrites, 0, nullptr);
-			vkCmdBindDescriptorSets(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, InPSO->Layout, 0, (uint32)Sets.Sets.size(), Sets.Sets.data(), 0, nullptr);
-		}
+	inline void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FComputePSO* InPSO)
+	{
+		UpdateDescriptors(CmdBuffer, NumWrites, DescriptorWrites, InPSO, VK_PIPELINE_BIND_POINT_COMPUTE);
 	}
 };
 
@@ -3283,14 +3299,23 @@ struct FPendingOpsManager
 
 struct FDescriptorPSOCache
 {
-	SVulkan::FGfxPSO* PSO;
+	SVulkan::FPSO* PSO;
+	SVulkan::FComputePSO* ComputePSO = nullptr;
+	SVulkan::FGfxPSO* GfxPSO = nullptr;
 
 	std::vector<VkWriteDescriptorSet> Writes;
 	std::vector<VkDescriptorImageInfo*> Images;
 	std::vector<VkDescriptorBufferInfo*> Buffers;
 
+	FDescriptorPSOCache(SVulkan::FComputePSO* InPSO)
+		: PSO(InPSO)
+		, ComputePSO(InPSO)
+	{
+	}
+
 	FDescriptorPSOCache(SVulkan::FGfxPSO* InPSO)
 		: PSO(InPSO)
+		, GfxPSO(InPSO)
 	{
 	}
 
@@ -3326,6 +3351,24 @@ struct FDescriptorPSOCache
 			BInfo->range = Buffer.Size;
 			Write.pBufferInfo = BInfo;
 			Buffers.push_back(BInfo);
+			Writes.push_back(Write);
+		}
+	}
+
+	void SetUAV(const char* Name, FBufferWithMemAndView& Buffer)
+	{
+		uint32 Binding = UINT32_MAX;
+		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+		bool bFound = GetParameter(Name, Binding, Type);
+		if (bFound)
+		{
+			check(Type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER || Type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
+			VkWriteDescriptorSet Write;
+			ZeroVulkanMem(Write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+			Write.descriptorCount = 1;
+			Write.dstBinding = Binding;
+			Write.descriptorType = Type;
+			Write.pTexelBufferView = &Buffer.View;
 			Writes.push_back(Write);
 		}
 	}
@@ -3379,7 +3422,15 @@ struct FDescriptorPSOCache
 
 	void UpdateDescriptors(FDescriptorCache& Cache, SVulkan::FCmdBuffer* CmdBuffer)
 	{
-		Cache.UpdateDescriptors(CmdBuffer, (uint32)Writes.size(), Writes.data(), PSO);
+		if (GfxPSO)
+		{
+			Cache.UpdateDescriptors(CmdBuffer, (uint32)Writes.size(), Writes.data(), GfxPSO);
+		}
+		else
+		{
+			check(ComputePSO);
+			Cache.UpdateDescriptors(CmdBuffer, (uint32)Writes.size(), Writes.data(), ComputePSO);
+		}
 	}
 
 	bool GetParameter(const char* Name, uint32& OutBinding, VkDescriptorType& OutType);
