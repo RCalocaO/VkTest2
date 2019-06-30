@@ -707,36 +707,7 @@ static double Render(FApp& App)
 
 	App.GPUTiming.EndTimestamp(CmdBuffer);
 
-#if 0
-	if (ImGui::BeginMainMenuBar())
-	{
-		{
-			char s[64];
-			sprintf(s, "FPS %3.2f", (float)(1000.0 / App.CpuDelta));
-			ImGui::MenuItem(s, nullptr, false, false);
-			sprintf(s, "CPU %3.2fms", (float)App.CpuDelta);
-			ImGui::MenuItem(s, nullptr, false, false);
-			sprintf(s, "GPU %3.2fms", (float)App.GpuDelta);
-			ImGui::MenuItem(s, nullptr, false, false);
-			if (!App.LoadedGLTF.empty())
-			{
-				ImGui::MenuItem(App.LoadedGLTF.c_str(), nullptr, false, false);
-			}
-		}
-/*
-		if (ImGui::BeginMenu("File"))
-		{
-			if (ImGui::MenuItem("Open", "Ctrl+O"))
-			{
-			}
-			ImGui::EndMenu();
-		}
-*/
-
-		ImGui::EndMainMenuBar();
-	}
-#endif
-	if (ImGui::Begin("Test"))
+	if (ImGui::Begin("Debug"))
 	{
 		if (!App.LoadedGLTF.empty())
 		{			

@@ -286,11 +286,8 @@ struct SVulkan
 
 	struct FGfxPSO : public FPSO
 	{
-		std::map<EShaderStages, SpvReflectDescriptorSet*> Reflection;
-
 		void AddShader(EShaderStages Stage, SVulkan::FShader* Shader)
 		{
-			Reflection[Stage] = Shader->DescSetInfo;
 			Shaders[Stage] = Shader;
 		}
 	};
@@ -2403,7 +2400,6 @@ struct FPSOCache
 			Entry.FixPointers();
 			SVulkan::FGfxPSO PSO;
 			PSO.ParameterMap = Entry.ParameterMap;
-			PSO.Reflection = Entry.Reflection;
 			PSO.Shaders = Entry.Shaders;
 			PSO.SetLayouts = Entry.SetLayouts;
 			PSO.Layout = Entry.GfxPipelineInfo.layout;
