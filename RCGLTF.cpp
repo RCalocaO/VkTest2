@@ -193,7 +193,10 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 			FScene::FMaterial Mtl;
 			Mtl.Name = GLTFMaterial.name;
 			Mtl.BaseColor = (int32)GLTFMaterial.values["baseColorTexture"].json_double_value["index"];
-			Mtl.Normal = (int32)GLTFMaterial.additionalValues["normalTexture"].json_double_value["index"];
+			auto FoundNormal = GLTFMaterial.additionalValues.find("normalTexture");
+			Mtl.Normal = FoundNormal != GLTFMaterial.additionalValues.end()
+				? (int32)FoundNormal->second.json_double_value["index"]
+				: -1;
 
 			Scene.Materials.push_back(Mtl);
 		}

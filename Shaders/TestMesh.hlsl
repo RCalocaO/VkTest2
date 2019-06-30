@@ -2,9 +2,13 @@ cbuffer ViewUB : register(b0)
 {
 	float4x4 ViewMtx;
 	float4x4 ProjectionMtx;
-	float4x4 WorldMtx;
 	float4 LightDir;
 	int4 Mode;
+};
+
+cbuffer ObjUB : register(b1)
+{
+	float4x4 ObjMtx;
 };
 
 SamplerState SS : register(s2);
@@ -33,10 +37,17 @@ struct FGLTFPS
 
 FGLTFPS TestGLTFVS(FGLTFVS In)
 {
+	float4x4 WorldMtx = ObjMtx;
 	FGLTFPS Out = (FGLTFPS)0;
-	float4 Pos = mul(WorldMtx, float4(In.POSITION, 1));
+	float4 Pos = float4(In.POSITION, 1);
+	Pos = mul(WorldMtx, Pos);
 	Pos = mul(ViewMtx, Pos);
 	Out.Pos = mul(ProjectionMtx, Pos);
+
+	if (Mode.x == 2 || Mode.x == 6)
+	{
+		WorldMtx = float4x4(float4(1, 0, 0, 0), float4(0, 1, 0, 0), float4(0, 0, 1, 0), float4(0, 0, 0, 1));
+	}
 
 	float3 vN = normalize(mul((float3x3)WorldMtx, In.NORMAL));
 	float3 vT = normalize(mul((float3x3)WorldMtx, In.TANGENT.xyz));
@@ -55,44 +66,53 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	float4 Diffuse = BaseTexture.Sample(SS, In.UV0);
 	float3 vNormalMap = NormalTexture.Sample(SS, In.UV0).xyz * 2 - 1;
 	float3x3 mTangentBasis = float3x3(In.Tangent, In.BiTangent, In.Normal);
-	if (Mode.x == 0)
+
+	if (Mode.x == 0 || Mode.x == 1)
 	{
 		if (Diffuse.a < 1)
 		{
 			discard;
 		}
+	}
 
+	if (Mode.x == 9 || Mode.x == 10)
+	{
+		mTangentBasis = float3x3(float3(1,0,0), float3(0,1,0), float3(0,0,1));
+	}
+
+	if (Mode.x == 0)
+	{
 		vNormalMap = mul(mTangentBasis, vNormalMap);
 		float L = max(0, dot(vNormalMap, -LightDir));
 		return float4(L * Diffuse.xyz, Diffuse.a);
 	}
 	else if (Mode.x == 1)
 	{
-		if (Diffuse.a < 1)
-		{
-			discard;
-		}
 		return Diffuse;
 	}
-	else if (Mode.x == 2)
-	{
-		float L = max(0, dot(In.Normal, -LightDir));
-		return float4(L, L, L, 1);
-	}
-	else if (Mode.x == 3)
+	else if (Mode.x == 2 || Mode.x == 3)
 	{
 		return float4(In.Normal * 0.5 + 0.5, 1);
 	}
 	else if (Mode.x == 4)
 	{
-		return float4(vNormalMap, 1);
+		float L = max(0, dot(In.Normal, -LightDir));
+		return float4(L, L, L, 1);
 	}
 	else if (Mode.x == 5)
+	{
+		return float4(vNormalMap * 0.5 + 0.5, 1);
+	}
+	else if (Mode.x == 6)
+	{
+		return float4(In.Tangent * 0.5 + 0.5, 1);
+	}
+	else if (Mode.x == 7 || Mode.x == 9)
 	{
 		vNormalMap = mul(mTangentBasis, vNormalMap);
 		return float4(vNormalMap, 1);
 	}
-	else if (Mode.x == 6)
+	else if (Mode.x == 8 || Mode.x == 10)
 	{
 		vNormalMap = mul(mTangentBasis, vNormalMap);
 		float L = max(0, dot(vNormalMap, -LightDir));

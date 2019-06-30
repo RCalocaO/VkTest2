@@ -75,6 +75,7 @@ struct FApp
 	VkSampler ImGuiFontSampler = VK_NULL_HANDLE;
 	VkSampler LinearMipSampler = VK_NULL_HANDLE;
 	FImageWithMemAndView WhiteTexture;
+	FImageWithMemAndView DefaultNormalMapTexture;
 	FGPUTiming GPUTiming;
 	enum
 	{
@@ -144,6 +145,20 @@ struct FApp
 			Buffer->Buffer->Unlock();
 
 			PendingOpsMgr.AddCopyBufferToImage(Buffer, WhiteTexture.Image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		}
+
+		DefaultNormalMapTexture.Create(Device, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::GPU, 1, 1, VK_FORMAT_R32G32B32A32_SFLOAT);
+		Device.SetDebugName(DefaultNormalMapTexture.Image.Image, VK_OBJECT_TYPE_IMAGE, "DefaultNormalMap");
+		{
+			FStagingBuffer* Buffer = GStagingBufferMgr.AcquireBuffer(sizeof(FVector4), nullptr);
+			FVector4* Mem = (FVector4*)Buffer->Buffer->Lock();
+			Mem->x = 0;
+			Mem->y = 0;
+			Mem->z = 1.0f;
+			Mem->w = 0;
+			Buffer->Buffer->Unlock();
+
+			PendingOpsMgr.AddCopyBufferToImage(Buffer, DefaultNormalMapTexture.Image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		}
 
 		GPUTiming.Init(&Device);
@@ -484,14 +499,19 @@ struct FApp
 		FVector3 FOVNearFar = {35.0f, 100.0f, 3000.0f};
 	} Camera;
 	FVector4 LightDir = {0, 1, 0, 0};
+	bool bRotateObject = false;
 
 	struct FViewUB
 	{
 		FMatrix4x4 ViewMtx;
 		FMatrix4x4 ProjMtx;
-		FMatrix4x4 WorldMtx;
 		FVector4 LightDir;
 		FIntVector4 Mode;
+	};
+
+	struct FObjUB
+	{
+		FMatrix4x4 ObjMtx;
 	};
 
 	void UpdateCameraMatrices(const FVector3& DeltaPos, const FVector3& DeltaRot)
@@ -508,22 +528,39 @@ struct FApp
 		glfwGetWindowSize(Window, &W, &H);
 		float FOVRadians = tan(ToRadians(Camera.FOVNearFar.x));
 
+		static float DeltaRot = 0;
+		float RotateObjectAngle = 0;
+		if (bRotateObject)
+		{
+			RotateObjectAngle = DeltaRot;
+			DeltaRot += 2.0f / 60.0f;
+		}
+		else
+		{
+			DeltaRot = 0;
+		}
+
+		FViewUB ViewUB;
+		ViewUB.Mode.Set(g_nMode, 0, 0, 0);
+		ViewUB.LightDir = LightDir.GetNormalized();
+		ViewUB.ViewMtx = Camera.ViewMtx;
+		ViewUB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
+		FStagingBuffer* ViewBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ViewUB), CmdBuffer);
+		*(FViewUB*)ViewBuffer->Buffer->Lock() = ViewUB;
+		ViewBuffer->Buffer->Unlock();
+
 		for (auto& Instance : Scene.Instances)
 		{
 			auto& Mesh = Scene.Meshes[Instance.Mesh];
 			for (auto& Prim : Mesh.Prims)
 			{
-				FViewUB ViewUB;
-				ViewUB.WorldMtx = FMatrix4x4::GetIdentity();
-				ViewUB.WorldMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
-				ViewUB.WorldMtx.Rows[3] = Instance.Pos;
-				ViewUB.Mode.Set(g_nMode, 0, 0, 0);
-				ViewUB.LightDir = LightDir.GetNormalized();
-				ViewUB.ViewMtx = Camera.ViewMtx;
-				ViewUB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
-				FStagingBuffer* ViewBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ViewUB), CmdBuffer);
-				*(FViewUB*)ViewBuffer->Buffer->Lock() = ViewUB;
-				ViewBuffer->Buffer->Unlock();
+				FObjUB ObjUB;
+				ObjUB.ObjMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
+				ObjUB.ObjMtx.Rows[3] = Instance.Pos;
+				ObjUB.ObjMtx *= FMatrix4x4::GetRotationY(RotateObjectAngle);
+				FStagingBuffer* ObjBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ObjUB), CmdBuffer);
+				*(FObjUB*)ObjBuffer->Buffer->Lock() = ObjUB;
+				ObjBuffer->Buffer->Unlock();
 
 				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, Prim.VertexDecl);
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
@@ -540,7 +577,7 @@ struct FApp
 #else
 				SVulkan::FBuffer& IB = Scene.Buffers[Prim.IndexBuffer].Buffer;
 				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB.Buffer, Prim.IndexOffset, Prim.IndexType);
-				for (auto VBIndex : Prim.VertexBuffers)
+				for (int VBIndex : Prim.VertexBuffers)
 				{
 					VBs.push_back(Scene.Buffers[VBIndex].Buffer.Buffer);
 				}
@@ -559,19 +596,21 @@ struct FApp
 					ImageInfo[1].sampler = LinearMipSampler;
 
 					ImageInfo[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					ImageInfo[2].imageView = Scene.Textures.empty() ? WhiteTexture.View : Scene.Textures[Scene.Materials[Prim.Material].Normal].Image.View;
+					ImageInfo[2].imageView = Scene.Textures.empty() || Scene.Materials[Prim.Material].Normal == -1 ? DefaultNormalMapTexture.View : Scene.Textures[Scene.Materials[Prim.Material].Normal].Image.View;
 					ImageInfo[2].sampler = LinearMipSampler;
 
-					VkDescriptorBufferInfo BufferInfo;
+					VkDescriptorBufferInfo BufferInfo[2];
 					ZeroMem(BufferInfo);
-					BufferInfo.buffer = ViewBuffer->Buffer->Buffer.Buffer;
-					BufferInfo.range = ViewBuffer->Buffer->Size;
+					BufferInfo[0].buffer = ViewBuffer->Buffer->Buffer.Buffer;
+					BufferInfo[0].range = ViewBuffer->Buffer->Size;
+					BufferInfo[1].buffer = ObjBuffer->Buffer->Buffer.Buffer;
+					BufferInfo[1].range = ObjBuffer->Buffer->Size;
 
-					VkWriteDescriptorSet DescriptorWrites[4];
+					VkWriteDescriptorSet DescriptorWrites[5];
 					ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
 					DescriptorWrites[0].descriptorCount = 1;
 					DescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-					DescriptorWrites[0].pBufferInfo = &BufferInfo;
+					DescriptorWrites[0].pBufferInfo = &BufferInfo[0];
 					DescriptorWrites[0].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[0]->binding;
 
 					ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -592,7 +631,13 @@ struct FApp
 					DescriptorWrites[3].pImageInfo = &ImageInfo[2];
 					DescriptorWrites[3].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[3]->binding;
 
-					GDescriptorCache.UpdateDescriptors(CmdBuffer, 4, &DescriptorWrites[0], PSO);
+					ZeroVulkanMem(DescriptorWrites[4], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+					DescriptorWrites[4].descriptorCount = 1;
+					DescriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+					DescriptorWrites[4].pBufferInfo = &BufferInfo[1];
+					DescriptorWrites[4].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[1]->binding;
+
+					GDescriptorCache.UpdateDescriptors(CmdBuffer, 5, &DescriptorWrites[0], PSO);
 				}
 
 
@@ -763,7 +808,7 @@ static double Render(FApp& App)
 	{
 		SVulkan::FComputePSO* PSO = GPSOCache.GetComputePSO(App.TestCSPSO);
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, PSO->Pipeline);
-		GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
+		//GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
 
 		VkWriteDescriptorSet DescriptorWrites[2];
 		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -837,22 +882,23 @@ static double Render(FApp& App)
 		ImGui::SliderFloat("GPU", &Value, 0, 66);
 		ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
 		ImGui::InputFloat3("Rot", App.Camera.Rot.Values);
+		ImGui::Checkbox("Rotate Object", &App.bRotateObject);
 		ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
 		ImGui::InputFloat3("Light Dir", App.LightDir.Values);
 
 		const char* List[] = {
-			"Default Lit",				// 0
+			"Default",				// 0
 			"Base Texture",				// 1
-			"Vertex Normal Lit",		// 2
-			"Show Vertex Normals",		// 3
-			"NormalMap Texture",		// 4
-			"Normal Mapping",			// 5
-			"Simple Dir Light",			// 6
-			//"7",
-			//"8",
-			//"9",
-
-						};
+			"Show Vertex Normals (Obj)",		// 2
+			"Show Vertex Normals (World)",		// 3
+			"Vertex Normal Lit",		// 4
+			"NormalMap Texture",		// 5
+			"Show Vertex Tangents (Obj)",		// 6
+			"Normal Mapping Vector",			// 7
+			"Normal Mapping Lit",			// 8
+			"Normal Mapping (Id basis) Vector",			// 9
+			"Normal Mapping (Id basis) Lit",			// 10
+		};
 		ImGui::ListBox("Show mode", &g_nMode, List, IM_ARRAYSIZE(List));
 
 		if (ImGui::Button("Recompile shaders"))
