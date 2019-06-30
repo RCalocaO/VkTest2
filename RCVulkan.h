@@ -247,15 +247,6 @@ struct SVulkan
 					Binding.stageFlags = Stage;
 					InfoBindings.push_back(Binding);
 				}
-
-				//VkDescriptorSetLayoutCreateInfo DSCreateInfo;
-				//ZeroVulkanMem(DSCreateInfo, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
-				//DSCreateInfo.bindingCount = (uint32)InfoBindings.size();
-				//DSCreateInfo.pBindings = InfoBindings.data();
-				//DSCreateInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-				//VkDescriptorSetLayout Layout = VK_NULL_HANDLE;
-				//VERIFY_VKRESULT(vkCreateDescriptorSetLayout(Device, &DSCreateInfo, nullptr, &Layout));
-				//SetLayouts.push_back(Layout);
 			}
 		}
 
@@ -295,6 +286,7 @@ struct SVulkan
 	struct FGfxPSO : public FPSO
 	{
 		std::map<EShaderStages, SpvReflectDescriptorSet*> Reflection;
+		std::map<std::string, std::pair<uint32, VkDescriptorType>> ParameterMap;
 
 		void AddShader(EShaderStages Stage, SVulkan::FShader* Shader)
 		{
@@ -2282,6 +2274,8 @@ struct FPSOCache
 		VkRect2D Scissor;
 		std::string Name = "<Unknown>";
 
+		std::map<std::string, std::pair<uint32, VkDescriptorType>> ParameterMap;
+
 		FGfxPSOEntry()
 		{
 			ZeroVulkanMem(GfxPipelineInfo, VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO);
@@ -2397,6 +2391,7 @@ struct FPSOCache
 
 	std::vector<FGfxPSOEntry> GfxPSOEntries;
 
+	// Do not cache this pointer!
 	SVulkan::FGfxPSO* GetGfxPSO(FPSOHandle GfxEntryHandle, int32 VertexDeclHandle = -1)
 	{
 		check(GfxEntryHandle.Index != -1);
@@ -2407,6 +2402,7 @@ struct FPSOCache
 			FGfxPSOEntry Entry = GfxPSOEntries[GfxEntryHandle.Index];
 			Entry.FixPointers();
 			SVulkan::FGfxPSO PSO;
+			PSO.ParameterMap = Entry.ParameterMap;
 			PSO.Reflection = Entry.Reflection;
 			PSO.Shaders = Entry.Shaders;
 			PSO.SetLayouts = Entry.SetLayouts;
@@ -2418,6 +2414,8 @@ struct FPSOCache
 		}
 		return &VertexDeclMap[VertexDeclHandle];
 	}
+
+	// Do not cache this pointer!
 	SVulkan::FComputePSO* GetComputePSO(FPSOHandle Handle)
 	{
 		check(Handle.Index != -1);
@@ -2569,19 +2567,6 @@ struct FPSOCache
 			Entry.AddShader(EShaderStages::Pixel, PS, VK_SHADER_STAGE_FRAGMENT_BIT);
 		}
 
-/*
-		SVulkan::FGfxPSO PSO;
-		PSO.AddShader(EShaderStages::Vertex, VS->Shader);
-		if (HS && DS)
-		{
-			PSO.AddShader(EShaderStages::Hull, HS->Shader);
-			PSO.AddShader(EShaderStages::Domain, DS->Shader);
-		}
-		if (PS)
-		{
-			PSO.AddShader(EShaderStages::Pixel, PS->Shader);
-		}
-*/
 		auto Layout = GetOrCreatePipelineLayout(VS->Shader, HS ? HS->Shader : nullptr, DS ? DS->Shader : nullptr, PS ? PS->Shader : nullptr, Entry.SetLayouts);
 
 		Entry.GfxPipelineInfo.layout = /*PSO.*/Layout;
@@ -2589,12 +2574,46 @@ struct FPSOCache
 		Entry.FixPointers();
 		Callback(Entry.GfxPipelineInfo);
 		Entry.Name = Name;
+
+		// Verify reflection
+		{
+			std::map<std::string, std::pair<uint32, VkDescriptorType>> ParameterMap;
+			for (auto& Pair : Entry.Reflection)
+			{
+				SpvReflectDescriptorSet* Set = Pair.second;
+				if (!Set)
+				{
+					continue;
+				}
+				for (uint32 Index = 0; Index < Set->binding_count; ++Index)
+				{
+					SpvReflectDescriptorBinding* SetBinding = Set->bindings[Index];
+					std::string Name = SetBinding->resource_type == SPV_REFLECT_RESOURCE_FLAG_CBV
+						? SetBinding->type_description->type_name
+						: SetBinding->name;
+					check(Name[0]);
+
+					uint32 Binding = SetBinding->binding;
+					VkDescriptorType Type = (VkDescriptorType)SetBinding->descriptor_type;
+
+					auto Found = ParameterMap.find(Name);
+					if (Found == ParameterMap.end())
+					{
+						ParameterMap[Name] = std::pair<uint32, VkDescriptorType>(Binding, Type);
+					}
+					else
+					{
+						check(ParameterMap[Name].first == Binding);
+						check(ParameterMap[Name].second == Type);
+					}
+				}
+			}
+
+			Entry.ParameterMap.swap(ParameterMap);
+		}
+
 		GfxPSOEntries.push_back(Entry);
 
-		//VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &Entry.GfxPipelineInfo, nullptr, &PSO.Pipeline));
-		//GfxPSOs.push_back(PSO);
-
-		//Device->SetDebugName(PSO.Pipeline, Name);
 		return FPSOHandle(GfxPSOEntries.size() - 1);
 	}
 
@@ -2894,6 +2913,7 @@ struct FDescriptorCache
 		}
 		PSODescriptors.clear();
 	}
+
 
 	void UpdateDescriptors(SVulkan::FCmdBuffer* CmdBuffer, uint32 NumWrites, VkWriteDescriptorSet* DescriptorWrites, SVulkan::FGfxPSO* InPSO)
 	{
@@ -3258,4 +3278,109 @@ struct FPendingOpsManager
 	}
 
 	std::vector<FPendingOp> Ops;
+};
+
+
+struct FDescriptorPSOCache
+{
+	SVulkan::FGfxPSO* PSO;
+
+	std::vector<VkWriteDescriptorSet> Writes;
+	std::vector<VkDescriptorImageInfo*> Images;
+	std::vector<VkDescriptorBufferInfo*> Buffers;
+
+	FDescriptorPSOCache(SVulkan::FGfxPSO* InPSO)
+		: PSO(InPSO)
+	{
+	}
+
+	~FDescriptorPSOCache()
+	{
+		for (auto* I : Images)
+		{
+			delete I;
+		}
+
+		for (auto* B : Buffers)
+		{
+			delete B;
+		}
+	}
+
+	void SetBuffer(const char* Name, FBufferWithMem& Buffer)
+	{
+		uint32 Binding = UINT32_MAX;
+		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+		bool bFound = GetParameter(Name, Binding, Type);
+		if (bFound)
+		{
+			check(Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC);
+			VkWriteDescriptorSet Write;
+			ZeroVulkanMem(Write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+			Write.descriptorCount = 1;
+			Write.dstBinding = Binding;
+			Write.descriptorType = Type;
+			VkDescriptorBufferInfo* BInfo = new VkDescriptorBufferInfo;
+			ZeroMem(*BInfo);
+			BInfo->buffer = Buffer.Buffer.Buffer;
+			BInfo->range = Buffer.Size;
+			Write.pBufferInfo = BInfo;
+			Buffers.push_back(BInfo);
+			Writes.push_back(Write);
+		}
+	}
+
+	void SetSampler(const char* Name, VkSampler Sampler)
+	{
+		uint32 Binding = UINT32_MAX;
+		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+		bool bFound = GetParameter(Name, Binding, Type);
+		if (bFound)
+		{
+			check(Type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || Type == VK_DESCRIPTOR_TYPE_SAMPLER);
+			VkWriteDescriptorSet Write;
+			ZeroVulkanMem(Write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+			Write.descriptorCount = 1;
+			Write.dstBinding = Binding;
+			Write.descriptorType = Type;
+			VkDescriptorImageInfo* IInfo = new VkDescriptorImageInfo;
+			ZeroMem(*IInfo);
+			IInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			IInfo->sampler = Sampler;
+			Write.pImageInfo = IInfo;
+			Images.push_back(IInfo);
+			Writes.push_back(Write);
+		}
+	}
+
+	void SetImage(const char* Name, FImageWithMemAndView& Image, VkSampler Sampler)
+	{
+		uint32 Binding = UINT32_MAX;
+		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+		bool bFound = GetParameter(Name, Binding, Type);
+		if (bFound)
+		{
+			check(Type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || Type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+			VkWriteDescriptorSet Write;
+			ZeroVulkanMem(Write, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+			Write.descriptorCount = 1;
+			Write.dstBinding = Binding;
+			Write.descriptorType = Type;
+			VkDescriptorImageInfo* IInfo = new VkDescriptorImageInfo;
+			ZeroMem(*IInfo);
+			IInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			IInfo->sampler = Sampler;
+			IInfo->imageView = Image.View;
+			Write.pImageInfo = IInfo;
+			Images.push_back(IInfo);
+			Writes.push_back(Write);
+		}
+	}
+
+	void UpdateDescriptors(FDescriptorCache& Cache, SVulkan::FCmdBuffer* CmdBuffer)
+	{
+		Cache.UpdateDescriptors(CmdBuffer, (uint32)Writes.size(), Writes.data(), PSO);
+	}
+
+	bool GetParameter(const char* Name, uint32& OutBinding, VkDescriptorType& OutType);
 };

@@ -196,3 +196,17 @@ void SVulkan::FSwapchain::Create(SDevice& Device, GLFWwindow* Window)
 		ImageViews[i] = Device.CreateImageView(Images[i], Format, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D);
 	}
 }
+
+bool FDescriptorPSOCache::GetParameter(const char* Name, uint32& OutBinding, VkDescriptorType& OutType)
+{
+	check(Name && *Name);
+	auto Found = PSO->ParameterMap.find(Name);
+	if (Found == PSO->ParameterMap.end())
+	{
+		return false;
+	}
+
+	OutBinding = Found->second.first;
+	OutType = Found->second.second;
+	return true;
+}

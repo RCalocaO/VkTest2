@@ -324,7 +324,7 @@ struct FApp
 		}
 	}
 
-	void DrawDataImGui(ImDrawData* DrawData, SVulkan::FSwapchain& Swapchain, SVulkan::FCmdBuffer* CmdBuffer, SVulkan::FFramebuffer* Framebuffer)
+	void DrawDataImGui(ImDrawData* DrawData, SVulkan::FCmdBuffer* CmdBuffer, SVulkan::FFramebuffer* Framebuffer)
 	{
 		if (DrawData->CmdListsCount > 0)
 		{
@@ -346,85 +346,32 @@ struct FApp
 				memcpy(DestIBData, SrcIB, CmdList->IdxBuffer.Size * sizeof(ImDrawIdx));
 				memcpy(DestVBData, SrcVB, CmdList->VtxBuffer.Size * sizeof(ImDrawVert));
 				
-				//vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, DestIBOffset * sizeof(ImDrawIdx), Align<uint32>(CmdList->IdxBuffer.Size * sizeof(ImDrawIdx), 4), SrcIB);
-				//vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, DestVBOffset * sizeof(ImDrawVert), Align<uint32>(CmdList->VtxBuffer.Size * sizeof(ImDrawVert), 4), SrcVB);
-
-				//DestIBOffset += CmdList->IdxBuffer.Size;
-				//DestVBOffset += CmdList->VtxBuffer.Size;
 				DestIBData += CmdList->IdxBuffer.Size;
 				DestVBData += CmdList->VtxBuffer.Size;
 			}
-
-			//VkBufferMemoryBarrier BufferBarriers[2];
-			//ZeroVulkanMem(BufferBarriers[0], VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
-			//BufferBarriers[0].buffer = ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
-			//BufferBarriers[0].size = DestVBOffset * sizeof(ImDrawVert);
-			//BufferBarriers[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			//BufferBarriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			//ZeroVulkanMem(BufferBarriers[1], VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
-			//BufferBarriers[1].buffer = ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
-			//BufferBarriers[1].size = DestIBOffset * sizeof(ImDrawIdx);
-			//BufferBarriers[1].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			//BufferBarriers[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			//vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, BufferBarriers, 0, nullptr);
 
 			ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 			ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 
 			SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(ImGUIPSO, ImGUIVertexDecl);
 			{
-				VkWriteDescriptorSet DescriptorWrites[3];
-				ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-				//DescriptorWrites.pNext = NULL;
-				//DescriptorWrites.dstSet = 0;  // dstSet is ignored by the extension
-				DescriptorWrites[0].descriptorCount = 1;
-				DescriptorWrites[0].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
-				VkDescriptorBufferInfo BInfo;
-				ZeroMem(BInfo);
-				BInfo.buffer = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
-				BInfo.range = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Size;
-				DescriptorWrites[0].pBufferInfo = &BInfo;
-				DescriptorWrites[0].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[0]->binding;
-
-				VkDescriptorImageInfo IInfo;
-				ZeroMem(IInfo);
-				IInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				IInfo.imageView = ImGuiFont.View;
-				IInfo.sampler = ImGuiFontSampler;
-
-				ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-				DescriptorWrites[1].descriptorCount = 1;
-				DescriptorWrites[1].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Pixel]->bindings[0]->descriptor_type;
-				DescriptorWrites[1].pImageInfo = &IInfo;
-				DescriptorWrites[1].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[0]->binding;
-
-				ZeroVulkanMem(DescriptorWrites[2], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-				DescriptorWrites[2].descriptorCount = 1;
-				DescriptorWrites[2].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Pixel]->bindings[1]->descriptor_type;
-				DescriptorWrites[2].pImageInfo = &IInfo;
-				DescriptorWrites[2].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[1]->binding;
-
 				{
 					float* ScaleTranslate = (float*)ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Lock();
-					FVector2 Scale = {2.0f / DrawData->DisplaySize.x, 2.0f / DrawData->DisplaySize.y};
-					FVector2 Translate = { -1.0f - DrawData->DisplayPos.x * Scale.x, -1.0f - DrawData->DisplayPos.y * Scale.y};
+					FVector2 Scale ={2.0f / DrawData->DisplaySize.x, 2.0f / DrawData->DisplaySize.y};
+					FVector2 Translate ={-1.0f - DrawData->DisplayPos.x * Scale.x, -1.0f - DrawData->DisplayPos.y * Scale.y};
 					//float ScaleTranslate[4];
 					ScaleTranslate[0] = Scale.x;
 					ScaleTranslate[1] = Scale.y;
 					ScaleTranslate[2] = Translate.x;
 					ScaleTranslate[3] = Translate.y;
 					ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
-					//vkCmdUpdateBuffer(CmdBuffer->CmdBuffer, ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer, 0, sizeof(ScaleTranslate), &ScaleTranslate);
-
-					//VkBufferMemoryBarrier BufferBarrier;
-					//ZeroVulkanMem(BufferBarrier, VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
-					//BufferBarrier.buffer = ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Buffer.Buffer;
-					//BufferBarrier.size = sizeof(ScaleTranslate);
-					//BufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-					//BufferBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-					//vkCmdPipelineBarrier(CmdBuffer->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &BufferBarrier, 0, nullptr);
 				}
-				GDescriptorCache.UpdateDescriptors(CmdBuffer, 3, DescriptorWrites, PSO);
+
+				FDescriptorPSOCache Cache(PSO);
+				Cache.SetBuffer("CB", ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS]);
+				Cache.SetSampler("Sampler", ImGuiFontSampler);
+				Cache.SetImage("Font", ImGuiFont, ImGuiFontSampler);
+				Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
 			}
 
 			CmdBuffer->BeginRenderPass(Framebuffer);
@@ -913,7 +860,7 @@ static double Render(FApp& App)
 	ImGui::Render();
 
 	ImDrawData* DrawData = ImGui::GetDrawData();
-	App.DrawDataImGui(DrawData, GVulkan.Swapchain, CmdBuffer, Framebuffer);
+	App.DrawDataImGui(DrawData, CmdBuffer, Framebuffer);
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
