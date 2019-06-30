@@ -3332,7 +3332,7 @@ struct FDescriptorPSOCache
 		}
 	}
 
-	void SetBuffer(const char* Name, FBufferWithMem& Buffer)
+	void SetUniformBuffer(const char* Name, FBufferWithMem& Buffer)
 	{
 		uint32 Binding = UINT32_MAX;
 		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
@@ -3355,7 +3355,7 @@ struct FDescriptorPSOCache
 		}
 	}
 
-	void SetUAV(const char* Name, FBufferWithMemAndView& Buffer)
+	void SetTexelBuffer(const char* Name, FBufferWithMemAndView& Buffer)
 	{
 		uint32 Binding = UINT32_MAX;
 		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;

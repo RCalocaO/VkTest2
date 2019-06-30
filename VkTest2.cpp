@@ -368,7 +368,7 @@ struct FApp
 				}
 
 				FDescriptorPSOCache Cache(PSO);
-				Cache.SetBuffer("CB", ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS]);
+				Cache.SetUniformBuffer("CB", ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS]);
 				Cache.SetSampler("Sampler", ImGuiFontSampler);
 				Cache.SetImage("Font", ImGuiFont, ImGuiFontSampler);
 				Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
@@ -532,59 +532,13 @@ struct FApp
 				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), Prim.VertexOffsets.data());
 #endif
 				{
-					VkDescriptorImageInfo ImageInfo[3];
-					ZeroMem(ImageInfo);
-
-					ImageInfo[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					ImageInfo[0].sampler = LinearMipSampler;
-
-					ImageInfo[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					ImageInfo[1].imageView = Scene.Textures.empty() ? WhiteTexture.View : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image.View;
-					ImageInfo[1].sampler = LinearMipSampler;
-
-					ImageInfo[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					ImageInfo[2].imageView = Scene.Textures.empty() || Scene.Materials[Prim.Material].Normal == -1 ? DefaultNormalMapTexture.View : Scene.Textures[Scene.Materials[Prim.Material].Normal].Image.View;
-					ImageInfo[2].sampler = LinearMipSampler;
-
-					VkDescriptorBufferInfo BufferInfo[2];
-					ZeroMem(BufferInfo);
-					BufferInfo[0].buffer = ViewBuffer->Buffer->Buffer.Buffer;
-					BufferInfo[0].range = ViewBuffer->Buffer->Size;
-					BufferInfo[1].buffer = ObjBuffer->Buffer->Buffer.Buffer;
-					BufferInfo[1].range = ObjBuffer->Buffer->Size;
-
-					VkWriteDescriptorSet DescriptorWrites[5];
-					ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-					DescriptorWrites[0].descriptorCount = 1;
-					DescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-					DescriptorWrites[0].pBufferInfo = &BufferInfo[0];
-					DescriptorWrites[0].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[0]->binding;
-
-					ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-					DescriptorWrites[1].descriptorCount = 1;
-					DescriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-					DescriptorWrites[1].pImageInfo = &ImageInfo[0];
-					DescriptorWrites[1].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[1]->binding;
-
-					ZeroVulkanMem(DescriptorWrites[2], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-					DescriptorWrites[2].descriptorCount = 1;
-					DescriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-					DescriptorWrites[2].pImageInfo = &ImageInfo[1];
-					DescriptorWrites[2].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[2]->binding;
-
-					ZeroVulkanMem(DescriptorWrites[3], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-					DescriptorWrites[3].descriptorCount = 1;
-					DescriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-					DescriptorWrites[3].pImageInfo = &ImageInfo[2];
-					DescriptorWrites[3].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[3]->binding;
-
-					ZeroVulkanMem(DescriptorWrites[4], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-					DescriptorWrites[4].descriptorCount = 1;
-					DescriptorWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-					DescriptorWrites[4].pBufferInfo = &BufferInfo[1];
-					DescriptorWrites[4].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[1]->binding;
-
-					GDescriptorCache.UpdateDescriptors(CmdBuffer, 5, &DescriptorWrites[0], PSO);
+					FDescriptorPSOCache Cache(PSO);
+					Cache.SetUniformBuffer("ViewUB", *ViewBuffer->Buffer);
+					Cache.SetUniformBuffer("ObjUB", *ObjBuffer->Buffer);
+					Cache.SetSampler("SS", LinearMipSampler);
+					Cache.SetImage("BaseTexture", Scene.Textures.empty() ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image, LinearMipSampler);
+					Cache.SetImage("NormalTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].Normal == -1 ? DefaultNormalMapTexture : Scene.Textures[Scene.Materials[Prim.Material].Normal].Image, LinearMipSampler);
+					Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
 				}
 
 
@@ -697,25 +651,10 @@ static double Render(FApp& App)
 
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 
-		VkWriteDescriptorSet DescriptorWrites[2];
-		ZeroVulkanMem(DescriptorWrites[0], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-		DescriptorWrites[0].descriptorCount = 1;
-		DescriptorWrites[0].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
-		DescriptorWrites[0].pTexelBufferView = &App.ClipVB.View;
-		//DescriptorWrites.pBufferInfo = &info.uniform_data.buffer_info;  // populated by init_uniform_buffer()
-		DescriptorWrites[0].dstBinding = PSO->Reflection[EShaderStages::Vertex]->bindings[0]->binding;
-
-		ZeroVulkanMem(DescriptorWrites[1], VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-		DescriptorWrites[1].descriptorCount = 1;
-		DescriptorWrites[1].descriptorType = (VkDescriptorType)PSO->Reflection[EShaderStages::Pixel]->bindings[0]->descriptor_type;
-		VkDescriptorBufferInfo BufferInfo;
-		ZeroMem(BufferInfo);
-		BufferInfo.buffer = App.ColorUB.Buffer.Buffer;
-		BufferInfo.range =  App.ColorUB.Size;
-		DescriptorWrites[1].pBufferInfo = &BufferInfo;
-		DescriptorWrites[1].dstBinding = PSO->Reflection[EShaderStages::Pixel]->bindings[0]->binding;
-
-		GDescriptorCache.UpdateDescriptors(CmdBuffer, 2, DescriptorWrites, PSO);
+		FDescriptorPSOCache Cache(PSO);
+		Cache.SetTexelBuffer("Pos", App.ClipVB);
+		Cache.SetUniformBuffer("$Global", App.ColorUB);
+		Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
 	}
 /*
 	else if (1)
@@ -757,8 +696,8 @@ static double Render(FApp& App)
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, PSO->Pipeline);
 
 		FDescriptorPSOCache Cache(PSO);
-		Cache.SetBuffer("CB0", App.TestCSUB);
-		Cache.SetUAV("output", App.TestCSBuffer);
+		Cache.SetUniformBuffer("CB0", App.TestCSUB);
+		Cache.SetTexelBuffer("output", App.TestCSBuffer);
 		Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
 		for (int32 Index = 0; Index < 256; ++Index)
 		{
