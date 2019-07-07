@@ -1071,7 +1071,7 @@ int main()
 
 	uint32 ExitAfterNFrames = RCUtils::FCmdLine::Get().TryGetIntPrefix("-exitafterframes=", (uint32)-1);
 
-	uint32 Frame = 0;
+	uint32 Frame = 1;
 	while (!glfwWindowShouldClose(Window))
 	{
 		double CpuBegin = glfwGetTime() * 1000.0;

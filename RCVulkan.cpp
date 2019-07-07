@@ -93,6 +93,83 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 	return VK_FALSE;
 }
 
+void SVulkan::GetPhysicalDevices()
+{
+	uint32 NumDevices = 0;
+	VERIFY_VKRESULT(vkEnumeratePhysicalDevices(Instance, &NumDevices, nullptr));
+
+	std::vector<VkPhysicalDevice> PhysicalDevices(NumDevices);
+	VERIFY_VKRESULT(vkEnumeratePhysicalDevices(Instance, &NumDevices, PhysicalDevices.data()));
+
+	for (auto& PD : PhysicalDevices)
+	{
+		VkPhysicalDeviceProperties Props;
+		vkGetPhysicalDeviceProperties(PD, &Props);
+
+		uint32 NumQueues = 0;
+		vkGetPhysicalDeviceQueueFamilyProperties(PD, &NumQueues, 0);
+
+		std::vector<VkQueueFamilyProperties> QueueProps(NumQueues);
+		vkGetPhysicalDeviceQueueFamilyProperties(PD, &NumQueues, QueueProps.data());
+
+		uint32 GfxQueueIndex = FindQueue(QueueProps, VK_QUEUE_GRAPHICS_BIT);
+		uint32 ComputeQueueIndex = FindQueue(QueueProps, VK_QUEUE_COMPUTE_BIT);
+		uint32 TransferQueueIndex = FindQueue(QueueProps, VK_QUEUE_TRANSFER_BIT);
+		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
+#if defined(VK_USE_PLATFORM_WIN32_KHR) && VK_USE_PLATFORM_WIN32_KHR
+		if (vkGetPhysicalDeviceWin32PresentationSupportKHR(PD, GfxQueueIndex))
+		{
+			PresentQueueIndex = GfxQueueIndex;
+		}
+		else if (GfxQueueIndex != ComputeQueueIndex && vkGetPhysicalDeviceWin32PresentationSupportKHR(PD, ComputeQueueIndex))
+		{
+			PresentQueueIndex = ComputeQueueIndex;
+		}
+		else if (GfxQueueIndex != TransferQueueIndex && vkGetPhysicalDeviceWin32PresentationSupportKHR(PD, TransferQueueIndex))
+		{
+			PresentQueueIndex = TransferQueueIndex;
+		}
+#endif
+		if (Props.apiVersion < VK_API_VERSION_1_1)
+		{
+			continue;
+		}
+
+		{
+			std::stringstream ss;
+			ss << "*** Device " << Props.deviceName << " ID " << Props.deviceID << " Driver " << Props.driverVersion << "\n";
+			ss << "\tGfx queue " << GfxQueueIndex << "\n";
+			ss << "\tCompute queue " << ComputeQueueIndex << "\n";
+			ss << "\tTransfer queue " << TransferQueueIndex << "\n";
+			ss << "\tPresent queue " << PresentQueueIndex << "\n";
+			ss.flush();
+			::OutputDebugStringA(ss.str().c_str());
+		}
+
+		if (Props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+		{
+			DiscreteDevices.push_back(PD);
+		}
+		else if (Props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+		{
+			IntegratedDevices.push_back(PD);
+		}
+		else
+		{
+			// What is this? :)
+			check(0);
+		}
+
+		auto& Device = Devices[PD];
+		Device.PhysicalDevice = PD;
+		Device.Props = Props;
+		Device.ComputeQueueIndex = ComputeQueueIndex;
+		Device.GfxQueueIndex = GfxQueueIndex;
+		Device.TransferQueueIndex = TransferQueueIndex;
+		Device.PresentQueueIndex = PresentQueueIndex;
+	}
+}
+
 void SVulkan::InitDebugCallback()
 {
 	VkDebugUtilsMessengerCreateInfoEXT Info;
@@ -112,6 +189,83 @@ void SVulkan::InitDebugCallback()
 	VERIFY_VKRESULT(vkCreateDebugUtilsMessengerEXT(Instance, &Info, nullptr, &DebugReportCallback));
 }
 
+
+void SVulkan::CreateInstance()
+{
+	uint32 ApiVersion = 0;
+	VERIFY_VKRESULT(vkEnumerateInstanceVersion(&ApiVersion));
+	if (ApiVersion < VK_API_VERSION_1_1)
+	{
+		// 1.1 not available
+		check(0);
+	}
+
+	VkInstanceCreateInfo Info;
+	ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
+
+	uint32 NumLayers = 0;
+	VERIFY_VKRESULT(vkEnumerateInstanceLayerProperties(&NumLayers, nullptr));
+
+	std::vector<VkLayerProperties> LayerProperties(NumLayers);
+	VERIFY_VKRESULT(vkEnumerateInstanceLayerProperties(&NumLayers, LayerProperties.data()));
+
+	::OutputDebugStringA("Found Instance Layers:\n");
+	PrintLayers(LayerProperties);
+
+	uint32 NumExtensions = 0;
+	VERIFY_VKRESULT(vkEnumerateInstanceExtensionProperties(nullptr, &NumExtensions, nullptr));
+
+	std::vector<VkExtensionProperties> ExtensionProperties(NumExtensions);
+	VERIFY_VKRESULT(vkEnumerateInstanceExtensionProperties(nullptr, &NumExtensions, ExtensionProperties.data()));
+
+	::OutputDebugStringA("Found Instance Extensions:\n");
+	PrintExtensions(ExtensionProperties);
+
+	std::vector<const char*> Layers;
+
+	if (RCUtils::FCmdLine::Get().Contains("-apidump"))
+	{
+		Layers.push_back("VK_LAYER_LUNARG_api_dump");
+	}
+
+	if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
+	{
+		Layers.push_back("VK_LAYER_KHRONOS_validation");
+		//Layers.push_back("VK_LAYER_LUNARG_standard_validation");
+	}
+
+	VerifyLayers(LayerProperties, Layers);
+	Info.ppEnabledLayerNames = Layers.data();
+	Info.enabledLayerCount = (uint32)Layers.size();
+
+	::OutputDebugStringA("Using Instance Layers:\n");
+	PrintList(Layers);
+
+	std::vector<const char*> Extensions =
+	{
+		VK_KHR_SURFACE_EXTENSION_NAME,
+		VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#if defined(VK_USE_PLATFORM_WIN32_KHR) && VK_USE_PLATFORM_WIN32_KHR
+			VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+#endif
+			VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+	};
+	VerifyExtensions(ExtensionProperties, Extensions);
+	Info.ppEnabledExtensionNames = Extensions.data();
+	Info.enabledExtensionCount = (uint32)Extensions.size();
+
+	::OutputDebugStringA("Using Instance Extensions:\n");
+	PrintList(Extensions);
+
+	// Needed to enable 1.1
+	VkApplicationInfo AppInfo;
+	ZeroVulkanMem(AppInfo, VK_STRUCTURE_TYPE_APPLICATION_INFO);
+	AppInfo.apiVersion = VK_API_VERSION_1_1;
+
+	Info.pApplicationInfo = &AppInfo;
+
+	VERIFY_VKRESULT(vkCreateInstance(&Info, nullptr, &Instance));
+}
 
 void SVulkan::FSwapchain::SetupSurface(SDevice* InDevice, VkInstance Instance, struct GLFWwindow* Window)
 {
@@ -209,4 +363,294 @@ bool FDescriptorPSOCache::GetParameter(const char* Name, uint32& OutBinding, VkD
 	OutBinding = Found->second.first;
 	OutType = Found->second.second;
 	return true;
+}
+
+void SVulkan::SDevice::Create()
+{
+	uint32 NumExtensions = 0;
+	VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &NumExtensions, nullptr));
+	std::vector<VkExtensionProperties> ExtensionProperties(NumExtensions);
+	VERIFY_VKRESULT(vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &NumExtensions, ExtensionProperties.data()));
+
+	::OutputDebugStringA("Found Device Extensions:\n");
+	PrintExtensions(ExtensionProperties);
+
+	check(Props.limits.timestampComputeAndGraphics);
+
+	float Priorities[1] = { 1.0f };
+
+	std::vector<const char*> DeviceExtensions =
+	{
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+		//VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE1_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE2_EXTENSION_NAME,
+		//VK_KHR_MULTIVIEW_EXTENSION_NAME,
+		//VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME,
+		//VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
+		//VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+#if USE_VULKAN_VERTEX_DIVISOR
+				VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME,
+#endif
+	};
+
+	VerifyExtensions(ExtensionProperties, DeviceExtensions);
+
+	bPushDescriptor = 0 && OptionalExtension(ExtensionProperties, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+	if (bPushDescriptor)
+	{
+		DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+	}
+
+	std::vector<VkDeviceQueueCreateInfo> QueueInfos(1);
+	ZeroVulkanMem(QueueInfos[0], VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
+	QueueInfos[0].queueFamilyIndex = GfxQueueIndex;
+	QueueInfos[0].queueCount = 1;
+	QueueInfos[0].pQueuePriorities = Priorities;
+	if (GfxQueueIndex != ComputeQueueIndex)
+	{
+		VkDeviceQueueCreateInfo Info;
+		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
+		Info.queueFamilyIndex = ComputeQueueIndex;
+		Info.queueCount = 1;
+		Info.pQueuePriorities = Priorities;
+		QueueInfos.push_back(Info);
+	}
+	if (GfxQueueIndex != TransferQueueIndex)
+	{
+		VkDeviceQueueCreateInfo Info;
+		ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
+		Info.queueFamilyIndex = TransferQueueIndex;
+		Info.queueCount = 1;
+		Info.pQueuePriorities = Priorities;
+		QueueInfos.push_back(Info);
+	}
+
+	VkPhysicalDeviceFeatures2 Features;
+	ZeroVulkanMem(Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+	vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
+
+#if USE_VULKAN_VERTEX_DIVISOR
+	VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT Divisor;
+	ZeroVulkanMem(Divisor, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT);
+	Divisor.vertexAttributeInstanceRateDivisor = VK_TRUE;
+	Divisor.vertexAttributeInstanceRateZeroDivisor = VK_TRUE;
+	Features.pNext = &Divisor;
+#endif
+	VkDeviceCreateInfo CreateInfo;
+	ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
+	CreateInfo.queueCreateInfoCount = (uint32)QueueInfos.size();
+	CreateInfo.pQueueCreateInfos = QueueInfos.data();
+	CreateInfo.ppEnabledExtensionNames = DeviceExtensions.data();
+	CreateInfo.enabledExtensionCount = (uint32)DeviceExtensions.size();
+	//CreateInfo.pEnabledFeatures = &Features.features;
+	::OutputDebugStringA("Enabled Device Extensions:\n");
+	PrintList(DeviceExtensions);
+
+	CreateInfo.pNext = &Features;
+
+	VERIFY_VKRESULT(vkCreateDevice(PhysicalDevice, &CreateInfo, nullptr, &Device));
+
+	vkGetDeviceQueue(Device, GfxQueueIndex, 0, &GfxQueue);
+	vkGetDeviceQueue(Device, TransferQueueIndex, 0, &TransferQueue);
+	vkGetDeviceQueue(Device, ComputeQueueIndex, 0, &ComputeQueue);
+	vkGetDeviceQueue(Device, PresentQueueIndex, 0, &PresentQueue);
+
+	CmdPools[GfxQueueIndex].Create(Device, GfxQueueIndex);
+	if (GfxQueueIndex != ComputeQueueIndex)
+	{
+		CmdPools[ComputeQueueIndex].Create(Device, ComputeQueueIndex);
+	}
+	if (GfxQueueIndex != TransferQueueIndex)
+	{
+		CmdPools[TransferQueueIndex].Create(Device, TransferQueueIndex);
+	}
+
+	vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &MemProperties);
+
+	{
+		auto GetHeapFlagsString = [](VkMemoryHeapFlags Flags)
+		{
+			std::string s;
+			if (Flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+			{
+				s += " Local";
+			}
+			if (Flags & VK_MEMORY_HEAP_MULTI_INSTANCE_BIT)
+			{
+				s += " Instance";
+			}
+
+			return s;
+		};
+		std::stringstream ss;
+		ss << "*** " << MemProperties.memoryHeapCount << " Mem Heaps" << std::endl;
+		for (uint32 Index = 0; Index < MemProperties.memoryHeapCount; ++Index)
+		{
+			ss << "\t" << Index << ":" << GetHeapFlagsString(MemProperties.memoryHeaps[Index].flags) << "(" << MemProperties.memoryHeaps[Index].flags << ") Size " << MemProperties.memoryHeaps[Index].size << std::endl;
+		}
+		auto GetTypeFlagsString = [](VkMemoryPropertyFlags Flags)
+		{
+			std::string s;
+			if (Flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+			{
+				s += " Local";
+			}
+			if (Flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+			{
+				s += " HostVis";
+			}
+			if (Flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+			{
+				s += " HostCoherent";
+			}
+			if (Flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)
+			{
+				s += " HostCached";
+			}
+			if (Flags & VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT)
+			{
+				s += " Lazy";
+			}
+			if (Flags & VK_MEMORY_PROPERTY_PROTECTED_BIT)
+			{
+				s += " Protected";
+			}
+
+			return s;
+		};
+		ss << MemProperties.memoryTypeCount << " Mem Types" << std::endl;
+		for (uint32 Index = 0; Index < MemProperties.memoryTypeCount; ++Index)
+		{
+			ss << "\t" << Index << ":" << GetTypeFlagsString(MemProperties.memoryTypes[Index].propertyFlags) << "(" << MemProperties.memoryTypes[Index].propertyFlags << ") Heap " << MemProperties.memoryTypes[Index].heapIndex << std::endl;
+		}
+		::OutputDebugStringA(ss.str().c_str());
+	}
+
+#if USE_VMA
+	{
+		VmaAllocatorCreateInfo VMACreateInfo = {};
+		VMACreateInfo.physicalDevice = PhysicalDevice;
+		VMACreateInfo.device = Device;
+
+		VmaVulkanFunctions Funcs = {};
+
+		Funcs.vkGetPhysicalDeviceProperties = vkGetPhysicalDeviceProperties;
+		Funcs.vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties;
+		Funcs.vkAllocateMemory = vkAllocateMemory;
+		Funcs.vkFreeMemory = vkFreeMemory;
+		Funcs.vkMapMemory = vkMapMemory;
+		Funcs.vkUnmapMemory = vkUnmapMemory;
+		Funcs.vkFlushMappedMemoryRanges = vkFlushMappedMemoryRanges;
+		Funcs.vkInvalidateMappedMemoryRanges = vkInvalidateMappedMemoryRanges;
+		Funcs.vkBindBufferMemory = vkBindBufferMemory;
+		Funcs.vkBindImageMemory = vkBindImageMemory;
+		Funcs.vkGetBufferMemoryRequirements = vkGetBufferMemoryRequirements;
+		Funcs.vkGetImageMemoryRequirements = vkGetImageMemoryRequirements;
+		Funcs.vkCreateBuffer = vkCreateBuffer;
+		Funcs.vkDestroyBuffer = vkDestroyBuffer;
+		Funcs.vkCreateImage = vkCreateImage;
+		Funcs.vkDestroyImage = vkDestroyImage;
+		Funcs.vkCmdCopyBuffer = vkCmdCopyBuffer;
+#if VMA_DEDICATED_ALLOCATION
+		Funcs.vkGetBufferMemoryRequirements2KHR = vkGetBufferMemoryRequirements2KHR;
+		Funcs.vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2KHR;
+#endif
+
+		VMACreateInfo.pVulkanFunctions = &Funcs;
+
+		vmaCreateAllocator(&VMACreateInfo, &VMAAllocator);
+	}
+#endif
+}
+
+void SVulkan::FRenderPass::Create(VkDevice InDevice, const FAttachmentInfo& Color, const FAttachmentInfo& Depth)
+{
+	Device = InDevice;
+
+	const bool bHasDepth = Depth.Format != VK_FORMAT_UNDEFINED;
+	VkAttachmentReference AttachmentReferences[2];
+	ZeroMem(AttachmentReferences);
+	check(Color.Format != VK_FORMAT_UNDEFINED);
+	AttachmentReferences[0].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkSubpassDescription SubPassDesc;
+	ZeroMem(SubPassDesc);
+	SubPassDesc.colorAttachmentCount = 1;
+	SubPassDesc.pColorAttachments = &AttachmentReferences[0];
+
+	bClearsColor = Color.LoadOp == VK_ATTACHMENT_LOAD_OP_CLEAR;
+	bClearsDepth = Depth.LoadOp == VK_ATTACHMENT_LOAD_OP_CLEAR;
+
+	VkAttachmentDescription Attachments[2];
+	ZeroMem(Attachments);
+	Attachments[0].format = Color.Format;
+	Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+	Attachments[0].loadOp = Color.LoadOp;
+	Attachments[0].storeOp = Color.StoreOp;
+	Attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	if (bHasDepth)
+	{
+		AttachmentReferences[1].layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		AttachmentReferences[1].attachment = 1;
+		SubPassDesc.pDepthStencilAttachment = &AttachmentReferences[1];
+		Attachments[1].format = Depth.Format;
+		Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+		Attachments[1].loadOp = Depth.LoadOp;
+		Attachments[1].storeOp = Depth.StoreOp;
+		Attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		Attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	}
+
+	VkRenderPassCreateInfo CreateInfo;
+	ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO);
+	CreateInfo.subpassCount = 1;
+	CreateInfo.pSubpasses = &SubPassDesc;
+	CreateInfo.attachmentCount = bHasDepth ? 2 : 1;
+	CreateInfo.pAttachments = Attachments;
+
+	VERIFY_VKRESULT(vkCreateRenderPass(Device, &CreateInfo, nullptr, &RenderPass));
+}
+
+bool FShaderLibrary::DoCompileFromSource(FShaderInfo* Info)
+{
+	static const std::string GlslangProlog = GetGlslangCommandLine();
+
+	std::string Compile = GlslangProlog;
+	Compile += " -e " + Info->EntryPoint;
+	Compile += " -o " + RCUtils::AddQuotes(Info->BinaryFile);
+	Compile += " -S " + GetStageName(Info->Stage);
+	Compile += " " + RCUtils::AddQuotes(Info->SourceFile);
+	Compile += " > " + RCUtils::AddQuotes(Info->AsmFile);
+	int ReturnCode = system(Compile.c_str());
+	if (ReturnCode)
+	{
+		std::vector<char> File = RCUtils::LoadFileToArray(Info->AsmFile.c_str());
+		if (File.empty())
+		{
+			std::string Error = "Compile error: No output for file ";
+			Error += Info->SourceFile;
+			::OutputDebugStringA(Error.c_str());
+		}
+		else
+		{
+			std::string FileString = &File[0];
+			FileString.resize(File.size());
+			std::string Error = "Compile error:\n";
+			Error += FileString;
+			Error += "\n";
+			::OutputDebugStringA(Error.c_str());
+
+			int DialogResult = ::MessageBoxA(nullptr, Error.c_str(), Info->SourceFile.c_str(), MB_CANCELTRYCONTINUE);
+			if (DialogResult == IDTRYAGAIN)
+			{
+				return DoCompileFromSource(Info);
+			}
+		}
+
+		return false;
+	}
+
+	return DoCompileFromBinary(Info);
 }
