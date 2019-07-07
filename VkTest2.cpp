@@ -716,6 +716,7 @@ static double Render(FApp& App)
 
 	App.GPUTiming.EndTimestamp(CmdBuffer);
 
+	bool bRecompileShaders = false;
 	{
 		FMarkerScope MarkerScope(Device, CmdBuffer, "ImGUI");
 		if (ImGui::Begin("Debug"))
@@ -755,7 +756,7 @@ static double Render(FApp& App)
 
 			if (ImGui::Button("Recompile shaders"))
 			{
-				GPSOCache.RecompileShaders();
+				bRecompileShaders = true;
 			}
 		}
 		ImGui::End();
@@ -777,8 +778,18 @@ static double Render(FApp& App)
 	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore);
 
 	GVulkan.Swapchain.Present(Device.PresentQueue, GVulkan.Swapchain.FinalSemaphore);
+
+	if (bRecompileShaders)
+	{
+		Device.WaitForIdle();
+		if (GShaderLibrary.RecompileShaders())
+		{
+			GPSOCache.RecompileShaders();
+		}
+	}
+
 	//Device.WaitForFence(CmdBuffer.Fence, CmdBuffer.LastSubmittedFence);
-	;vkDeviceWaitIdle(Device.Device);
+	//vkDeviceWaitIdle(Device.Device);
 
 	double GpuTimeMS = App.GPUTiming.ReadTimestamp();
 	return GpuTimeMS;

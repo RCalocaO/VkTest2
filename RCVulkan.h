@@ -806,6 +806,11 @@ struct SVulkan
 		{
 			SetDebugName<VkBuffer>(Buffer, VK_OBJECT_TYPE_BUFFER, Name);
 		}
+
+		void WaitForIdle()
+		{
+			vkDeviceWaitIdle(Device);
+		}
 	};
 
 	struct FSwapchain
@@ -1517,19 +1522,24 @@ struct FShaderLibrary
 		return Info;
 	}
 
-	void RecompileShaders()
+	bool RecompileShaders()
 	{
+		bool bChanged = false;
 		for (auto* Info : ShaderInfos)
 		{
 			if (Info->NeedsRecompiling())
 			{
 				DoCompileFromSource(Info);
+				bChanged = true;
 			}
 			else if (!Info->Shader)
 			{
 				DoCompileFromBinary(Info);
+				bChanged = true;
 			}
 		}
+
+		return bChanged;
 	}
 
 	static std::string GetGlslangCommandLine()
@@ -1578,6 +1588,7 @@ struct FShaderLibrary
 
 	bool CreateShader(FShaderInfo* Info, std::vector<char>& Data)
 	{
+		check(!Info->Shader);
 		Info->Shader = new SVulkan::FShader;
 		Info->Shader->SpirV = Data;
 		return Info->Shader->Create(Device, GetVulkanStage(Info->Stage));
@@ -1592,12 +1603,11 @@ struct FShaderLibrary
 			return false;
 		}
 
-		check(!Info->Shader);
-		//#todo: Destroy old; sync with rendering
-		//if (Info.Shader)
-		//{
-		//	ShadersToDestroy.push_back(Info.Shader);
-		//}
+		if (Info->Shader)
+		{
+			delete Info->Shader;
+			Info->Shader = nullptr;
+		}
 		return CreateShader(Info, File);
 	}
 
@@ -1749,11 +1759,15 @@ struct FPSOCache
 			for (auto& InnerPair : Map)
 			{
 				SVulkan::FGfxPSO& PSO = InnerPair.second;
-				for (auto& ShadersPair : PSO.Shaders)
-				{
-					SVulkan::FShader* Shader = ShadersPair.second;
-				}
+				vkDestroyPipeline(Device->Device, PSO.Pipeline, nullptr);
+				//PSO.Reset();
 			}
+		}
+
+		//for (auto& Pair : ComputePSOs)
+		{
+			//vkDestroyPipeline(Device->Device, Pair.second.Pipeline, nullptr);
+			//Compute.Reset();
 		}
 	}
 
