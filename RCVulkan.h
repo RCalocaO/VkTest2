@@ -1925,7 +1925,7 @@ struct FPSOCache
 			++GfxPipelineInfo.stageCount;
 		}
 
-		void Finalize(/*VkRenderPass RenderPass, */FVertexDecl* VertexDecl)
+		void Finalize(SVulkan::SDevice* Device, /*VkRenderPass RenderPass, */FVertexDecl* VertexDecl)
 		{
 			//GfxPipelineInfo.renderPass = RenderPass;
 
@@ -1935,10 +1935,11 @@ struct FPSOCache
 				VertexInputInfo.pVertexAttributeDescriptions = VertexDecl->AttrDescs.data();
 				VertexInputInfo.vertexBindingDescriptionCount = (uint32)VertexDecl->BindingDescs.size();
 				VertexInputInfo.pVertexBindingDescriptions = VertexDecl->BindingDescs.data();
-#if USE_VULKAN_VERTEX_DIVISOR
-				VertexInputDivisor.vertexBindingDivisorCount = (uint32)VertexDecl->Divisors.size();
-				VertexInputDivisor.pVertexBindingDivisors = VertexDecl->Divisors.data();
-#endif
+				if (Device->bUseVertexDivisor)
+				{
+					VertexInputDivisor.vertexBindingDivisorCount = (uint32)VertexDecl->Divisors.size();
+					VertexInputDivisor.pVertexBindingDivisors = VertexDecl->Divisors.data();
+				}
 			}
 		}
 
@@ -1984,7 +1985,7 @@ struct FPSOCache
 			PSO.Shaders = Entry.Shaders;
 			PSO.SetLayouts = Entry.SetLayouts;
 			PSO.Layout = Entry.GfxPipelineInfo.layout;
-			Entry.Finalize(/*RenderPass->RenderPass, */VertexDeclHandle == -1 ? nullptr : &VertexDecls[VertexDeclHandle]);
+			Entry.Finalize(Device, /*RenderPass->RenderPass, */VertexDeclHandle == -1 ? nullptr : &VertexDecls[VertexDeclHandle]);
 			VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &Entry.GfxPipelineInfo, nullptr, &PSO.Pipeline));
 			VertexDeclMap[VertexDeclHandle] = PSO;
 			Device->SetDebugName(PSO.Pipeline, Entry.Name.c_str());
