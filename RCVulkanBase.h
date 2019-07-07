@@ -31,5 +31,3 @@ inline bool operator == (const VkVertexInputBindingDescription& A, const VkVerte
 {
 	return A.binding == B.binding && A.inputRate == B.inputRate && A.stride == B.stride;
 }
-
-#define USE_VULKAN_VERTEX_DIVISOR	1

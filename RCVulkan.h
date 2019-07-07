@@ -581,6 +581,7 @@ struct SVulkan
 		uint32 TransferQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		VkPhysicalDeviceMemoryProperties MemProperties;
+		bool bUseVertexDivisor = false;
 		bool bHasMarkerExtension = false;
 #if USE_VMA
 		VmaAllocator VMAAllocator = VK_NULL_HANDLE;
@@ -1011,7 +1012,6 @@ struct SVulkan
 	std::map<VkPhysicalDevice, SDevice> Devices;
 
 	VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
-	bool bRenderDoc = false;
 
 	void Init(GLFWwindow* Window)
 	{
@@ -1255,6 +1255,12 @@ struct FMarkerScope
 {
 	VkCommandBuffer CmdBuffer;
 	bool bHasMarkerExtension;
+
+	FMarkerScope(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* InCmdBuffer, const char* Name)
+		: FMarkerScope(&Device, InCmdBuffer, Name)
+	{
+	}
+
 	FMarkerScope(SVulkan::SDevice* Device, SVulkan::FCmdBuffer* InCmdBuffer, const char* Name)
 		: CmdBuffer(InCmdBuffer->CmdBuffer)
 	{
@@ -1712,9 +1718,7 @@ struct FPSOCache
 		std::vector<std::string> Names;
 
 		std::vector<VkVertexInputBindingDescription> BindingDescs;
-#if USE_VULKAN_VERTEX_DIVISOR
 		std::vector<VkVertexInputBindingDivisorDescriptionEXT> Divisors;
-#endif
 		void AddAttribute(uint32 BindingIndex, uint32 Location, VkFormat Format, uint32 AttributeOffset, const char* Name)
 		{
 			VkVertexInputAttributeDescription Attr;
@@ -1829,9 +1833,7 @@ struct FPSOCache
 		VkPipelineMultisampleStateCreateInfo MSInfo;
 		VkPipelineDynamicStateCreateInfo DynamicInfo;
 		VkPipelineViewportStateCreateInfo ViewportState;
-#if USE_VULKAN_VERTEX_DIVISOR
 		VkPipelineVertexInputDivisorStateCreateInfoEXT VertexInputDivisor;
-#endif
 		VkDynamicState DynamicStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
 		VkViewport Viewport;
 		VkRect2D Scissor;
@@ -1889,9 +1891,7 @@ struct FPSOCache
 			ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
 			ViewportState.scissorCount = 1;
 			ViewportState.viewportCount = 1;
-#if USE_VULKAN_VERTEX_DIVISOR
 			ZeroVulkanMem(VertexInputDivisor, VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT);
-#endif
 		}
 
 		std::map<EShaderStages, SpvReflectDescriptorSet*> Reflection;
@@ -1928,7 +1928,7 @@ struct FPSOCache
 			}
 		}
 
-		void FixPointers()
+		void FixPointers(SVulkan::SDevice* Device)
 		{
 			ViewportState.pScissors = &Scissor;
 			ViewportState.pViewports = &Viewport;
@@ -1946,9 +1946,10 @@ struct FPSOCache
 			GfxPipelineInfo.pMultisampleState = &MSInfo;
 			DynamicInfo.pDynamicStates = DynamicStates;
 			GfxPipelineInfo.pDynamicState = &DynamicInfo;
-#if USE_VULKAN_VERTEX_DIVISOR
-			VertexInputInfo.pNext = &VertexInputDivisor;
-#endif
+			if (Device->bUseVertexDivisor)
+			{
+				VertexInputInfo.pNext = &VertexInputDivisor;
+			}
 		}
 	};
 
@@ -1963,7 +1964,7 @@ struct FPSOCache
 		if (FoundVertexDecl == VertexDeclMap.end())
 		{
 			FGfxPSOEntry Entry = GfxPSOEntries[GfxEntryHandle.Index];
-			Entry.FixPointers();
+			Entry.FixPointers(Device);
 			SVulkan::FGfxPSO PSO;
 			PSO.ParameterMap = Entry.ParameterMap;
 			PSO.Shaders = Entry.Shaders;
@@ -2133,7 +2134,7 @@ struct FPSOCache
 
 		Entry.GfxPipelineInfo.layout = /*PSO.*/Layout;
 		Entry.GfxPipelineInfo.renderPass = RenderPass->RenderPass;
-		Entry.FixPointers();
+		Entry.FixPointers(Device);
 		Callback(Entry.GfxPipelineInfo);
 		Entry.Name = Name;
 

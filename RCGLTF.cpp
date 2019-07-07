@@ -148,21 +148,24 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		{
 #if SCENE_USE_SINGLE_BUFFERS
 			VertexDecl.AddAttribute(BindingIndex, BindingIndex, Format, 0, Semantic);
-#if USE_VULKAN_VERTEX_DIVISOR
-			OutPrim.VertexBuffers.push_back(PSOCache.ZeroBuffer);
-			VertexDecl.AddBinding(BindingIndex, PSOCache.ZeroBuffer.Size, true);
-			VertexDecl.Divisors.push_back({BindingIndex, 0});
-#else
-			OutPrim.VertexBuffers.push_back(FBufferWithMem());
-			FBufferWithMem& VB = OutPrim.VertexBuffers.back();
-			VB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, MaxSize, true);
+			if (Device.bUseVertexDivisor)
 			{
-				float* DestData = (float*)VB.Lock();
-				memset(DestData, 0xff, MaxSize);
-				VB.Unlock();
+				OutPrim.VertexBuffers.push_back(PSOCache.ZeroBuffer);
+				VertexDecl.AddBinding(BindingIndex, PSOCache.ZeroBuffer.Size, true);
+				VertexDecl.Divisors.push_back({ BindingIndex, 0 });
 			}
-			VertexDecl.AddBinding(BindingIndex, 16, true);
-#endif
+			else
+			{
+				OutPrim.VertexBuffers.push_back(FBufferWithMem());
+				FBufferWithMem& VB = OutPrim.VertexBuffers.back();
+				VB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, MaxSize, true);
+				{
+					float* DestData = (float*)VB.Lock();
+					memset(DestData, 0xff, MaxSize);
+					VB.Unlock();
+				}
+				VertexDecl.AddBinding(BindingIndex, 16, true);
+			}
 			++BindingIndex;
 #else
 #error

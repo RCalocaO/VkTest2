@@ -469,8 +469,10 @@ struct FApp
 		Camera.ViewMtx.Rows[3] += Camera.Pos;
 	}
 
-	void DrawScene(SVulkan::FCmdBuffer* CmdBuffer)
+	void DrawScene(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
 	{
+		FMarkerScope MarkerScope(&Device, CmdBuffer, "Scene");
+
 		int W = 0, H = 1;
 		glfwGetWindowSize(Window, &W, &H);
 		float FOVRadians = tan(ToRadians(Camera.FOVNearFar.x));
@@ -608,7 +610,10 @@ static double Render(FApp& App)
 	FRenderTargetInfo ColorInfo = GVulkan.Swapchain.GetRenderTargetInfo();
 	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(ColorInfo, FRenderTargetInfo(App.DepthBuffer.View, App.DepthBuffer.Image.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE), (uint32)Width, (uint32)Height);
 
-	App.PendingOpsMgr.ExecutePendingStagingOps(Device, CmdBuffer);
+	{
+		FMarkerScope MarkerScope(Device, CmdBuffer, "Pending");
+		App.PendingOpsMgr.ExecutePendingStagingOps(Device, CmdBuffer);
+	}
 
 	App.ImGuiNewFrame();
 
@@ -637,61 +642,65 @@ static double Render(FApp& App)
 		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 
 	CmdBuffer->BeginRenderPass(Framebuffer);
-	if (0)
 	{
-		//vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSRedPSO.Pipeline);
-	}
-	else if (0)
-	{
-		//vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.PassThroughVSRedPSPSO.Pipeline);
-	}
-	else if (1)
-	{
-		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(App.DataClipVSColorPSO);
+		FMarkerScope MarkerScope(Device, CmdBuffer, "TestTriangle");
+		if (0)
+		{
+			//vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSRedPSO.Pipeline);
+		}
+		else if (0)
+		{
+			//vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.PassThroughVSRedPSPSO.Pipeline);
+		}
+		else if (1)
+		{
+			SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(App.DataClipVSColorPSO);
 
-		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
+			vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 
-		FDescriptorPSOCache Cache(PSO);
-		Cache.SetTexelBuffer("Pos", App.ClipVB);
-		Cache.SetUniformBuffer("$Global", App.ColorUB);
-		Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
+			FDescriptorPSOCache Cache(PSO);
+			Cache.SetTexelBuffer("Pos", App.ClipVB);
+			Cache.SetUniformBuffer("$Global", App.ColorUB);
+			Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
+		}
+		/*
+			else if (1)
+			{
+				SVulkan::FGfxPSO* PSO = GPSOCache.GetPSO(App.DataClipVSRedPSO);
+				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Pipeline);
+
+				VkWriteDescriptorSet DescriptorWrites;
+				ZeroVulkanMem(DescriptorWrites, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+				//DescriptorWrites.pNext = NULL;
+				//DescriptorWrites.dstSet = 0;  // dstSet is ignored by the extension
+				DescriptorWrites.descriptorCount = 1;
+				DescriptorWrites.descriptorType = (VkDescriptorType)App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
+				DescriptorWrites.pTexelBufferView = &App.ClipVB.View;
+				DescriptorWrites.dstBinding = App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->binding;
+
+				GDescriptorCache.UpdateDescriptors(CmdBuffer, 1, &DescriptorWrites, App.DataClipVSRedPSO);
+			}
+			else if (1)
+			{
+				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.VBClipVSRedPSO.Pipeline);
+				VkDeviceSize Offsets = 0;
+				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &App.ClipVB.Buffer.Buffer, &Offsets);
+			}
+		*/
+		GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
+
+		vkCmdDraw(CmdBuffer->CmdBuffer, 3, 1, 0, 0);
 	}
-/*
-	else if (1)
-	{
-		SVulkan::FGfxPSO* PSO = GPSOCache.GetPSO(App.DataClipVSRedPSO);
-		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Pipeline);
-
-		VkWriteDescriptorSet DescriptorWrites;
-		ZeroVulkanMem(DescriptorWrites, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-		//DescriptorWrites.pNext = NULL;
-		//DescriptorWrites.dstSet = 0;  // dstSet is ignored by the extension
-		DescriptorWrites.descriptorCount = 1;
-		DescriptorWrites.descriptorType = (VkDescriptorType)App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
-		DescriptorWrites.pTexelBufferView = &App.ClipVB.View;
-		DescriptorWrites.dstBinding = App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->binding;
-
-		GDescriptorCache.UpdateDescriptors(CmdBuffer, 1, &DescriptorWrites, App.DataClipVSRedPSO);
-	}
-	else if (1)
-	{
-		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.VBClipVSRedPSO.Pipeline);
-		VkDeviceSize Offsets = 0;
-		vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &App.ClipVB.Buffer.Buffer, &Offsets);
-	}
-*/
-	GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
-
-	vkCmdDraw(CmdBuffer->CmdBuffer, 3, 1, 0, 0);
 
 	if (!App.Scene.Meshes.empty())
 	{
-		App.DrawScene(CmdBuffer);
+		App.DrawScene(Device, CmdBuffer);
 	}
 
 	CmdBuffer->EndRenderPass();
 
 	{
+		FMarkerScope MarkerScope(Device, CmdBuffer, "TestCompute");
 		SVulkan::FComputePSO* PSO = GPSOCache.GetComputePSO(App.TestCSPSO);
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, PSO->Pipeline);
 
@@ -707,54 +716,57 @@ static double Render(FApp& App)
 
 	App.GPUTiming.EndTimestamp(CmdBuffer);
 
-	if (ImGui::Begin("Debug"))
 	{
-		if (!App.LoadedGLTF.empty())
-		{			
-			ImGui::MenuItem(RCUtils::GetBaseName(App.LoadedGLTF, true).c_str(), nullptr, false, false);
-		}
-		char s[64];
-		sprintf(s, "FPS %3.2f", (float)(1000.0 / App.CpuDelta));
-		float Value = (float)(1000.0 / App.CpuDelta);
-		ImGui::SliderFloat("FPS", &Value, 0, 60);
-		Value = (float)App.CpuDelta;
-		ImGui::SliderFloat("CPU", &Value, 0, 66);
-		Value = (float)App.GpuDelta;
-		ImGui::SliderFloat("GPU", &Value, 0, 66);
-		ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
-		ImGui::InputFloat3("Rot", App.Camera.Rot.Values);
-		ImGui::Checkbox("Rotate Object", &App.bRotateObject);
-		ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
-		ImGui::InputFloat3("Light Dir", App.LightDir.Values);
-
-		const char* List[] = {
-			"Default",				// 0
-			"Base Texture",				// 1
-			"Show Vertex Normals (Obj)",		// 2
-			"Show Vertex Normals (World)",		// 3
-			"Vertex Normal Lit",		// 4
-			"NormalMap Texture",		// 5
-			"Show Vertex Tangents (Obj)",		// 6
-			"Normal Mapping Vector",			// 7
-			"Normal Mapping Lit",			// 8
-			"Normal Mapping (Id basis) Vector",			// 9
-			"Normal Mapping (Id basis) Lit",			// 10
-		};
-		ImGui::ListBox("Show mode", &g_nMode, List, IM_ARRAYSIZE(List));
-
-		if (ImGui::Button("Recompile shaders"))
+		FMarkerScope MarkerScope(Device, CmdBuffer, "ImGUI");
+		if (ImGui::Begin("Debug"))
 		{
-			GPSOCache.RecompileShaders();
+			if (!App.LoadedGLTF.empty())
+			{
+				ImGui::MenuItem(RCUtils::GetBaseName(App.LoadedGLTF, true).c_str(), nullptr, false, false);
+			}
+			char s[64];
+			sprintf(s, "FPS %3.2f", (float)(1000.0 / App.CpuDelta));
+			float Value = (float)(1000.0 / App.CpuDelta);
+			ImGui::SliderFloat("FPS", &Value, 0, 60);
+			Value = (float)App.CpuDelta;
+			ImGui::SliderFloat("CPU", &Value, 0, 66);
+			Value = (float)App.GpuDelta;
+			ImGui::SliderFloat("GPU", &Value, 0, 66);
+			ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
+			ImGui::InputFloat3("Rot", App.Camera.Rot.Values);
+			ImGui::Checkbox("Rotate Object", &App.bRotateObject);
+			ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
+			ImGui::InputFloat3("Light Dir", App.LightDir.Values);
+
+			const char* List[] = {
+				"Default",				// 0
+				"Base Texture",				// 1
+				"Show Vertex Normals (Obj)",		// 2
+				"Show Vertex Normals (World)",		// 3
+				"Vertex Normal Lit",		// 4
+				"NormalMap Texture",		// 5
+				"Show Vertex Tangents (Obj)",		// 6
+				"Normal Mapping Vector",			// 7
+				"Normal Mapping Lit",			// 8
+				"Normal Mapping (Id basis) Vector",			// 9
+				"Normal Mapping (Id basis) Lit",			// 10
+			};
+			ImGui::ListBox("Show mode", &g_nMode, List, IM_ARRAYSIZE(List));
+
+			if (ImGui::Button("Recompile shaders"))
+			{
+				GPSOCache.RecompileShaders();
+			}
 		}
+		ImGui::End();
+
+		//ImGui::ShowDemoWindow();
+
+		ImGui::Render();
+
+		ImDrawData* DrawData = ImGui::GetDrawData();
+		App.DrawDataImGui(DrawData, CmdBuffer, Framebuffer);
 	}
-	ImGui::End();
-
-	//ImGui::ShowDemoWindow();
-
-	ImGui::Render();
-
-	ImDrawData* DrawData = ImGui::GetDrawData();
-	App.DrawDataImGui(DrawData, CmdBuffer, Framebuffer);
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,

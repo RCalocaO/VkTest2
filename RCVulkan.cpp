@@ -246,9 +246,9 @@ void SVulkan::CreateInstance()
 		VK_KHR_SURFACE_EXTENSION_NAME,
 		VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #if defined(VK_USE_PLATFORM_WIN32_KHR) && VK_USE_PLATFORM_WIN32_KHR
-			VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+		VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
 #endif
-			VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+		VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
 	};
 	VerifyExtensions(ExtensionProperties, Extensions);
 	Info.ppEnabledExtensionNames = Extensions.data();
@@ -389,10 +389,14 @@ void SVulkan::SDevice::Create()
 		//VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME,
 		//VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
 		//VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
-#if USE_VULKAN_VERTEX_DIVISOR
-				VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME,
-#endif
 	};
+
+	bUseVertexDivisor = 0 && OptionalExtension(ExtensionProperties, VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
+	if (bUseVertexDivisor)
+	{
+		DeviceExtensions.push_back(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
+		bUseVertexDivisor = true;
+	}
 
 	VerifyExtensions(ExtensionProperties, DeviceExtensions);
 
@@ -400,6 +404,12 @@ void SVulkan::SDevice::Create()
 	if (bPushDescriptor)
 	{
 		DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+	}
+
+	if (OptionalExtension(ExtensionProperties, VK_EXT_DEBUG_MARKER_EXTENSION_NAME))
+	{
+		DeviceExtensions.push_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
+		bHasMarkerExtension = true;
 	}
 
 	std::vector<VkDeviceQueueCreateInfo> QueueInfos(1);
@@ -430,13 +440,14 @@ void SVulkan::SDevice::Create()
 	ZeroVulkanMem(Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
 	vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
-#if USE_VULKAN_VERTEX_DIVISOR
 	VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT Divisor;
 	ZeroVulkanMem(Divisor, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT);
-	Divisor.vertexAttributeInstanceRateDivisor = VK_TRUE;
-	Divisor.vertexAttributeInstanceRateZeroDivisor = VK_TRUE;
-	Features.pNext = &Divisor;
-#endif
+	if (bUseVertexDivisor)
+	{
+		Divisor.vertexAttributeInstanceRateDivisor = VK_TRUE;
+		Divisor.vertexAttributeInstanceRateZeroDivisor = VK_TRUE;
+		Features.pNext = &Divisor;
+	}
 	VkDeviceCreateInfo CreateInfo;
 	ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
 	CreateInfo.queueCreateInfoCount = (uint32)QueueInfos.size();
