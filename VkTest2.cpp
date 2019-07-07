@@ -165,11 +165,14 @@ struct FApp
 
 		int32 Width = 0, Height = 1;
 		glfwGetFramebufferSize(Window, &Width, &Height);
-		DepthBuffer.Create(*GPSOCache.Device, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::GPU, (uint32)Width, (uint32)Height, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+		DepthBuffer.Create(Device, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::GPU, (uint32)Width, (uint32)Height, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 	}
 
 	void Destroy()
 	{
+		vkDestroySampler(ImGuiFont.Image.Device, LinearMipSampler, nullptr);
+		DefaultNormalMapTexture.Destroy();
+		DepthBuffer.Destroy();
 		GPUTiming.Destroy();
 
 		WhiteTexture.Destroy();

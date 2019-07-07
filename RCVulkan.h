@@ -2009,6 +2009,7 @@ struct FPSOCache
 			memset(Mem, ZeroBuffer.Size, 255);
 			ZeroBuffer.Unlock();
 		}
+		Device->SetDebugName(ZeroBuffer.Buffer.Buffer, "ZeroBuffer");
 	}
 
 	VkPipelineLayout GetOrCreatePipelineLayout(SVulkan::FShader* VS, SVulkan::FShader* HS, SVulkan::FShader* DS, SVulkan::FShader* PS, std::vector<VkDescriptorSetLayout>& OutLayouts)
@@ -2281,6 +2282,7 @@ struct FPSOCache
 
 	void Destroy()
 	{
+		ZeroBuffer.Destroy();
 		for (auto PL : PipelineLayouts)
 		{
 			PL.Destroy(Device->Device);
@@ -2575,19 +2577,10 @@ struct FStagingBufferManager
 		for (int32 Index = (int32)UsedEntries.size() - 1; Index >= 0; --Index)
 		{
 			FStagingBuffer* Entry = UsedEntries[Index];
-			if (Entry->CmdBuffer->Fence.Counter > Entry->Fence)
-			{
-				Entry->Buffer->Destroy();
-				delete Entry->Buffer;
-				delete Entry;
-			}
-			else
-			{
-				//check(0);
-			}
+			Entry->Buffer->Destroy();
+			delete Entry->Buffer;
+			delete Entry;
 		}
-
-		//check(UsedEntries.empty());
 
 		for (FStagingBuffer* Buffer : FreeEntries)
 		{

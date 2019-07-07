@@ -68,6 +68,7 @@ struct FScene
 	void Destroy()
 	{
 #if SCENE_USE_SINGLE_BUFFERS
+		//std::set<VkBuffer> Deleted;
 		for (auto& Mesh : Meshes)
 		{
 			for (auto& Prim : Mesh.Prims)
@@ -75,7 +76,12 @@ struct FScene
 				Prim.IndexBuffer.Destroy();
 				for (auto& VB : Prim.VertexBuffers)
 				{
-//					VB.Destroy();
+					// Hack to not refcount
+					//if (Deleted.end() == Deleted.find(VB.Buffer.Buffer))
+					{
+						VB.Destroy();
+						//Deleted.insert(VB.Buffer.Buffer);
+					}
 				}
 			}
 		}

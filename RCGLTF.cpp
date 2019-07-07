@@ -130,6 +130,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 			memcpy(DestData, SrcData, Size);
 			VB.Unlock();
 		}
+		Device.SetDebugName(VB.Buffer.Buffer, "GLTFVB");
 #else
 		OutPrim.VertexOffsets.push_back(BufferView.byteOffset + Accessor.byteOffset);
 		OutPrim.VertexBuffers.push_back(BufferView.buffer);
@@ -164,6 +165,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 					memset(DestData, 0xff, MaxSize);
 					VB.Unlock();
 				}
+				Device.SetDebugName(VB.Buffer.Buffer, "GLTFVB");
 				VertexDecl.AddBinding(BindingIndex, 16, true);
 			}
 			++BindingIndex;
@@ -229,6 +231,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 					memcpy(DestData, SrcData, Size);
 					Prim.IndexBuffer.Unlock();
 				}
+				Device.SetDebugName(Prim.IndexBuffer.Buffer.Buffer, "GLTFIB");
 #else
 				Prim.IndexOffset = Indices.byteOffset + IndicesBufferView.byteOffset;
 				Prim.IndexBuffer = IndicesBufferView.buffer;
@@ -251,6 +254,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 			float* Data = (float*)Buffer.Lock();
 			memcpy(Data, GLTFBuffer.data.data(), Size);
 			Buffer.Unlock();
+			Device.SetDebugName(Buffer.Buffer.Buffer, "GLTFBuffer");
 			Scene.Buffers.push_back(Buffer);
 		}
 #endif
@@ -264,6 +268,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 			{
 				FScene::FTexture Texture;
 				Texture.Image.Create(Device, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL | VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, EMemLocation::GPU, GLTFImage.width, GLTFImage.height, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, GetNumMips(GLTFImage.width, GLTFImage.height));
+				Device.SetDebugName(Texture.Image.Image.Image, "GLTFTexture");
 
 				SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 
