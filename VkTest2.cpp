@@ -63,7 +63,7 @@ struct FApp
 	FPSOCache::FPSOHandle DataClipVSRedPSO;
 	FPSOCache::FPSOHandle DataClipVSColorPSO;
 	FPSOCache::FPSOHandle VBClipVSRedPSO;
-	std::vector<FPSOCache::FPSOHandle> TestGLTFPSOs;
+	FPSOCache::FPSOHandle TestGLTFPSO;
 	FBufferWithMemAndView ClipVB;
 	FPSOCache::FPSOHandle TestCSPSO;
 	FBufferWithMemAndView TestCSBuffer;
@@ -517,7 +517,7 @@ struct FApp
 				*(FObjUB*)ObjBuffer->Buffer->Lock() = ObjUB;
 				ObjBuffer->Buffer->Unlock();
 
-				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOs[Prim.Material], Prim.VertexDecl);
+				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, FPSOCache::FPSOSecondHandle(Prim.VertexDecl, Scene.Materials[Prim.Material].bDoubleSided));
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 				std::vector<VkBuffer> VBs;
 #if SCENE_USE_SINGLE_BUFFERS
@@ -746,15 +746,14 @@ static double Render(FApp& App)
 			ImGui::InputFloat3("Light Dir", App.LightDir.Values);
 
 			const char* List[] = {
-				"Default",				// 0
+				"Default (Normal Mapping Lit)",	// 0
 				"Diffuse Texture",				// 1
 				"NormalMap Texture",		// 2
 				"Show Vertex Normals",		// 3
 				"Show Pixel Normals",			// 4
 				"Show Vertex Tangents",		// 5
 				"Vertex Normal Lit",		// 6
-				"Normal Mapping Lit",			// 7
-				"Show Vertex Binormals",			// 8
+				"Show Vertex Binormals",			// 7
 			};
 			ImGui::ListBox("Show mode", &g_vMode.x, List, IM_ARRAYSIZE(List));
 			ImGui::Checkbox("Identity World xfrm", (bool*)&g_vMode.w);
@@ -992,26 +991,19 @@ static void SetupShaders(FApp& App)
 	}
 
 	{
+		App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+			{
+				VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
+				DSInfo->depthTestEnable = VK_TRUE;
+				DSInfo->depthWriteEnable = VK_TRUE;
+				DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+			});
+
 		for (auto& Mesh : App.Scene.Meshes)
 		{
 			for (auto& Prim : Mesh.Prims)
 			{
 				FixGLTFVertexDecl(TestGLTFVS->Shader, Prim.VertexDecl);
-				FPSOCache::FPSOHandle Handle = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-				{
-					VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
-					DSInfo->depthTestEnable = VK_TRUE;
-					DSInfo->depthWriteEnable = VK_TRUE;
-					DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
-					if (App.Scene.Materials[Prim.Material].bDoubleSided)
-					{
-						VkPipelineRasterizationStateCreateInfo* RSInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
-						RSInfo->cullMode = VK_CULL_MODE_NONE;
-					}
-				});
-				check(Prim.Material == (int32)App.TestGLTFPSOs.size());
-				App.TestGLTFPSOs.push_back(Handle);
 			}
 		}
 	}
@@ -1038,6 +1030,8 @@ static GLFWwindow* Init(FApp& App)
 	App.Camera.FOVNearFar.x = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-fov=", App.Camera.FOVNearFar.x);
 	App.Camera.FOVNearFar.y = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-near=", App.Camera.FOVNearFar.y);
 	App.Camera.FOVNearFar.z = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-far=", App.Camera.FOVNearFar.z);
+
+	App.LightDir = FVector4(TryGetVector3Prefix("-lightdir=", App.LightDir.GetVector3()), 0);
 
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
 	glfwHideWindow(Window);

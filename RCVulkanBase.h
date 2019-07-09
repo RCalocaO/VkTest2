@@ -1,6 +1,8 @@
 
 #pragma once
 
+#pragma warning (disable: 4530)     // C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc
+
 #include "../volk/volk.h"
 
 template <typename T>

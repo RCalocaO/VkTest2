@@ -55,10 +55,9 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	float3 vT = normalize(mul((float3x3)WorldMtx, In.TANGENT.xyz));
 	float3 vB = normalize(mul((float3x3)WorldMtx, In.TANGENT.w * cross(vN, vT)));
 
-	bool bTransposeTangentBasis = Mode2.x != 0;
-	Out.Tangent =	bTransposeTangentBasis ? vT : float3(vT.x, vB.x, vN.x);
-	Out.BiTangent = bTransposeTangentBasis ? vB : float3(vT.y, vB.y, vN.y);
-	Out.Normal =	bTransposeTangentBasis ? vN : float3(vT.z, vB.z, vN.z);
+	Out.Tangent =	float3(vT.x, vB.x, vN.x);
+	Out.BiTangent = float3(vT.y, vB.y, vN.y);
+	Out.Normal =	float3(vT.z, vB.z, vN.z);
 	Out.UV0 = In.TEXCOORD_0;
 	Out.Color = In.COLOR_0;
 	return Out;
@@ -72,7 +71,12 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	bool bIdentityNormalBasis = Mode.y != 0;
 	bool bLightingOnly = Mode.z != 0;
 
-	float3x3 mTangentBasis = bIdentityNormalBasis ? float3x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1)) : float3x3(In.Tangent, In.BiTangent, In.Normal);
+	float3x3 mTangentBasis = bIdentityNormalBasis ? float3x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1)) : transpose(float3x3(In.Tangent, In.BiTangent, In.Normal));
+	bool bTransposeTangentBasis = Mode2.x != 0;
+	if (bTransposeTangentBasis)
+	{
+		mTangentBasis = transpose(mTangentBasis);
+	}
 
 	if (Mode.x == 0 || Mode.x == 1)
 	{
@@ -110,35 +114,10 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	}
 	else if (Mode.x == 7)
 	{
-		vNormalMap = mul(mTangentBasis, vNormalMap);
-		float L = max(0, dot(vNormalMap, -LightDir));
-		return (bLightingOnly ? float4(1, 1, 1, 1) : Diffuse) * float4(L, L, L, 1);
-	}
-	else if (Mode.x == 8)
-	{
 		return float4(In.BiTangent * 0.5 + 0.5, 1);
 	}
-	/*
-	if (Mode.x == 9 || Mode.x == 10)
-	{
-		mTangentBasis = float3x3(float3(1,0,0), float3(0,1,0), float3(0,0,1));
-	}
 
-	if (Mode.x == 0)
-	{
-		vNormalMap = mul(mTangentBasis, vNormalMap);
-		float L = max(0, dot(vNormalMap, -LightDir));
-		return float4(L * Diffuse.xyz, Diffuse.a);
-	}
-	else 
-	else if (Mode.x == 2 || Mode.x == 3)
-	{
-		return float4(In.Normal * 0.5 + 0.5, 1);
-	}
-	else if (Mode.x == 5)
-	{
-		return float4(vNormalMap, 1);
-	}
-*/
-	return float4(0, 0, 1, 0.5);
+	vNormalMap = mul(mTangentBasis, vNormalMap);
+	float L = max(0, dot(vNormalMap, -LightDir));
+	return (bLightingOnly ? float4(1, 1, 1, 1) : Diffuse) * float4(L, L, L, 1);
 }

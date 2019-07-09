@@ -1813,7 +1813,27 @@ struct FPSOCache
 		std::vector<SVulkan::FShader*> Shaders;
 	};
 	std::vector<FLayout> PipelineLayouts;
-	std::map<int32, std::map<int32, SVulkan::FGfxPSO>> GfxPSOs;
+
+	struct FPSOSecondHandle
+	{
+		int32 VertexDecl = -1;
+		bool bDoubleSided = false;
+
+		FPSOSecondHandle() = default;
+
+		FPSOSecondHandle(int32 InVertexDecl, bool bInDoubleSided = false)
+			: VertexDecl(InVertexDecl)
+			, bDoubleSided(bInDoubleSided)
+		{
+		}
+	};
+
+	friend bool operator < (const FPSOSecondHandle& A, const FPSOSecondHandle& B)
+	{
+		return A.VertexDecl < B.VertexDecl;
+	}
+
+	std::map<int32, std::map<FPSOSecondHandle, SVulkan::FGfxPSO>> GfxPSOs;
 	std::vector<SVulkan::FComputePSO> ComputePSOs;
 
 	SVulkan::SDevice* Device =  nullptr;
@@ -1833,6 +1853,7 @@ struct FPSOCache
 			Index = (int32)In;
 		}
 	};
+
 
 	struct FGfxPSOEntry
 	{
@@ -1925,10 +1946,9 @@ struct FPSOCache
 			++GfxPipelineInfo.stageCount;
 		}
 
-		void Finalize(SVulkan::SDevice* Device, /*VkRenderPass RenderPass, */FVertexDecl* VertexDecl)
+		void Finalize(SVulkan::SDevice* Device, /*VkRenderPass RenderPass, */FPSOSecondHandle SecondHandle, FVertexDecl* VertexDecl)
 		{
 			//GfxPipelineInfo.renderPass = RenderPass;
-
 			if (VertexDecl)
 			{
 				VertexInputInfo.vertexAttributeDescriptionCount = (uint32)VertexDecl->AttrDescs.size();
@@ -1941,6 +1961,8 @@ struct FPSOCache
 					VertexInputDivisor.pVertexBindingDivisors = VertexDecl->Divisors.data();
 				}
 			}
+
+			RasterizerInfo.cullMode = SecondHandle.bDoubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
 		}
 
 		void FixPointers(SVulkan::SDevice* Device)
@@ -1971,11 +1993,11 @@ struct FPSOCache
 	std::vector<FGfxPSOEntry> GfxPSOEntries;
 
 	// Do not cache this pointer!
-	SVulkan::FGfxPSO* GetGfxPSO(FPSOHandle GfxEntryHandle, int32 VertexDeclHandle = -1)
+	SVulkan::FGfxPSO* GetGfxPSO(FPSOHandle GfxEntryHandle, FPSOSecondHandle SecondHandle = FPSOSecondHandle())
 	{
 		check(GfxEntryHandle.Index != -1);
 		auto& VertexDeclMap = GfxPSOs[GfxEntryHandle.Index];
-		auto FoundVertexDecl = VertexDeclMap.find(VertexDeclHandle);
+		auto FoundVertexDecl = VertexDeclMap.find(SecondHandle);
 		if (FoundVertexDecl == VertexDeclMap.end())
 		{
 			FGfxPSOEntry Entry = GfxPSOEntries[GfxEntryHandle.Index];
@@ -1985,12 +2007,12 @@ struct FPSOCache
 			PSO.Shaders = Entry.Shaders;
 			PSO.SetLayouts = Entry.SetLayouts;
 			PSO.Layout = Entry.GfxPipelineInfo.layout;
-			Entry.Finalize(Device, /*RenderPass->RenderPass, */VertexDeclHandle == -1 ? nullptr : &VertexDecls[VertexDeclHandle]);
+			Entry.Finalize(Device, /*RenderPass->RenderPass, */SecondHandle, SecondHandle.VertexDecl == -1 ? nullptr : &VertexDecls[SecondHandle.VertexDecl]);
 			VERIFY_VKRESULT(vkCreateGraphicsPipelines(Device->Device, VK_NULL_HANDLE, 1, &Entry.GfxPipelineInfo, nullptr, &PSO.Pipeline));
-			VertexDeclMap[VertexDeclHandle] = PSO;
+			VertexDeclMap[SecondHandle] = PSO;
 			Device->SetDebugName(PSO.Pipeline, Entry.Name.c_str());
 		}
-		return &VertexDeclMap[VertexDeclHandle];
+		return &VertexDeclMap[SecondHandle];
 	}
 
 	// Do not cache this pointer!
@@ -2867,13 +2889,16 @@ struct FPendingOpsManager
 	std::vector<FPendingOp> Ops;
 };
 
+inline bool operator < (const FPSOCache::FPSOHandle& A, const FPSOCache::FPSOHandle& B)
+{
+	return A.Index < B.Index;
+}
 
 struct FDescriptorPSOCache
 {
 	SVulkan::FPSO* PSO;
 	SVulkan::FComputePSO* ComputePSO = nullptr;
 	SVulkan::FGfxPSO* GfxPSO = nullptr;
-
 	std::vector<VkWriteDescriptorSet> Writes;
 	std::vector<VkDescriptorImageInfo*> Images;
 	std::vector<VkDescriptorBufferInfo*> Buffers;
