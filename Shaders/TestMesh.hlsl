@@ -15,6 +15,7 @@ cbuffer ObjUB : register(b1)
 SamplerState SS : register(s2);
 Texture2D BaseTexture : register(t3);
 Texture2D NormalTexture : register(t4);
+Texture2D MetallicRoughnessTexture : register(t5);
 
 struct FGLTFVS
 {
@@ -67,12 +68,14 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 {
 	float4 Diffuse = BaseTexture.Sample(SS, In.UV0);
 	float3 vNormalMap = NormalTexture.Sample(SS, In.UV0).xyz * 2 - 1;
+	float4 MetallicRoughness = MetallicRoughnessTexture.Sample(SS, In.UV0);
 
 	bool bIdentityNormalBasis = Mode.y != 0;
 	bool bLightingOnly = Mode.z != 0;
 
 	float3x3 mTangentBasis = bIdentityNormalBasis ? float3x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1)) : transpose(float3x3(In.Tangent, In.BiTangent, In.Normal));
 	bool bTransposeTangentBasis = Mode2.x != 0;
+	bool bNormalize = Mode2.y != 0;
 	if (bTransposeTangentBasis)
 	{
 		mTangentBasis = transpose(mTangentBasis);
@@ -101,6 +104,10 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	else if (Mode.x == 4)
 	{
 		vNormalMap = mul(mTangentBasis, vNormalMap);
+		if (bNormalize)
+		{
+			vNormalMap = normalize(vNormalMap);
+		}
 		return float4(vNormalMap * 0.5 + 0.5, 1);
 	}
 	else if (Mode.x == 5)
@@ -116,8 +123,20 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	{
 		return float4(In.BiTangent * 0.5 + 0.5, 1);
 	}
+	else if (Mode.x == 8)
+	{
+		return MetallicRoughness.g;
+	}
+	else if (Mode.x == 9)
+	{
+		return MetallicRoughness.b;
+	}
 
 	vNormalMap = mul(mTangentBasis, vNormalMap);
+	if (bNormalize)
+	{
+		vNormalMap = normalize(vNormalMap);
+	}
 	float L = max(0, dot(vNormalMap, -LightDir));
 	return (bLightingOnly ? float4(1, 1, 1, 1) : Diffuse) * float4(L, L, L, 1);
 }

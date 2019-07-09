@@ -544,11 +544,11 @@ struct FApp
 					Cache.SetUniformBuffer("ViewUB", *ViewBuffer->Buffer);
 					Cache.SetUniformBuffer("ObjUB", *ObjBuffer->Buffer);
 					Cache.SetSampler("SS", LinearMipSampler);
-					Cache.SetImage("BaseTexture", Scene.Textures.empty() ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image, LinearMipSampler);
+					Cache.SetImage("BaseTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].BaseColor == -1 ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image, LinearMipSampler);
 					Cache.SetImage("NormalTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].Normal == -1 ? DefaultNormalMapTexture : Scene.Textures[Scene.Materials[Prim.Material].Normal].Image, LinearMipSampler);
+					Cache.SetImage("MetallicRoughnessTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].MetallicRoughness == -1 ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].MetallicRoughness].Image, LinearMipSampler);
 					Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
 				}
-
 
 				vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Prim.NumIndices, 1, 0, 0, 0);
 			}
@@ -753,13 +753,16 @@ static double Render(FApp& App)
 				"Show Pixel Normals",			// 4
 				"Show Vertex Tangents",		// 5
 				"Vertex Normal Lit",		// 6
-				"Show Vertex Binormals",			// 7
+				"Show Vertex Binormals",		// 7
+				"Show Roughness",	// 8
+				"Show Metallic",	// 9
 			};
 			ImGui::ListBox("Show mode", &g_vMode.x, List, IM_ARRAYSIZE(List));
 			ImGui::Checkbox("Identity World xfrm", (bool*)&g_vMode.w);
 			ImGui::Checkbox("Identity Normal xfrm", (bool*)&g_vMode.y);
 			ImGui::Checkbox("Lighting only", (bool*)&g_vMode.z);
 			ImGui::Checkbox("Transpose tangent basis", (bool*)&g_vMode2.x);
+			ImGui::Checkbox("Normalize", (bool*)&g_vMode2.y);
 
 			if (ImGui::Button("Recompile shaders"))
 			{

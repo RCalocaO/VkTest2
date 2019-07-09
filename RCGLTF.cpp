@@ -215,21 +215,31 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 	std::string Warnings;
 	if (Loader.LoadASCIIFromFile(&Model, &Error, &Warnings, Filename))
 	{
+		auto FindTextureValueDouble = [](tinygltf::Material& GLTFMaterial, const char* Name, bool bIsAdditional) -> double
+		{
+			auto& Values = bIsAdditional ? GLTFMaterial.additionalValues : GLTFMaterial.values;
+			auto Found = Values.find(Name);
+			return Found !=Values.end()
+				? Found->second.json_double_value["index"]
+				: -1.0;
+		};
+		auto FindTextureValueBool = [](tinygltf::Material& GLTFMaterial, const char* Name, bool bIsAdditional)
+		{
+			auto& Values = bIsAdditional ? GLTFMaterial.additionalValues : GLTFMaterial.values;
+			auto Found = Values.find(Name);
+			return Found != Values.end()
+				? Found->second.bool_value
+				: false;
+		};
+
 		for (tinygltf::Material& GLTFMaterial : Model.materials)
 		{
 			FScene::FMaterial Mtl;
 			Mtl.Name = GLTFMaterial.name;
-			Mtl.BaseColor = (int32)GLTFMaterial.values["baseColorTexture"].json_double_value["index"];
-			auto FoundNormal = GLTFMaterial.additionalValues.find("normalTexture");
-			Mtl.Normal = FoundNormal != GLTFMaterial.additionalValues.end()
-				? (int32)FoundNormal->second.json_double_value["index"]
-				: -1;
-
-			auto FoundDoubleSided = GLTFMaterial.additionalValues.find("doubleSided");
-			if (FoundDoubleSided != GLTFMaterial.additionalValues.end())
-			{
-				Mtl.bDoubleSided = FoundDoubleSided->second.bool_value;
-			}
+			Mtl.BaseColor = (int32)FindTextureValueDouble(GLTFMaterial, "baseColorTexture", false);
+			Mtl.Normal = (int32)FindTextureValueDouble(GLTFMaterial, "normalTexture", true);
+			Mtl.bDoubleSided = FindTextureValueBool(GLTFMaterial, "doubleSided", true);
+			Mtl.MetallicRoughness = (int32)FindTextureValueDouble(GLTFMaterial, "metallicRoughnessTexture", false);
 
 			Scene.Materials.push_back(Mtl);
 		}
