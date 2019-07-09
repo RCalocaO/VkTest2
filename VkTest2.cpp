@@ -31,7 +31,8 @@ static FStagingBufferManager GStagingBufferMgr;
 
 static FVector3 g_vMove = {0, 0, 0};
 static FVector3 g_vRot = {0, 0, 0};
-static int32 g_nMode = 0;
+static FIntVector4 g_vMode = {0, 0, 0 ,0};
+static FIntVector4 g_vMode2 = { 0, 0, 0 ,0 };
 
 extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
 
@@ -62,7 +63,7 @@ struct FApp
 	FPSOCache::FPSOHandle DataClipVSRedPSO;
 	FPSOCache::FPSOHandle DataClipVSColorPSO;
 	FPSOCache::FPSOHandle VBClipVSRedPSO;
-	FPSOCache::FPSOHandle TestGLTFPSO;
+	std::vector<FPSOCache::FPSOHandle> TestGLTFPSOs;
 	FBufferWithMemAndView ClipVB;
 	FPSOCache::FPSOHandle TestCSPSO;
 	FBufferWithMemAndView TestCSBuffer;
@@ -457,6 +458,7 @@ struct FApp
 		FMatrix4x4 ProjMtx;
 		FVector4 LightDir;
 		FIntVector4 Mode;
+		FIntVector4 Mode2;
 	};
 
 	struct FObjUB
@@ -493,7 +495,8 @@ struct FApp
 		}
 
 		FViewUB ViewUB;
-		ViewUB.Mode.Set(g_nMode, 0, 0, 0);
+		ViewUB.Mode = g_vMode;
+		ViewUB.Mode2 = g_vMode2;
 		ViewUB.LightDir = LightDir.GetNormalized();
 		ViewUB.ViewMtx = Camera.ViewMtx;
 		ViewUB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
@@ -507,14 +510,14 @@ struct FApp
 			for (auto& Prim : Mesh.Prims)
 			{
 				FObjUB ObjUB;
-				ObjUB.ObjMtx = FMatrix4x4::GetRotationZ(ToRadians(180));
+				ObjUB.ObjMtx = FMatrix4x4::GetIdentity();//FMatrix4x4::GetRotationZ(ToRadians(180));
 				ObjUB.ObjMtx.Rows[3] = Instance.Pos;
 				ObjUB.ObjMtx *= FMatrix4x4::GetRotationY(RotateObjectAngle);
 				FStagingBuffer* ObjBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ObjUB), CmdBuffer);
 				*(FObjUB*)ObjBuffer->Buffer->Lock() = ObjUB;
 				ObjBuffer->Buffer->Unlock();
 
-				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, Prim.VertexDecl);
+				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOs[Prim.Material], Prim.VertexDecl);
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 				std::vector<VkBuffer> VBs;
 #if SCENE_USE_SINGLE_BUFFERS
@@ -744,18 +747,20 @@ static double Render(FApp& App)
 
 			const char* List[] = {
 				"Default",				// 0
-				"Base Texture",				// 1
-				"Show Vertex Normals (Obj)",		// 2
-				"Show Vertex Normals (World)",		// 3
-				"Vertex Normal Lit",		// 4
-				"NormalMap Texture",		// 5
-				"Show Vertex Tangents (Obj)",		// 6
-				"Normal Mapping Vector",			// 7
-				"Normal Mapping Lit",			// 8
-				"Normal Mapping (Id basis) Vector",			// 9
-				"Normal Mapping (Id basis) Lit",			// 10
+				"Diffuse Texture",				// 1
+				"NormalMap Texture",		// 2
+				"Show Vertex Normals",		// 3
+				"Show Pixel Normals",			// 4
+				"Show Vertex Tangents",		// 5
+				"Vertex Normal Lit",		// 6
+				"Normal Mapping Lit",			// 7
+				"Show Vertex Binormals",			// 8
 			};
-			ImGui::ListBox("Show mode", &g_nMode, List, IM_ARRAYSIZE(List));
+			ImGui::ListBox("Show mode", &g_vMode.x, List, IM_ARRAYSIZE(List));
+			ImGui::Checkbox("Identity World xfrm", (bool*)&g_vMode.w);
+			ImGui::Checkbox("Identity Normal xfrm", (bool*)&g_vMode.y);
+			ImGui::Checkbox("Lighting only", (bool*)&g_vMode.z);
+			ImGui::Checkbox("Transpose tangent basis", (bool*)&g_vMode2.x);
 
 			if (ImGui::Button("Recompile shaders"))
 			{
@@ -987,18 +992,26 @@ static void SetupShaders(FApp& App)
 	}
 
 	{
-		App.TestGLTFPSO = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-		{
-			VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
-			DSInfo->depthTestEnable = VK_TRUE;
-			DSInfo->depthWriteEnable = VK_TRUE;
-			DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-		});
 		for (auto& Mesh : App.Scene.Meshes)
 		{
 			for (auto& Prim : Mesh.Prims)
 			{
 				FixGLTFVertexDecl(TestGLTFVS->Shader, Prim.VertexDecl);
+				FPSOCache::FPSOHandle Handle = GPSOCache.CreateGfxPSO("TestGLTFPSO", TestGLTFVS, TestGLTFPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+				{
+					VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
+					DSInfo->depthTestEnable = VK_TRUE;
+					DSInfo->depthWriteEnable = VK_TRUE;
+					DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+					if (App.Scene.Materials[Prim.Material].bDoubleSided)
+					{
+						VkPipelineRasterizationStateCreateInfo* RSInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
+						RSInfo->cullMode = VK_CULL_MODE_NONE;
+					}
+				});
+				check(Prim.Material == (int32)App.TestGLTFPSOs.size());
+				App.TestGLTFPSOs.push_back(Handle);
 			}
 		}
 	}
@@ -1022,6 +1035,9 @@ static GLFWwindow* Init(FApp& App)
 
 	g_vMove = TryGetVector3Prefix("-pos=", FVector3::GetZero());
 	g_vRot = TryGetVector3Prefix("-rot=", FVector3::GetZero());
+	App.Camera.FOVNearFar.x = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-fov=", App.Camera.FOVNearFar.x);
+	App.Camera.FOVNearFar.y = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-near=", App.Camera.FOVNearFar.y);
+	App.Camera.FOVNearFar.z = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-far=", App.Camera.FOVNearFar.z);
 
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
 	glfwHideWindow(Window);

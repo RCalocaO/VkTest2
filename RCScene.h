@@ -51,6 +51,7 @@ struct FScene
 		std::string Name;
 		int32 BaseColor = -1;
 		int32 Normal = -1;
+		bool bDoubleSided = false;
 	};
 	std::vector<FMaterial> Materials;
 
