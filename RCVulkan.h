@@ -1819,21 +1819,34 @@ struct FPSOCache
 
 	struct FPSOSecondHandle
 	{
-		int32 VertexDecl = -1;
-		bool bDoubleSided = false;
+		union
+		{
+			uint32 Data;
+			struct
+			{
+				uint32 VertexDecl : 30;
+				uint32 bDoubleSided : 1;
+				uint32 bWireframe : 1;
+			};
+		};
 
-		FPSOSecondHandle() = default;
+		FPSOSecondHandle()
+		{
+			static_assert(sizeof(Data) == sizeof(*this), "Out of bits");
+			Data = 0;
+		}
 
-		FPSOSecondHandle(int32 InVertexDecl, bool bInDoubleSided = false)
+		FPSOSecondHandle(int32 InVertexDecl, bool bInDoubleSided = false, bool bInWireframe = false)
 			: VertexDecl(InVertexDecl)
 			, bDoubleSided(bInDoubleSided)
+			, bWireframe(bInWireframe)
 		{
 		}
 	};
 
 	friend bool operator < (const FPSOSecondHandle& A, const FPSOSecondHandle& B)
 	{
-		return A.VertexDecl < B.VertexDecl;
+		return A.Data < B.Data;
 	}
 
 	std::map<int32, std::map<FPSOSecondHandle, SVulkan::FGfxPSO>> GfxPSOs;
@@ -1966,6 +1979,7 @@ struct FPSOCache
 			}
 
 			RasterizerInfo.cullMode = SecondHandle.bDoubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+			RasterizerInfo.polygonMode = SecondHandle.bWireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
 		}
 
 		void FixPointers(SVulkan::SDevice* Device)

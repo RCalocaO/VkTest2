@@ -33,6 +33,7 @@ static FVector3 g_vMove = {0, 0, 0};
 static FVector3 g_vRot = {0, 0, 0};
 static FIntVector4 g_vMode = {0, 0, 0 ,0};
 static FIntVector4 g_vMode2 = { 0, 0, 0 ,0 };
+static bool g_bWireframe = false;
 
 extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
 
@@ -517,7 +518,7 @@ struct FApp
 				*(FObjUB*)ObjBuffer->Buffer->Lock() = ObjUB;
 				ObjBuffer->Buffer->Unlock();
 
-				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, FPSOCache::FPSOSecondHandle(Prim.VertexDecl, Scene.Materials[Prim.Material].bDoubleSided));
+				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, FPSOCache::FPSOSecondHandle(Prim.VertexDecl, Scene.Materials[Prim.Material].bDoubleSided, g_bWireframe));
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 				GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
 				std::vector<VkBuffer> VBs;
@@ -766,6 +767,7 @@ static double Render(FApp& App)
 			ImGui::Checkbox("Lighting only", (bool*)&g_vMode.z);
 			ImGui::Checkbox("Transpose tangent basis", (bool*)&g_vMode2.x);
 			ImGui::Checkbox("Normalize", (bool*)&g_vMode2.y);
+			ImGui::Checkbox("Wireframe", (bool*)&g_bWireframe);
 
 			if (ImGui::Button("Recompile shaders"))
 			{
