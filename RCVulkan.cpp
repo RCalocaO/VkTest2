@@ -665,3 +665,18 @@ bool FShaderLibrary::DoCompileFromSource(FShaderInfo* Info)
 
 	return DoCompileFromBinary(Info);
 }
+
+void FGPUTiming::Init(SVulkan::SDevice* InDevice, FPendingOpsManager& PendingOpsMgr)
+{
+	Device = InDevice;
+
+	VkQueryPoolCreateInfo PoolCreateInfo;
+	ZeroVulkanMem(PoolCreateInfo, VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
+	PoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+	PoolCreateInfo.queryCount = 2;
+	VERIFY_VKRESULT(vkCreateQueryPool(Device->Device, &PoolCreateInfo, nullptr, &QueryPool));
+
+	QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, 2 * sizeof(uint64), true);
+
+	PendingOpsMgr.AddResetQueryPool(QueryPool, 0, 2);
+}

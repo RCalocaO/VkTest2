@@ -162,7 +162,7 @@ struct FApp
 			PendingOpsMgr.AddCopyBufferToImage(Buffer, DefaultNormalMapTexture.Image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		}
 
-		GPUTiming.Init(&Device);
+		GPUTiming.Init(&Device, PendingOpsMgr);
 
 		int32 Width = 0, Height = 1;
 		glfwGetFramebufferSize(Window, &Width, &Height);
@@ -519,6 +519,7 @@ struct FApp
 
 				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, FPSOCache::FPSOSecondHandle(Prim.VertexDecl, Scene.Materials[Prim.Material].bDoubleSided));
 				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
+				GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
 				std::vector<VkBuffer> VBs;
 #if SCENE_USE_SINGLE_BUFFERS
 				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, Prim.IndexBuffer.Buffer.Buffer, 0, Prim.IndexType);
@@ -603,6 +604,12 @@ static double Render(FApp& App)
 	App.Update();
 
 	SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
+	if (!App.PendingOpsMgr.Ops.empty())
+	{
+		FMarkerScope MarkerScope(Device, CmdBuffer, "Pending");
+		App.PendingOpsMgr.ExecutePendingStagingOps(Device, CmdBuffer);
+	}
+
 	App.GPUTiming.BeginTimestamp(CmdBuffer);
 
 	float Width = GVulkan.Swapchain.GetViewport().width;
@@ -616,11 +623,6 @@ static double Render(FApp& App)
 	FRenderTargetInfo ColorInfo = GVulkan.Swapchain.GetRenderTargetInfo();
 	SVulkan::FFramebuffer* Framebuffer = GRenderTargetCache.GetOrCreateFrameBuffer(ColorInfo, FRenderTargetInfo(App.DepthBuffer.View, App.DepthBuffer.Image.Format, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE), (uint32)Width, (uint32)Height);
 
-	{
-		FMarkerScope MarkerScope(Device, CmdBuffer, "Pending");
-		App.PendingOpsMgr.ExecutePendingStagingOps(Device, CmdBuffer);
-	}
-
 	App.ImGuiNewFrame();
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
@@ -633,7 +635,7 @@ static double Render(FApp& App)
 		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 
 	static float F = 0;
-	F += 0.025f;
+	F += 0.005f;
 	float ClearColor[4] = {0.0f, abs(sin(F)), abs(cos(F)), 0.0f};
 	ClearColorImage(CmdBuffer->CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
 	ClearDepthImage(CmdBuffer->CmdBuffer, App.DepthBuffer.Image.Image, 1.0f, 0);
@@ -648,6 +650,7 @@ static double Render(FApp& App)
 		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 
 	CmdBuffer->BeginRenderPass(Framebuffer);
+	if (0)
 	{
 		FMarkerScope MarkerScope(Device, CmdBuffer, "TestTriangle");
 		if (0)
@@ -955,6 +958,7 @@ static void SetupShaders(FApp& App)
 	FShaderInfo* UIPS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* TestGLTFVS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* TestGLTFPS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFPS", FShaderInfo::EStage::Pixel);
+	FShaderInfo* ShowDebugVectorsGS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ShowDebugVectorsGS", FShaderInfo::EStage::Geometry);
 	FShaderInfo* PassThroughVS = GShaderLibrary.RegisterShader("Shaders/PassThroughVS.hlsl", "MainVS", FShaderInfo::EStage::Vertex);
 	GShaderLibrary.RecompileShaders();
 
@@ -1035,6 +1039,7 @@ static GLFWwindow* Init(FApp& App)
 	App.Camera.FOVNearFar.z = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-far=", App.Camera.FOVNearFar.z);
 
 	App.LightDir = FVector4(TryGetVector3Prefix("-lightdir=", App.LightDir.GetVector3()), 0);
+	App.LightDir = App.LightDir.GetNormalized();
 
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
 	glfwHideWindow(Window);

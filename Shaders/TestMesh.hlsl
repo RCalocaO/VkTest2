@@ -2,7 +2,7 @@ cbuffer ViewUB : register(b0)
 {
 	float4x4 ViewMtx;
 	float4x4 ProjectionMtx;
-	float4 LightDir;
+	float4 LightDirWS;
 	int4 Mode;
 	int4 Mode2;
 };
@@ -40,17 +40,17 @@ struct FGLTFPS
 FGLTFPS TestGLTFVS(FGLTFVS In)
 {
 	float4x4 WorldMtx = ObjMtx;
-	FGLTFPS Out = (FGLTFPS)0;
-	float4 Pos = float4(In.POSITION, 1);
-	Pos = mul(WorldMtx, Pos);
-	Pos = mul(ViewMtx, Pos);
-	Out.Pos = mul(ProjectionMtx, Pos);
-
 	bool bIdentityWorld = Mode.w != 0;
 	if (bIdentityWorld)
 	{
 		WorldMtx = float4x4(float4(1, 0, 0, 0), float4(0, 1, 0, 0), float4(0, 0, 1, 0), float4(0, 0, 0, 1));
 	}
+
+	FGLTFPS Out = (FGLTFPS)0;
+	float4 Pos = float4(In.POSITION, 1);
+	Pos = mul(WorldMtx, Pos);
+	Pos = mul(ViewMtx, Pos);
+	Out.Pos = mul(ProjectionMtx, Pos);
 
 	float3 vN = normalize(mul((float3x3)WorldMtx, In.NORMAL));
 	float3 vT = normalize(mul((float3x3)WorldMtx, In.TANGENT.xyz));
@@ -88,6 +88,8 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 			discard;
 		}
 	}
+
+	float3 LightDir = mul(mTangentBasis, LightDirWS);
 
 	if (Mode.x == 1)
 	{

@@ -100,3 +100,9 @@ float4 MainTexPS(FVSOut In)
 {
 	return Tex.Sample(SS, In.UVs) * In.Color;
 }
+
+[maxvertexcount(6)]
+void ShowDebugVectorsGS(point FVSOut In[1], inout TriangleStream<FVSOut> Out)
+{
+	Out.Append(In[0]);
+}

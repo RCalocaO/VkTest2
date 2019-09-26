@@ -1469,6 +1469,7 @@ struct FShaderInfo
 		Pixel,
 		Hull,
 		Domain,
+		Geometry,
 
 		Compute = 16,
 	};
@@ -1563,6 +1564,7 @@ struct FShaderLibrary
 		case FShaderInfo::EStage::Pixel:	return "frag";
 		case FShaderInfo::EStage::Hull:		return "tesc";
 		case FShaderInfo::EStage::Domain:	return "tese";
+		case FShaderInfo::EStage::Geometry:	return "geom";
 		default:
 			break;
 		}
@@ -1579,6 +1581,7 @@ struct FShaderLibrary
 		case FShaderInfo::EStage::Pixel:	return VK_SHADER_STAGE_FRAGMENT_BIT;
 		case FShaderInfo::EStage::Hull:		return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
 		case FShaderInfo::EStage::Domain:	return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+		case FShaderInfo::EStage::Geometry:	return VK_SHADER_STAGE_GEOMETRY_BIT;
 		default:
 			break;
 		}
@@ -2661,18 +2664,7 @@ struct FGPUTiming
 	FBufferWithMem QueryResultsBuffer;
 	SVulkan::SDevice* Device = nullptr;
 
-	void Init(SVulkan::SDevice* InDevice)
-	{
-		Device = InDevice;
-
-		VkQueryPoolCreateInfo PoolCreateInfo;
-		ZeroVulkanMem(PoolCreateInfo, VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO);
-		PoolCreateInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-		PoolCreateInfo.queryCount = 2;
-		VERIFY_VKRESULT(vkCreateQueryPool(Device->Device, &PoolCreateInfo, nullptr, &QueryPool));
-
-		QueryResultsBuffer.Create(*Device, VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, 2 * sizeof(uint64), true);
-	}
+	void Init(SVulkan::SDevice* InDevice, struct FPendingOpsManager& PendingOpsMgr);
 
 	void Destroy()
 	{
@@ -2734,6 +2726,7 @@ struct FPendingOpsManager
 			ECopyBuffers,
 			ECopyBufferToImage,
 			EUpdateBuffer,
+			EResetQueryPool,
 		};
 
 		OpType Op = EInvalid;
@@ -2770,10 +2763,23 @@ struct FPendingOpsManager
 		};
 		FCopyBufferToImage CopyImage;
 
+		struct FResetQueryPool
+		{
+			VkQueryPool Pool = VK_NULL_HANDLE;
+			uint32 FirstQuery = 0;
+			uint32 NumQueries = 0;
+		};
+		FResetQueryPool ResetQueryPool;
+
 		void Exec(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
 		{
 			switch (Op)
 			{
+			case EResetQueryPool:
+			{
+				vkCmdResetQueryPool(CmdBuffer->CmdBuffer, ResetQueryPool.Pool, ResetQueryPool.FirstQuery, ResetQueryPool.NumQueries);
+			}
+				break;
 			case ECopyBuffers:
 			{
 				VkBufferCopy Region;
@@ -2852,6 +2858,17 @@ struct FPendingOpsManager
 		Op.Copy.SrcStaging = SrcBuffer;
 		Op.Copy.Dest = DestBuffer->Buffer;
 		Op.Copy.Size = SrcBuffer->Buffer->Size;
+
+		Ops.push_back(Op);
+	}
+
+	void AddResetQueryPool(VkQueryPool Pool, uint32 FirstQuery, uint32 NumQueries)
+	{
+		FPendingOp Op;
+		Op.Op = FPendingOp::EResetQueryPool;
+		Op.ResetQueryPool.Pool = Pool;
+		Op.ResetQueryPool.FirstQuery = FirstQuery;
+		Op.ResetQueryPool.NumQueries = NumQueries;
 
 		Ops.push_back(Op);
 	}
