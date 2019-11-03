@@ -35,6 +35,7 @@ struct FGLTFPS
 	float3 BiTangent : BITANGENT;
 	float2 UV0 : TEXCOORD0;
 	float4 Color : COLOR;
+	float4 WorldPos : WORLD_POS;
 };
 
 FGLTFPS TestGLTFVS(FGLTFVS In)
@@ -49,6 +50,7 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	FGLTFPS Out = (FGLTFPS)0;
 	float4 Pos = float4(In.POSITION, 1);
 	Pos = mul(WorldMtx, Pos);
+	Out.WorldPos = Pos;
 	Pos = mul(ViewMtx, Pos);
 	Out.Pos = mul(ProjectionMtx, Pos);
 
@@ -76,6 +78,7 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	float3x3 mTangentBasis = bIdentityNormalBasis ? float3x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1)) : transpose(float3x3(In.Tangent, In.BiTangent, In.Normal));
 	bool bTransposeTangentBasis = Mode2.x != 0;
 	bool bNormalize = Mode2.y != 0;
+	bool bNoPrecomputedTangents = Mode2.z != 0;
 	if (bTransposeTangentBasis)
 	{
 		mTangentBasis = transpose(mTangentBasis);
@@ -90,6 +93,19 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	}
 
 	float3 LightDir = mul(mTangentBasis, LightDirWS);
+	float3 NonPrecomputedNormal;
+	{
+		float3 q1 = ddx(In.WorldPos.xyz);
+		float3 q2 = ddy(In.WorldPos.xyz);
+		float2 st1 = ddx(In.UV0);
+		float2 st2 = ddy(In.UV0);
+
+		float3 N = normalize(In.Normal);
+		float3 T = normalize(q1 * st2.t - q2 * st1.t);
+		float3 B = -normalize(cross(N, T));
+		float3x3 TBN = float3x3(T, B, N);
+		NonPrecomputedNormal = normalize(mul(TBN, vNormalMap));
+	}
 
 	if (Mode.x == 1)
 	{
@@ -135,10 +151,15 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	}
 
 	vNormalMap = mul(mTangentBasis, vNormalMap);
+	if (bNoPrecomputedTangents)
+	{
+		vNormalMap = NonPrecomputedNormal;
+	}
 	if (bNormalize)
 	{
 		vNormalMap = normalize(vNormalMap);
 	}
+
 	float L = max(0, dot(vNormalMap, -LightDir));
 	return (bLightingOnly ? float4(1, 1, 1, 1) : Diffuse) * float4(L, L, L, 1);
 }

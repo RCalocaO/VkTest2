@@ -768,6 +768,7 @@ static double Render(FApp& App)
 			ImGui::Checkbox("Transpose tangent basis", (bool*)&g_vMode2.x);
 			ImGui::Checkbox("Normalize", (bool*)&g_vMode2.y);
 			ImGui::Checkbox("Wireframe", (bool*)&g_bWireframe);
+			ImGui::Checkbox("No precomputed tangents", (bool*)&g_vMode2.z);
 
 			if (ImGui::Button("Recompile shaders"))
 			{
@@ -1006,6 +1007,10 @@ static void SetupShaders(FApp& App)
 				DSInfo->depthTestEnable = VK_TRUE;
 				DSInfo->depthWriteEnable = VK_TRUE;
 				DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+				VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
+				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
+				RasterizerInfo->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 			});
 
 		for (auto& Mesh : App.Scene.Meshes)
