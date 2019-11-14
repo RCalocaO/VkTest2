@@ -75,6 +75,12 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 		case VK_OBJECT_TYPE_DESCRIPTOR_SET:
 			s += "\tDescriptorSet ";
 			break;
+		case VK_OBJECT_TYPE_PIPELINE:
+			s += "\tPipeline ";
+			break;
+		case VK_OBJECT_TYPE_PIPELINE_LAYOUT:
+			s += "\tPipelineLayout ";
+			break;
 		case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT:
 			s += "\tDescriptorSetLayout ";
 			break;

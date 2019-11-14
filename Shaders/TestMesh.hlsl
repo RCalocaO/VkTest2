@@ -29,13 +29,14 @@ struct FGLTFVS
 
 struct FGLTFPS
 {
-	float4 Pos : SV_POSITION;
+	float4 ClipPos : SV_POSITION;
 	float3 Normal : NORMAL;
 	float3 Tangent : TANGENT;
 	float3 BiTangent : BITANGENT;
 	float2 UV0 : TEXCOORD0;
 	float4 Color : COLOR;
 	float4 WorldPos : WORLD_POS;
+	float4 ViewPos : VIEW_POS;
 };
 
 FGLTFPS TestGLTFVS(FGLTFVS In)
@@ -48,19 +49,28 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	}
 
 	FGLTFPS Out = (FGLTFPS)0;
-	float4 Pos = float4(In.POSITION, 1);
-	Pos = mul(WorldMtx, Pos);
-	Out.WorldPos = Pos;
-	Pos = mul(ViewMtx, Pos);
-	Out.Pos = mul(ProjectionMtx, Pos);
+	float4 ObjPos = float4(In.POSITION, 1);
+	Out.WorldPos = mul(WorldMtx, ObjPos);
+	Out.ViewPos = mul(ViewMtx, Out.WorldPos);
+	Out.ClipPos = mul(ProjectionMtx, Out.ViewPos);
 
-	float3 vN = normalize(mul((float3x3)WorldMtx, In.NORMAL));
-	float3 vT = normalize(mul((float3x3)WorldMtx, In.TANGENT.xyz));
-	float3 vB = normalize(mul((float3x3)WorldMtx, In.TANGENT.w * cross(vN, vT)));
+	float3 vN = /*normalize*/(mul((float3x3)WorldMtx, In.NORMAL));
+	bool bNormalize = Mode2.y != 0;
+	if (bNormalize)
+	{
+		vN = normalize(vN);
+	}
+	float3 vT = 0;//normalize(mul((float3x3)WorldMtx, In.TANGENT.xyz));
+	float3 vB = 0;//normalize(mul((float3x3)WorldMtx, In.TANGENT.w * cross(vN, vT)));
 
-	Out.Tangent =	float3(vT.x, vB.x, vN.x);
-	Out.BiTangent = float3(vT.y, vB.y, vN.y);
-	Out.Normal =	float3(vT.z, vB.z, vN.z);
+	Out.Tangent =	0;//float3(vT.x, vB.x, vN.x);
+	Out.BiTangent = 0;//float3(vT.y, vB.y, vN.y);
+	Out.Normal =	0;//float3(vT.z, vB.z, vN.z);
+
+	// View normals
+	Out.Normal = mul((float3x3)WorldMtx, In.NORMAL);
+	Out.Normal = mul((float3x3)ViewMtx, Out.Normal);
+
 	Out.UV0 = In.TEXCOORD_0;
 	Out.Color = In.COLOR_0;
 	return Out;
@@ -68,6 +78,9 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 
 float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 {
+#if 1
+	return float4((In.Normal + 1) * 0.5, 1);
+#else
 	float4 Diffuse = BaseTexture.Sample(SS, In.UV0);
 	float3 vNormalMap = NormalTexture.Sample(SS, In.UV0).xyz * 2 - 1;
 	float4 MetallicRoughness = MetallicRoughnessTexture.Sample(SS, In.UV0);
@@ -162,4 +175,5 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 
 	float L = max(0, dot(vNormalMap, -LightDir));
 	return (bLightingOnly ? float4(1, 1, 1, 1) : Diffuse) * float4(L, L, L, 1);
+#endif
 }
