@@ -46,7 +46,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 
 	for (uint32 Index = 0; Index < CallbackData->objectCount; ++Index)
 	{
-		switch (CallbackData->pObjects[Index].objectType)
+		const VkDebugUtilsObjectNameInfoEXT& Info = CallbackData->pObjects[Index];
+		switch (Info.objectType)
 		{
 		case VK_OBJECT_TYPE_COMMAND_BUFFER:
 			s += "\tCmdBuf ";
@@ -84,14 +85,24 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 		case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT:
 			s += "\tDescriptorSetLayout ";
 			break;
+		case VK_OBJECT_TYPE_SHADER_MODULE:
+			s += "\tShaderModule ";
+			break;
 		case VK_OBJECT_TYPE_UNKNOWN:
 			continue;
 		default:
 			check(0);
 		}
 
-		char Handle[32];
-		sprintf(Handle, "%p\n", (void*)CallbackData->pObjects[Index].objectHandle);
+		char Handle[128];
+		if (Info.pObjectName && *Info.pObjectName)
+		{
+			sprintf(Handle, "'%s' %p\n", Info.pObjectName, (void*)CallbackData->pObjects[Index].objectHandle);
+		}
+		else
+		{
+			sprintf(Handle, "%p\n", (void*)CallbackData->pObjects[Index].objectHandle);
+		}
 		s += Handle;
 	}
 

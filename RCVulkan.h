@@ -34,9 +34,10 @@ enum class EMemLocation
 enum class EShaderStages
 {
 	Vertex = 0,
-	Domain = 1,
-	Hull = 2,
-	Pixel = 3,
+	Hull = 1,
+	Domain = 2,
+	Geometry = 3,
+	Pixel = 4,
 
 	Compute = 0,
 };
@@ -782,19 +783,30 @@ struct SVulkan
 		}
 
 		template <typename T>
-		void SetDebugName(T Handle,VkObjectType Type, const char* Name)
+		inline static void StaticSetDebugName(VkDevice InDevice, T Handle, VkObjectType Type, const char* Name)
 		{
 			VkDebugUtilsObjectNameInfoEXT Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT);
 			Info.objectHandle = (uint64)Handle;
 			Info.objectType = Type;
 			Info.pObjectName = Name;
-			vkSetDebugUtilsObjectNameEXT(Device, &Info);
+			vkSetDebugUtilsObjectNameEXT(InDevice, &Info);
+		}
+
+		template <typename T>
+		inline void SetDebugName(T Handle,VkObjectType Type, const char* Name)
+		{
+			StaticSetDebugName(Device, Handle, Type, Name);
 		}
 
 		void SetDebugName(VkPipeline Pipeline, const char* Name)
 		{
-			SetDebugName<VkPipeline>(Pipeline, VK_OBJECT_TYPE_IMAGE, Name);
+			SetDebugName<VkPipeline>(Pipeline, VK_OBJECT_TYPE_PIPELINE, Name);
+		}
+
+		void SetDebugName(VkShaderModule Shader, const char* Name)
+		{
+			SetDebugName<VkShaderModule>(Shader, VK_OBJECT_TYPE_SHADER_MODULE, Name);
 		}
 
 		void SetDebugName(VkImage Image, const char* Name)
@@ -1594,7 +1606,13 @@ struct FShaderLibrary
 		check(!Info->Shader);
 		Info->Shader = new SVulkan::FShader;
 		Info->Shader->SpirV = Data;
-		return Info->Shader->Create(Device, GetVulkanStage(Info->Stage));
+		if (Info->Shader->Create(Device, GetVulkanStage(Info->Stage)))
+		{
+			SVulkan::SDevice::StaticSetDebugName(Device, Info->Shader->ShaderModule, VK_OBJECT_TYPE_SHADER_MODULE, Info->EntryPoint.c_str());
+			return true;
+		}
+
+		return false;
 	}
 
 	bool DoCompileFromBinary(FShaderInfo* Info)
@@ -2051,7 +2069,7 @@ struct FPSOCache
 		Device->SetDebugName(ZeroBuffer.Buffer.Buffer, "ZeroBuffer");
 	}
 
-	VkPipelineLayout GetOrCreatePipelineLayout(SVulkan::FShader* VS, SVulkan::FShader* HS, SVulkan::FShader* DS, SVulkan::FShader* PS, std::vector<VkDescriptorSetLayout>& OutLayouts)
+	VkPipelineLayout GetOrCreatePipelineLayout(SVulkan::FShader* VS, SVulkan::FShader* HS, SVulkan::FShader* DS, SVulkan::FShader* GS, SVulkan::FShader* PS, std::vector<VkDescriptorSetLayout>& OutLayouts)
 	{
 		std::vector<SVulkan::FShader*> Shaders;
 		Shaders.push_back(VS);
@@ -2059,6 +2077,10 @@ struct FPSOCache
 		{
 			Shaders.push_back(HS);
 			Shaders.push_back(DS);
+		}
+		if (GS)
+		{
+			Shaders.push_back(GS);
 		}
 		if (PS)
 		{
@@ -2091,7 +2113,10 @@ struct FPSOCache
 			AddBindings(HS);
 			AddBindings(DS);
 		}
-
+		if (GS)
+		{
+			AddBindings(GS);
+		}
 		if (PS)
 		{
 			AddBindings(PS);
@@ -2157,7 +2182,7 @@ struct FPSOCache
 	}
 
 	template <typename TFunction>
-	FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
+	FPSOHandle InternalCreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* GS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
 	{
 		check(VS->Shader && VS->Shader->ShaderModule);
 		if (HS || DS)
@@ -2165,6 +2190,12 @@ struct FPSOCache
 			check(HS && DS);
 			check(HS->Shader && DS->Shader);
 		}
+
+		if (GS)
+		{
+			check(GS->Shader && GS->Shader->ShaderModule)
+		}
+
 		if (PS)
 		{
 			check(PS->Shader && PS->Shader->ShaderModule);
@@ -2180,12 +2211,17 @@ struct FPSOCache
 			Entry.AddShader(EShaderStages::Domain, DS, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
 		}
 
+		if (GS)
+		{
+			Entry.AddShader(EShaderStages::Geometry, GS, VK_SHADER_STAGE_GEOMETRY_BIT);
+		}
+
 		if (PS)
 		{
 			Entry.AddShader(EShaderStages::Pixel, PS, VK_SHADER_STAGE_FRAGMENT_BIT);
 		}
 
-		auto Layout = GetOrCreatePipelineLayout(VS->Shader, HS ? HS->Shader : nullptr, DS ? DS->Shader : nullptr, PS ? PS->Shader : nullptr, Entry.SetLayouts);
+		auto Layout = GetOrCreatePipelineLayout(VS->Shader, HS ? HS->Shader : nullptr, DS ? DS->Shader : nullptr, GS ? GS->Shader : nullptr, PS ? PS->Shader : nullptr, Entry.SetLayouts);
 
 		Entry.GfxPipelineInfo.layout = /*PSO.*/Layout;
 		Entry.GfxPipelineInfo.renderPass = RenderPass->RenderPass;
@@ -2238,12 +2274,12 @@ struct FPSOCache
 	template <typename TFunction>
 	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
 	{
-		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass, Callback);
+		return InternalCreateGfxPSO(Name, VS, nullptr, nullptr, nullptr, PS, RenderPass, Callback);
 	}
 
 	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
 	{
-		return CreateGfxPSO(Name, VS, nullptr, nullptr, PS, RenderPass,
+		return InternalCreateGfxPSO(Name, VS, nullptr, nullptr, nullptr, PS, RenderPass,
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 			{
 			});
@@ -2251,10 +2287,24 @@ struct FPSOCache
 
 	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* HS, FShaderInfo* DS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
 	{
-		return CreateGfxPSO(Name, VS, HS, DS, PS, RenderPass,
+		return InternalCreateGfxPSO(Name, VS, HS, DS, nullptr, PS, RenderPass,
 			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
 		{
 		});
+	}
+
+	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* GS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass)
+	{
+		return InternalCreateGfxPSO(Name, VS, nullptr, nullptr, GS, PS, RenderPass,
+			[=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+		{
+		});
+	}
+
+	template <typename TFunction>
+	inline FPSOHandle CreateGfxPSO(const char* Name, FShaderInfo* VS, FShaderInfo* GS, FShaderInfo* PS, SVulkan::FRenderPass* RenderPass, TFunction Callback)
+	{
+		return InternalCreateGfxPSO(Name, VS, nullptr, nullptr, GS, PS, RenderPass, Callback);
 	}
 
 	FPSOHandle CreateComputePSO(const char* Name, FShaderInfo* CS)
@@ -2297,7 +2347,7 @@ struct FPSOCache
 				}
 			}
 		}
-		PSO.Layout = GetOrCreatePipelineLayout(CS->Shader, nullptr, nullptr, nullptr, PSO.SetLayouts);
+		PSO.Layout = GetOrCreatePipelineLayout(CS->Shader, nullptr, nullptr, nullptr, nullptr, PSO.SetLayouts);
 		PSO.Shaders[EShaderStages::Compute] = CS->Shader;
 
 		PipelineInfo.layout = PSO.Layout;
