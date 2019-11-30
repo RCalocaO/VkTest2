@@ -70,6 +70,25 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	// View normals
 	Out.Normal = mul((float3x3)WorldMtx, In.NORMAL);
 	Out.Normal = mul((float3x3)ViewMtx, Out.Normal);
+	if (bNormalize)
+	{
+		Out.Normal = normalize(Out.Normal);
+	}
+
+	// View normals
+	Out.Tangent = mul((float3x3)WorldMtx, In.TANGENT.xyz);
+	Out.Tangent = mul((float3x3)ViewMtx, Out.Tangent);
+	if (bNormalize)
+	{
+		Out.Tangent = normalize(Out.Tangent);
+	}
+
+	Out.BiTangent = In.TANGENT.w * cross(In.NORMAL.xyz, In.TANGENT.xyz);
+	Out.BiTangent = mul((float3x3)ViewMtx, Out.BiTangent);
+	if (bNormalize)
+	{
+		Out.BiTangent = normalize(Out.BiTangent);
+	}
 
 	Out.UV0 = In.TEXCOORD_0;
 	Out.Color = In.COLOR_0;
@@ -78,7 +97,7 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 
 float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 {
-#if 1
+#if 0
 	return float4((In.Normal + 1) * 0.5, 1);
 #else
 	float4 Diffuse = BaseTexture.Sample(SS, In.UV0);

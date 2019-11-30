@@ -118,7 +118,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 
 		auto FixNormalOrPosition = [](const std::string& InName, uint32 Size, FVector3* Data)
 		{
-			if (InName == "NORMAL" || InName == "POSITION")
+			if (/*InName == "NORMAL" ||*/ InName == "POSITION")
 			{
 				FVector3 Min = {FLT_MAX, FLT_MAX, FLT_MAX};
 				FVector3 Max = {FLT_MIN, FLT_MIN, FLT_MIN};
