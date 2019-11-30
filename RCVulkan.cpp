@@ -235,6 +235,18 @@ void SVulkan::CreateInstance()
 	std::vector<VkExtensionProperties> ExtensionProperties(NumExtensions);
 	VERIFY_VKRESULT(vkEnumerateInstanceExtensionProperties(nullptr, &NumExtensions, ExtensionProperties.data()));
 
+/*
+	for (auto& Layer : LayerProperties)
+	{
+		uint32 NumLayerExtensions = 0;
+		VERIFY_VKRESULT(vkEnumerateInstanceExtensionProperties(Layer.layerName, &NumLayerExtensions, nullptr));
+
+		auto LastSize = ExtensionProperties.size();
+		ExtensionProperties.resize(NumLayerExtensions + LastSize);
+		VERIFY_VKRESULT(vkEnumerateInstanceExtensionProperties(Layer.layerName, &NumLayerExtensions, ExtensionProperties.data() + LastSize));
+	}
+*/
+
 	::OutputDebugStringA("Found Instance Extensions:\n");
 	PrintExtensions(ExtensionProperties);
 
@@ -247,8 +259,8 @@ void SVulkan::CreateInstance()
 
 	if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
 	{
-		Layers.push_back("VK_LAYER_KHRONOS_validation");
-		//Layers.push_back("VK_LAYER_LUNARG_standard_validation");
+		//Layers.push_back("VK_LAYER_KHRONOS_validation");
+		Layers.push_back("VK_LAYER_LUNARG_standard_validation");
 	}
 
 	VerifyLayers(LayerProperties, Layers);

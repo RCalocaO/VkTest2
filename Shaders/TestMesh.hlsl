@@ -1,3 +1,11 @@
+#define HLSL	1
+
+#include "ShaderDefines.h"
+
+#define CONST_ENTRY(Index, String, Enum)	static const int Enum = Index;
+ENTRY_LIST(CONST_ENTRY)
+#undef CONST_ENTRY
+
 cbuffer ViewUB : register(b0)
 {
 	float4x4 ViewMtx;
@@ -116,7 +124,12 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 		mTangentBasis = transpose(mTangentBasis);
 	}
 
-	if (Mode.x == 0 || Mode.x == 1)
+/*
+	if (Mode.x == MODE_NORMAL_MAP_LIT || 
+		Mode.x == MODE_SHOWTEX_DIFFUSE || 
+		Mode.x == MODE_SHOWTEX_NORMALMAP ||
+		Mode.x == MODE_VERTEX_NORMAL_LIT)
+*/
 	{
 		if (Diffuse.a < 1)
 		{
@@ -139,19 +152,19 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 		NonPrecomputedNormal = normalize(mul(TBN, vNormalMap));
 	}
 
-	if (Mode.x == 1)
+	if (Mode.x == MODE_SHOWTEX_DIFFUSE)
 	{
 		return Diffuse;
 	}
-	else if (Mode.x == 2)
+	else if (Mode.x == MODE_SHOWTEX_NORMALMAP)
 	{
 		return float4(vNormalMap, 1);
 	}
-	else if (Mode.x == 3)
+	else if (Mode.x == MODE_SHOW_VERTEX_NORMALS)
 	{
 		return float4(In.Normal * 0.5 + 0.5, 1);
 	}
-	else if (Mode.x == 4)
+	else if (Mode.x == MODE_SHOW_PIXEL_NORMALS)
 	{
 		vNormalMap = mul(mTangentBasis, vNormalMap);
 		if (bNormalize)
@@ -160,24 +173,24 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 		}
 		return float4(vNormalMap * 0.5 + 0.5, 1);
 	}
-	else if (Mode.x == 5)
+	else if (Mode.x == MODE_SHOW_VERTEX_TANGENT)
 	{
 		return float4(In.Tangent * 0.5 + 0.5, 1);
 	}
-	else if (Mode.x == 6)
+	else if (Mode.x == MODE_VERTEX_NORMAL_LIT)
 	{
 		float L = max(0, dot(In.Normal, -LightDir));
 		return (bLightingOnly ? float4(1, 1, 1, 1) : Diffuse) * float4(L, L, L, 1);
 	}
-	else if (Mode.x == 7)
+	else if (Mode.x == MODE_SHOW_VERTEX_BITANGENT)
 	{
 		return float4(In.BiTangent * 0.5 + 0.5, 1);
 	}
-	else if (Mode.x == 8)
+	else if (Mode.x == MODE_SHOW_ROUGHNESS)
 	{
 		return MetallicRoughness.g;
 	}
-	else if (Mode.x == 9)
+	else if (Mode.x == MODE_SHOW_METALLIC)
 	{
 		return MetallicRoughness.b;
 	}

@@ -13,6 +13,7 @@
 
 #include "RCScene.h"
 
+#include "Shaders/ShaderDefines.h"
 
 #include "../RCUtils/RCUtilsMath.h"
 
@@ -749,18 +750,11 @@ static double Render(FApp& App)
 			ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
 			ImGui::InputFloat3("Light Dir", App.LightDir.Values);
 
+#define TEXT_ENTRY(Index, String, Enum)		String,
 			const char* List[] = {
-				"Default (Normal Mapping Lit)",	// 0
-				"Diffuse Texture",				// 1
-				"NormalMap Texture",		// 2
-				"Show Vertex Normals",		// 3
-				"Show Pixel Normals",			// 4
-				"Show Vertex Tangents",		// 5
-				"Vertex Normal Lit",		// 6
-				"Show Vertex Binormals",		// 7
-				"Show Roughness",	// 8
-				"Show Metallic",	// 9
+				ENTRY_LIST(TEXT_ENTRY)
 			};
+#undef TEXT_ENTRY
 			ImGui::ListBox("Show mode", &g_vMode.x, List, IM_ARRAYSIZE(List));
 			ImGui::Checkbox("Identity World xfrm", (bool*)&g_vMode.w);
 			ImGui::Checkbox("Identity Normal xfrm", (bool*)&g_vMode.y);

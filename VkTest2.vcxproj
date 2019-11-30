@@ -179,6 +179,7 @@
     <ClInclude Include="RCScene.h" />
     <ClInclude Include="RCVulkan.h" />
     <ClInclude Include="RCVulkanBase.h" />
+    <ClInclude Include="Shaders\ShaderDefines.h" />
     <ClInclude Include="VkTest2.h" />
   </ItemGroup>
   <ItemGroup>
