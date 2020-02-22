@@ -171,6 +171,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		{
 #if SCENE_USE_SINGLE_BUFFERS
 			VertexDecl.AddAttribute(BindingIndex, BindingIndex, Format, 0, Semantic);
+/*
 			if (Device.bUseVertexDivisor)
 			{
 				OutPrim.VertexBuffers.push_back(PSOCache.ZeroBuffer);
@@ -178,6 +179,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 				VertexDecl.Divisors.push_back({ BindingIndex, 0 });
 			}
 			else
+*/
 			{
 				OutPrim.VertexBuffers.push_back(FBufferWithMem());
 				FBufferWithMem& VB = OutPrim.VertexBuffers.back();

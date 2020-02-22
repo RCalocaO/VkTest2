@@ -1,4 +1,4 @@
 
 #pragma once
 
-#define USE_VMA			0
+#define USE_VMA			1

@@ -1,10 +1,41 @@
 
 #include "pch.h"
+#define NOMINMAX
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
-
+#include <algorithm>
 #define VMA_IMPLEMENTATION
 #include "RCVulkan.h"
+
+
+static const std::vector<const char*> GInstanceExtensions =
+{
+	VK_KHR_SURFACE_EXTENSION_NAME,
+	VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+#if defined(VK_USE_PLATFORM_WIN32_KHR) && VK_USE_PLATFORM_WIN32_KHR
+	VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+#endif
+	VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+};
+
+static const std::vector<const char*> GDeviceExtensions =
+{
+	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+	//VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+	VK_KHR_MAINTENANCE1_EXTENSION_NAME,
+	VK_KHR_MAINTENANCE2_EXTENSION_NAME,
+	//VK_KHR_MULTIVIEW_EXTENSION_NAME,
+	//VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME,
+	//VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
+	//VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+};
+
+static const std::vector<const char*> GDeviceExtensionsOptional =
+{
+	//VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+	//VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME,
+};
+
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
 	VkDebugUtilsMessageTypeFlagsEXT MessageType, const VkDebugUtilsMessengerCallbackDataEXT* CallbackData,
@@ -259,8 +290,8 @@ void SVulkan::CreateInstance()
 
 	if (!RCUtils::FCmdLine::Get().Contains("-novalidation"))
 	{
-		//Layers.push_back("VK_LAYER_KHRONOS_validation");
-		Layers.push_back("VK_LAYER_LUNARG_standard_validation");
+		Layers.push_back("VK_LAYER_KHRONOS_validation");
+		//Layers.push_back("VK_LAYER_LUNARG_standard_validation");
 	}
 
 	VerifyLayers(LayerProperties, Layers);
@@ -270,21 +301,12 @@ void SVulkan::CreateInstance()
 	::OutputDebugStringA("Using Instance Layers:\n");
 	PrintList(Layers);
 
-	std::vector<const char*> Extensions =
-	{
-		VK_KHR_SURFACE_EXTENSION_NAME,
-		VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-#if defined(VK_USE_PLATFORM_WIN32_KHR) && VK_USE_PLATFORM_WIN32_KHR
-		VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-#endif
-		VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
-	};
-	VerifyExtensions(ExtensionProperties, Extensions);
-	Info.ppEnabledExtensionNames = Extensions.data();
-	Info.enabledExtensionCount = (uint32)Extensions.size();
+	VerifyExtensions(ExtensionProperties, GInstanceExtensions);
+	Info.ppEnabledExtensionNames = GInstanceExtensions.data();
+	Info.enabledExtensionCount = (uint32)GInstanceExtensions.size();
 
 	::OutputDebugStringA("Using Instance Extensions:\n");
-	PrintList(Extensions);
+	PrintList(GInstanceExtensions);
 
 	// Needed to enable 1.1
 	VkApplicationInfo AppInfo;
@@ -408,32 +430,22 @@ void SVulkan::SDevice::Create()
 
 	float Priorities[1] = { 1.0f };
 
-	std::vector<const char*> DeviceExtensions =
-	{
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-		//VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
-		VK_KHR_MAINTENANCE1_EXTENSION_NAME,
-		VK_KHR_MAINTENANCE2_EXTENSION_NAME,
-		//VK_KHR_MULTIVIEW_EXTENSION_NAME,
-		//VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME,
-		//VK_KHR_16BIT_STORAGE_EXTENSION_NAME,
-		//VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
-	};
+	//bUseVertexDivisor = 0 && OptionalExtension(ExtensionProperties, VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
+	//if (bUseVertexDivisor)
+	//{
+	//	GDeviceExtensions.push_back(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
+	//	bUseVertexDivisor = true;
+	//}
 
-	bUseVertexDivisor = 0 && OptionalExtension(ExtensionProperties, VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
-	if (bUseVertexDivisor)
-	{
-		DeviceExtensions.push_back(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
-		bUseVertexDivisor = true;
-	}
+	VerifyExtensions(ExtensionProperties, GDeviceExtensions);
 
-	VerifyExtensions(ExtensionProperties, DeviceExtensions);
+	std::vector<const char*> DeviceExtensions = GDeviceExtensions;
 
-	bPushDescriptor = 0 && OptionalExtension(ExtensionProperties, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
-	if (bPushDescriptor)
-	{
-		DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
-	}
+	//bPushDescriptor = 0 && OptionalExtension(ExtensionProperties, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+	//if (bPushDescriptor)
+	//{
+	//	GDeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+	//}
 
 	if (OptionalExtension(ExtensionProperties, VK_EXT_DEBUG_MARKER_EXTENSION_NAME))
 	{
@@ -469,14 +481,14 @@ void SVulkan::SDevice::Create()
 	ZeroVulkanMem(Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
 	vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
-	VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT Divisor;
-	ZeroVulkanMem(Divisor, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT);
-	if (bUseVertexDivisor)
-	{
-		Divisor.vertexAttributeInstanceRateDivisor = VK_TRUE;
-		Divisor.vertexAttributeInstanceRateZeroDivisor = VK_TRUE;
-		Features.pNext = &Divisor;
-	}
+	//VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT Divisor;
+	//ZeroVulkanMem(Divisor, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT);
+	//if (bUseVertexDivisor)
+	//{
+	//	Divisor.vertexAttributeInstanceRateDivisor = VK_TRUE;
+	//	Divisor.vertexAttributeInstanceRateZeroDivisor = VK_TRUE;
+	//	Features.pNext = &Divisor;
+	//}
 	VkDeviceCreateInfo CreateInfo;
 	ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
 	CreateInfo.queueCreateInfoCount = (uint32)QueueInfos.size();

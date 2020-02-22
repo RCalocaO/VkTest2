@@ -11,6 +11,7 @@
 #include <list>
 #include <set>
 
+#define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
@@ -582,7 +583,7 @@ struct SVulkan
 		uint32 TransferQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		uint32 PresentQueueIndex = VK_QUEUE_FAMILY_IGNORED;
 		VkPhysicalDeviceMemoryProperties MemProperties;
-		bool bUseVertexDivisor = false;
+		//bool bUseVertexDivisor = false;
 		bool bHasMarkerExtension = false;
 #if USE_VMA
 		VmaAllocator VMAAllocator = VK_NULL_HANDLE;
@@ -1438,6 +1439,7 @@ struct FImageWithMem
 #endif
 		Image.Width = Width;
 		Image.Height = Height;
+		Image.Format = Format;
 	}
 
 	void Destroy()
@@ -1902,7 +1904,7 @@ struct FPSOCache
 		VkPipelineMultisampleStateCreateInfo MSInfo;
 		VkPipelineDynamicStateCreateInfo DynamicInfo;
 		VkPipelineViewportStateCreateInfo ViewportState;
-		VkPipelineVertexInputDivisorStateCreateInfoEXT VertexInputDivisor;
+		//VkPipelineVertexInputDivisorStateCreateInfoEXT VertexInputDivisor;
 		VkDynamicState DynamicStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
 		VkViewport Viewport;
 		VkRect2D Scissor;
@@ -1960,7 +1962,7 @@ struct FPSOCache
 			ZeroVulkanMem(ViewportState, VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO);
 			ViewportState.scissorCount = 1;
 			ViewportState.viewportCount = 1;
-			ZeroVulkanMem(VertexInputDivisor, VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT);
+			//ZeroVulkanMem(VertexInputDivisor, VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT);
 		}
 
 		std::map<EShaderStages, SpvReflectDescriptorSet*> Reflection;
@@ -1989,11 +1991,13 @@ struct FPSOCache
 				VertexInputInfo.pVertexAttributeDescriptions = VertexDecl->AttrDescs.data();
 				VertexInputInfo.vertexBindingDescriptionCount = (uint32)VertexDecl->BindingDescs.size();
 				VertexInputInfo.pVertexBindingDescriptions = VertexDecl->BindingDescs.data();
+/*
 				if (Device->bUseVertexDivisor)
 				{
 					VertexInputDivisor.vertexBindingDivisorCount = (uint32)VertexDecl->Divisors.size();
 					VertexInputDivisor.pVertexBindingDivisors = VertexDecl->Divisors.data();
 				}
+*/
 			}
 
 			RasterizerInfo.cullMode = SecondHandle.bDoubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
@@ -2018,10 +2022,12 @@ struct FPSOCache
 			GfxPipelineInfo.pMultisampleState = &MSInfo;
 			DynamicInfo.pDynamicStates = DynamicStates;
 			GfxPipelineInfo.pDynamicState = &DynamicInfo;
+/*
 			if (Device->bUseVertexDivisor)
 			{
 				VertexInputInfo.pNext = &VertexInputDivisor;
 			}
+*/
 		}
 	};
 
@@ -2988,12 +2994,18 @@ struct FDescriptorPSOCache
 		: PSO(InPSO)
 		, ComputePSO(InPSO)
 	{
+		//Writes.reserve(32);
+		//Images.reserve(128);
+		//Buffers.reserve(64);
 	}
 
 	FDescriptorPSOCache(SVulkan::FGfxPSO* InPSO)
 		: PSO(InPSO)
 		, GfxPSO(InPSO)
 	{
+		//Writes.reserve(32);
+		//Images.reserve(128);
+		//Buffers.reserve(64);
 	}
 
 	~FDescriptorPSOCache()
