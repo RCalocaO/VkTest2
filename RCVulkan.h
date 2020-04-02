@@ -570,6 +570,7 @@ struct SVulkan
 
 	struct SDevice
 	{
+		VkInstance Instance = VK_NULL_HANDLE;
 		VkDevice Device = VK_NULL_HANDLE;
 		std::map<uint32, FCommandPool> CmdPools;
 		VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;

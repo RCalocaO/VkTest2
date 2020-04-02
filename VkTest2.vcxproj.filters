@@ -84,6 +84,9 @@
     <ClInclude Include="Shaders\ShaderDefines.h">
       <Filter>Shaders</Filter>
     </ClInclude>
+    <ClInclude Include="..\imgui\examples\imgui_impl_win32.h">
+      <Filter>External\imgui</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -118,6 +121,9 @@
     </ClCompile>
     <ClCompile Include="RCGLTF.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\imgui\examples\imgui_impl_win32.cpp">
+      <Filter>External\imgui</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

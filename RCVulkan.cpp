@@ -209,6 +209,7 @@ void SVulkan::GetPhysicalDevices()
 		}
 
 		auto& Device = Devices[PD];
+		Device.Instance = Instance;
 		Device.PhysicalDevice = PD;
 		Device.Props = Props;
 		Device.ComputeQueueIndex = ComputeQueueIndex;
@@ -311,7 +312,7 @@ void SVulkan::CreateInstance()
 	// Needed to enable 1.1
 	VkApplicationInfo AppInfo;
 	ZeroVulkanMem(AppInfo, VK_STRUCTURE_TYPE_APPLICATION_INFO);
-	AppInfo.apiVersion = VK_API_VERSION_1_1;
+	AppInfo.apiVersion = VK_API_VERSION_1_2;
 
 	Info.pApplicationInfo = &AppInfo;
 
@@ -584,6 +585,7 @@ void SVulkan::SDevice::Create()
 		VmaAllocatorCreateInfo VMACreateInfo = {};
 		VMACreateInfo.physicalDevice = PhysicalDevice;
 		VMACreateInfo.device = Device;
+		VMACreateInfo.instance = Instance;
 
 		VmaVulkanFunctions Funcs = {};
 
@@ -607,6 +609,11 @@ void SVulkan::SDevice::Create()
 #if VMA_DEDICATED_ALLOCATION
 		Funcs.vkGetBufferMemoryRequirements2KHR = vkGetBufferMemoryRequirements2KHR;
 		Funcs.vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2KHR;
+		Funcs.vkGetBufferMemoryRequirements2KHR = vkGetBufferMemoryRequirements2KHR;
+		Funcs.vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2KHR;
+		Funcs.vkBindBufferMemory2KHR = vkBindBufferMemory2KHR;
+		Funcs.vkBindImageMemory2KHR = vkBindImageMemory2KHR;
+		Funcs.vkGetPhysicalDeviceMemoryProperties2KHR = vkGetPhysicalDeviceMemoryProperties2KHR;
 #endif
 
 		VMACreateInfo.pVulkanFunctions = &Funcs;

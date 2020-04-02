@@ -10,6 +10,7 @@
 #include "RCVulkan.h"
 
 #include "imgui.h"
+#include "examples/imgui_impl_win32.h"
 
 #include "RCScene.h"
 
@@ -194,11 +195,20 @@ struct FApp
 		TestCSBuffer.Destroy();
 		ClipVB.Destroy();
 		ColorUB.Destroy();
+
+		ImGui_ImplWin32_Shutdown();
 	}
 
 	void SetupImGuiAndResources(SVulkan::SDevice& Device)
 	{
+		IMGUI_CHECKVERSION();
+
+		ImGui::CreateContext();
+		ImGui::StyleColorsDark();
+
 		ImGuiIO& IO = ImGui::GetIO();
+		ImGui_ImplWin32_Init(Window);
+
 
 		int32 Width = 0, Height = 0;
 		unsigned char* Pixels = nullptr;
@@ -256,10 +266,12 @@ struct FApp
 
 	void ImGuiNewFrame()
 	{
+		ImGui_ImplWin32_NewFrame();
+
 		ImGuiIO& io = ImGui::GetIO();
 		IM_ASSERT(io.Fonts->IsBuilt());     // Font atlas needs to be built, call renderer _NewFrame() function e.g. ImGui_ImplOpenGL3_NewFrame() 
 
-			// Setup display size
+		// Setup display size
 		int w, h;
 		int display_w, display_h;
 		glfwGetWindowSize(Window, &w, &h);
@@ -269,7 +281,6 @@ struct FApp
 
 		// Setup time step
 		double current_time = glfwGetTime();
-		io.DeltaTime = Time > 0.0 ? (float)(current_time - Time) : (float)(1.0f/60.0f);
 		Time = current_time;
 
 		UpdateMousePosAndButtons();
@@ -838,6 +849,7 @@ static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, i
 
 	if (IsModifierKey(Key) || io.WantCaptureKeyboard)
 	{
+/*
 		if (Action == GLFW_PRESS)
 		{
 			io.KeysDown[Key] = true;
@@ -852,6 +864,7 @@ static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, i
 		io.KeyShift = io.KeysDown[GLFW_KEY_LEFT_SHIFT] || io.KeysDown[GLFW_KEY_RIGHT_SHIFT];
 		io.KeyAlt = io.KeysDown[GLFW_KEY_LEFT_ALT] || io.KeysDown[GLFW_KEY_RIGHT_ALT];
 		io.KeySuper = io.KeysDown[GLFW_KEY_LEFT_SUPER] || io.KeysDown[GLFW_KEY_RIGHT_SUPER];
+*/
 	}
 	else
 	{
@@ -1076,14 +1089,8 @@ static GLFWwindow* Init(FApp& App)
 	SetupShaders(App);
 
 	App.Create(Device, Window);
-
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGui::StyleColorsDark();
-	ImGuiIO& IO = ImGui::GetIO();
-	//IO.ImeWindowHandle = Window;
-
 	App.SetupImGuiAndResources(Device);
+
 	glfwShowWindow(Window);
 
 	return Window;
