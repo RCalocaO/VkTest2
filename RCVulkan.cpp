@@ -119,6 +119,9 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 		case VK_OBJECT_TYPE_SHADER_MODULE:
 			s += "\tShaderModule ";
 			break;
+		case VK_OBJECT_TYPE_SURFACE_KHR:
+			s += "\tSurface ";
+			break;
 		case VK_OBJECT_TYPE_UNKNOWN:
 			continue;
 		default:
@@ -319,8 +322,9 @@ void SVulkan::CreateInstance()
 	VERIFY_VKRESULT(vkCreateInstance(&Info, nullptr, &Instance));
 }
 
-void SVulkan::FSwapchain::SetupSurface(SDevice* InDevice, VkInstance Instance, struct GLFWwindow* Window)
+void SVulkan::FSwapchain::SetupSurface(SDevice* InDevice, VkInstance InInstance, struct GLFWwindow* Window)
 {
+	Instance = InInstance;
 	Device = InDevice;
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
 	{

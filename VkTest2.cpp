@@ -249,7 +249,7 @@ struct FApp
 		}
 
 		{
-			VkSamplerCreateInfo Info;
+			VkSamplerCreateInfo Info = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, };
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO);
 			Info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 			Info.magFilter = VK_FILTER_LINEAR;

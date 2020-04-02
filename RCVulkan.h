@@ -829,6 +829,7 @@ struct SVulkan
 
 	struct FSwapchain
 	{
+		VkInstance Instance = VK_NULL_HANDLE;
 		SDevice* Device = nullptr;
 		VkSwapchainKHR Swapchain = VK_NULL_HANDLE;
 		VkSemaphore AcquireBackbufferSemaphore = VK_NULL_HANDLE;
@@ -840,7 +841,7 @@ struct SVulkan
 		VkFormat Format = VK_FORMAT_UNDEFINED;
 		VkSurfaceCapabilitiesKHR SurfaceCaps;
 
-		void SetupSurface(SDevice* InDevice, VkInstance Instance, struct GLFWwindow* Window);
+		void SetupSurface(SDevice* InDevice, VkInstance InInstance, struct GLFWwindow* Window);
 
 		static VkPresentModeKHR GetPresentMode(VkPhysicalDevice PhysicalDevice, VkSurfaceKHR Surface)
 		{
@@ -912,6 +913,9 @@ struct SVulkan
 			FinalSemaphore = VK_NULL_HANDLE;
 			vkDestroySwapchainKHR(Device->Device, Swapchain, nullptr);
 			Swapchain = VK_NULL_HANDLE;
+
+			vkDestroySurfaceKHR(Instance, Surface, nullptr);
+			Surface = VK_NULL_HANDLE;
 		}
 
 		void AcquireBackbuffer()
