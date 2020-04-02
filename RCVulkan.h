@@ -2486,6 +2486,8 @@ struct FDescriptorCache
 			{
 				std::map<VkDescriptorType, uint32> TypeCounts;
 				NumDescriptorsPerSet.push_back(0);
+				uint64_t BindingMask = 0;
+				uint32_t NumBindings = 0;
 				for (auto OuterPair : PSO->Shaders)
 				{
 					for (auto Pair : OuterPair.second->SetInfoBindings)
@@ -2493,10 +2495,13 @@ struct FDescriptorCache
 						for (VkDescriptorSetLayoutBinding Binding : Pair.second)
 						{
 							TypeCounts[Binding.descriptorType] += Binding.descriptorCount;
+							check(Binding.binding <= 63);
+							BindingMask |= (uint64_t)1 << (uint64_t)Binding.binding;
+							NumBindings = Max(NumBindings, Binding.binding + 1);
 						}
-						NumDescriptorsPerSet[0] += (uint32)Pair.second.size();
 					}
 				}
+				NumDescriptorsPerSet[0] = NumBindings;
 
 				for (auto Pair : TypeCounts)
 				{
