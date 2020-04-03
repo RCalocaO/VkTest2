@@ -278,78 +278,45 @@ struct FApp
 	{
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
-/*
-		ImGuiIO& io = ImGui::GetIO();
-		IM_ASSERT(io.Fonts->IsBuilt());     // Font atlas needs to be built, call renderer _NewFrame() function e.g. ImGui_ImplOpenGL3_NewFrame() 
 
-		// Setup display size
-		int w, h;
-		int display_w, display_h;
-		glfwGetWindowSize(Window, &w, &h);
-		glfwGetFramebufferSize(Window, &display_w, &display_h);
-		io.DisplaySize = ImVec2((float)w, (float)h);
-		io.DisplayFramebufferScale = ImVec2(w > 0 ? ((float)display_w / w) : 0, h > 0 ? ((float)display_h / h) : 0);
-*/
 		// Setup time step
 		double current_time = glfwGetTime();
 		Time = current_time;
 
-		//UpdateMousePosAndButtons();
-		//UpdateMouseCursor();
+		ProcessInput();
 	}
-/*
-	void UpdateMousePosAndButtons()
+
+	void ProcessInput()
 	{
-		ImGuiIO& io = ImGui::GetIO();
-		for (int i = 0; i < IM_ARRAYSIZE(io.MouseDown); i++)
+		if (glfwGetKey(Window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
 		{
-			// If a mouse press event came, always pass it as "mouse held this frame", so we don't miss click-release events that are shorter than 1 frame.
-			io.MouseDown[i] = MouseJustPressed[i] || glfwGetMouseButton(Window, i) != 0;
-			MouseJustPressed[i] = false;
+			glfwSetWindowShouldClose(Window, true);
 		}
 
-		// Update mouse position
-		const ImVec2 mouse_pos_backup = io.MousePos;
-		io.MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
-		const bool focused = glfwGetWindowAttrib(Window, GLFW_FOCUSED) != 0;
-		if (focused)
+		float CameraSpeed = 2.5f * (float)Time;
+		FVector3 Front = Camera.ViewMtx.Rows[0].GetVector3();
+		FVector3 Up = Camera.ViewMtx.Rows[1].GetVector3();
+		if (glfwGetKey(Window, GLFW_KEY_W) == GLFW_PRESS)
 		{
-			if (io.WantSetMousePos)
-			{
-				glfwSetCursorPos(Window, (double)mouse_pos_backup.x, (double)mouse_pos_backup.y);
-			}
-			else
-			{
-				double mouse_x, mouse_y;
-				glfwGetCursorPos(Window, &mouse_x, &mouse_y);
-				io.MousePos = ImVec2((float)mouse_x, (float)mouse_y);
-			}
+			g_vMove += CameraSpeed * Front;
+		}
+
+		if (glfwGetKey(Window, GLFW_KEY_S) == GLFW_PRESS)
+		{
+			g_vMove -= CameraSpeed * Front;
+		}
+
+		if (glfwGetKey(Window, GLFW_KEY_A) == GLFW_PRESS)
+		{
+			g_vMove -= FVector3::Cross(Front, Up).GetNormalized() * CameraSpeed;
+		}
+
+		if (glfwGetKey(Window, GLFW_KEY_D) == GLFW_PRESS)
+		{
+			g_vMove += FVector3::Cross(Front, Up).GetNormalized() * CameraSpeed;
 		}
 	}
 
-	void UpdateMouseCursor()
-	{
-		ImGuiIO& io = ImGui::GetIO();
-		if ((io.ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange) || glfwGetInputMode(Window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
-		{
-			return;
-		}
-
-		ImGuiMouseCursor imgui_cursor = ImGui::GetMouseCursor();
-		if (imgui_cursor == ImGuiMouseCursor_None || io.MouseDrawCursor)
-		{
-			// Hide OS mouse cursor if imgui is drawing it or if it wants no cursor
-			glfwSetInputMode(Window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
-		}
-		else
-		{
-			// Show OS mouse cursor
-			// FIXME-PLATFORM: Unfocused windows seems to fail changing the mouse cursor with GLFW 3.2, but 3.3 works here.
-			glfwSetCursor(Window, MouseCursors[imgui_cursor] ? MouseCursors[imgui_cursor] : MouseCursors[ImGuiMouseCursor_Arrow]);
-			glfwSetInputMode(Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-		}
-	}
-*/
 	void DrawDataImGui(ImDrawData* DrawData, SVulkan::FCmdBuffer* CmdBuffer, SVulkan::FFramebuffer* Framebuffer)
 	{
 		if (DrawData->CmdListsCount > 0)
@@ -825,97 +792,6 @@ static double Render(FApp& App)
 	return GpuTimeMS;
 }
 
-/*
-static void CharCallback(GLFWwindow* Window, unsigned int Char)
-{
-	ImGuiIO& io = ImGui::GetIO();
-	io.AddInputCharacter(Char);
-}
-*/
-static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, int Mods)
-{
-	ImGuiIO& io = ImGui::GetIO();
-
-	auto IsModifierKey = [](int Key)
-	{
-		switch (Key)
-		{
-		case GLFW_KEY_LEFT_CONTROL:
-		case GLFW_KEY_RIGHT_CONTROL:
-		case GLFW_KEY_LEFT_SHIFT:
-		case GLFW_KEY_RIGHT_SHIFT:
-		case GLFW_KEY_LEFT_ALT:
-		case GLFW_KEY_RIGHT_ALT:
-		case GLFW_KEY_LEFT_SUPER:
-		case GLFW_KEY_RIGHT_SUPER:
-			break;
-		default:
-			return false;
-		}
-
-		return true;
-	};
-
-	if (IsModifierKey(Key) || io.WantCaptureKeyboard)
-	{
-/*
-		if (Action == GLFW_PRESS)
-		{
-			io.KeysDown[Key] = true;
-		}
-		if (Action == GLFW_RELEASE)
-		{
-			io.KeysDown[Key] = false;
-		}
-
-		// Modifiers are not reliable across systems
-		io.KeyCtrl = io.KeysDown[GLFW_KEY_LEFT_CONTROL] || io.KeysDown[GLFW_KEY_RIGHT_CONTROL];
-		io.KeyShift = io.KeysDown[GLFW_KEY_LEFT_SHIFT] || io.KeysDown[GLFW_KEY_RIGHT_SHIFT];
-		io.KeyAlt = io.KeysDown[GLFW_KEY_LEFT_ALT] || io.KeysDown[GLFW_KEY_RIGHT_ALT];
-		io.KeySuper = io.KeysDown[GLFW_KEY_LEFT_SUPER] || io.KeysDown[GLFW_KEY_RIGHT_SUPER];
-*/
-	}
-	else
-	{
-		if (Action == GLFW_PRESS || Action == GLFW_REPEAT)
-		{
-			float Delta = io.KeyShift ? 5.0f : 1.0f;
-			switch (Key)
-			{
-			case GLFW_KEY_LEFT_SHIFT:
-			case GLFW_KEY_RIGHT_SHIFT:
-				break;
-			case GLFW_KEY_RIGHT:
-				g_vRot.y += Delta;
-				break;
-			case GLFW_KEY_LEFT:
-				g_vRot.y -= Delta;
-				break;
-			case GLFW_KEY_PAGE_UP:
-				g_vMove.y += Delta;
-				break;
-			case GLFW_KEY_PAGE_DOWN:
-				g_vMove.y -= Delta;
-				break;
-			case GLFW_KEY_W:
-				g_vMove.z += Delta;
-				break;
-			case GLFW_KEY_S:
-				g_vMove.z -= Delta;
-				break;
-			case GLFW_KEY_A:
-				g_vMove.x += Delta;
-				break;
-			case GLFW_KEY_D:
-				g_vMove.x -= Delta;
-				break;
-			default:
-				break;
-			}
-		}
-	}
-}
-
 static void FixGLTFVertexDecl(SVulkan::FShader* Shader, int32& PrimVertexDeclHandle)
 {
 	SpvReflectShaderModule Module;
@@ -1087,9 +963,6 @@ static GLFWwindow* Init(FApp& App)
 	GPSOCache.Init(&Device);
 	GDescriptorCache.Init(&Device);
 	GStagingBufferMgr.Init(&Device);
-
-	glfwSetKeyCallback(Window, KeyCallback);
-	//glfwSetCharCallback(Window, CharCallback);
 
 	const char* Filename = nullptr;
 	if (RCUtils::FCmdLine::Get().TryGetStringFromPrefix("-gltf=", Filename))
