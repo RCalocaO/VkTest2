@@ -87,6 +87,9 @@
     <ClInclude Include="..\imgui\examples\imgui_impl_win32.h">
       <Filter>External\imgui</Filter>
     </ClInclude>
+    <ClInclude Include="..\imgui\examples\imgui_impl_glfw.h">
+      <Filter>External</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -124,6 +127,9 @@
     </ClCompile>
     <ClCompile Include="..\imgui\examples\imgui_impl_win32.cpp">
       <Filter>External\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\imgui\examples\imgui_impl_glfw.cpp">
+      <Filter>External</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

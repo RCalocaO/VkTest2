@@ -2,7 +2,6 @@
 //
 
 #include "pch.h"
-#include <GLFW/glfw3.h>
 
 // Fix Windows warning
 #undef APIENTRY
@@ -10,7 +9,10 @@
 #include "RCVulkan.h"
 
 #include "imgui.h"
-#include "examples/imgui_impl_win32.h"
+#include "examples/imgui_impl_glfw.h"
+
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 
 #include "RCScene.h"
 
@@ -55,6 +57,14 @@ FVector3 TryGetVector3Prefix(const char* Prefix, FVector3 Value)
 
 	return Value;
 }
+
+static void ResizeCallback(GLFWwindow*, int w, int h)
+{
+	//g_SwapChainRebuild = true;
+	//g_SwapChainResizeWidth = w;
+	//g_SwapChainResizeHeight = h;
+}
+
 
 struct FApp
 {
@@ -169,6 +179,7 @@ struct FApp
 
 		int32 Width = 0, Height = 1;
 		glfwGetFramebufferSize(Window, &Width, &Height);
+		glfwSetFramebufferSizeCallback(Window, ResizeCallback);
 		DepthBuffer.Create(Device, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::GPU, (uint32)Width, (uint32)Height, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 	}
 
@@ -196,7 +207,7 @@ struct FApp
 		ClipVB.Destroy();
 		ColorUB.Destroy();
 
-		ImGui_ImplWin32_Shutdown();
+		ImGui_ImplGlfw_Shutdown();
 	}
 
 	void SetupImGuiAndResources(SVulkan::SDevice& Device)
@@ -207,8 +218,7 @@ struct FApp
 		ImGui::StyleColorsDark();
 
 		ImGuiIO& IO = ImGui::GetIO();
-		ImGui_ImplWin32_Init(Window);
-
+		ImGui_ImplGlfw_InitForVulkan(Window, true);
 
 		int32 Width = 0, Height = 0;
 		unsigned char* Pixels = nullptr;
@@ -266,8 +276,9 @@ struct FApp
 
 	void ImGuiNewFrame()
 	{
-		ImGui_ImplWin32_NewFrame();
-
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+/*
 		ImGuiIO& io = ImGui::GetIO();
 		IM_ASSERT(io.Fonts->IsBuilt());     // Font atlas needs to be built, call renderer _NewFrame() function e.g. ImGui_ImplOpenGL3_NewFrame() 
 
@@ -278,17 +289,15 @@ struct FApp
 		glfwGetFramebufferSize(Window, &display_w, &display_h);
 		io.DisplaySize = ImVec2((float)w, (float)h);
 		io.DisplayFramebufferScale = ImVec2(w > 0 ? ((float)display_w / w) : 0, h > 0 ? ((float)display_h / h) : 0);
-
+*/
 		// Setup time step
 		double current_time = glfwGetTime();
 		Time = current_time;
 
-		UpdateMousePosAndButtons();
-		UpdateMouseCursor();
-
-		ImGui::NewFrame();
+		//UpdateMousePosAndButtons();
+		//UpdateMouseCursor();
 	}
-
+/*
 	void UpdateMousePosAndButtons()
 	{
 		ImGuiIO& io = ImGui::GetIO();
@@ -340,7 +349,7 @@ struct FApp
 			glfwSetInputMode(Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 		}
 	}
-
+*/
 	void DrawDataImGui(ImDrawData* DrawData, SVulkan::FCmdBuffer* CmdBuffer, SVulkan::FFramebuffer* Framebuffer)
 	{
 		if (DrawData->CmdListsCount > 0)
@@ -816,13 +825,13 @@ static double Render(FApp& App)
 	return GpuTimeMS;
 }
 
-
+/*
 static void CharCallback(GLFWwindow* Window, unsigned int Char)
 {
 	ImGuiIO& io = ImGui::GetIO();
 	io.AddInputCharacter(Char);
 }
-
+*/
 static void KeyCallback(GLFWwindow* Window, int Key, int Scancode, int Action, int Mods)
 {
 	ImGuiIO& io = ImGui::GetIO();
@@ -1055,7 +1064,9 @@ static GLFWwindow* Init(FApp& App)
 	App.LightDir = FVector4(TryGetVector3Prefix("-lightdir=", App.LightDir.GetVector3()), 0);
 	App.LightDir = App.LightDir.GetNormalized();
 
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
+
 	glfwHideWindow(Window);
 	check(Window);
 
@@ -1078,7 +1089,7 @@ static GLFWwindow* Init(FApp& App)
 	GStagingBufferMgr.Init(&Device);
 
 	glfwSetKeyCallback(Window, KeyCallback);
-	glfwSetCharCallback(Window, CharCallback);
+	//glfwSetCharCallback(Window, CharCallback);
 
 	const char* Filename = nullptr;
 	if (RCUtils::FCmdLine::Get().TryGetStringFromPrefix("-gltf=", Filename))
@@ -1100,6 +1111,7 @@ static void Deinit(FApp& App, GLFWwindow* Window)
 {
 	GVulkan.DeinitPre();
 
+	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
 
 	GStagingBufferMgr.Destroy();
@@ -1114,6 +1126,7 @@ static void Deinit(FApp& App, GLFWwindow* Window)
 	GVulkan.Deinit();
 
 	glfwDestroyWindow(Window);
+	glfwTerminate();
 }
 
 int main()
