@@ -294,26 +294,42 @@ struct FApp
 		}
 
 		float CameraSpeed = 2.5f * (float)Time;
+
+		if (glfwGetKey(Window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
+		{
+			CameraSpeed *= 2.5f;
+		}
+
 		FVector3 Front = Camera.ViewMtx.Rows[0].GetVector3();
 		FVector3 Up = Camera.ViewMtx.Rows[1].GetVector3();
-		if (glfwGetKey(Window, GLFW_KEY_W) == GLFW_PRESS)
+		if (glfwGetKey(Window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_UP) == GLFW_PRESS)
 		{
 			g_vMove += CameraSpeed * Front;
 		}
 
-		if (glfwGetKey(Window, GLFW_KEY_S) == GLFW_PRESS)
+		if (glfwGetKey(Window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_DOWN) == GLFW_PRESS)
 		{
 			g_vMove -= CameraSpeed * Front;
 		}
 
-		if (glfwGetKey(Window, GLFW_KEY_A) == GLFW_PRESS)
+		if (glfwGetKey(Window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_LEFT) == GLFW_PRESS)
 		{
 			g_vMove -= FVector3::Cross(Front, Up).GetNormalized() * CameraSpeed;
 		}
 
-		if (glfwGetKey(Window, GLFW_KEY_D) == GLFW_PRESS)
+		if (glfwGetKey(Window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_RIGHT) == GLFW_PRESS)
 		{
 			g_vMove += FVector3::Cross(Front, Up).GetNormalized() * CameraSpeed;
+		}
+
+		if (glfwGetKey(Window, GLFW_KEY_PAGE_UP) == GLFW_PRESS)
+		{
+			g_vMove += Up * CameraSpeed;
+		}
+
+		if (glfwGetKey(Window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS)
+		{
+			g_vMove -= Up * CameraSpeed;
 		}
 	}
 
