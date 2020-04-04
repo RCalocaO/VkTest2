@@ -2486,21 +2486,34 @@ struct FDescriptorCache
 			{
 				std::map<VkDescriptorType, uint32> TypeCounts;
 				NumDescriptorsPerSet.push_back(0);
-				uint64_t BindingMask = 0;
-				uint32_t NumBindings = 0;
+				uint32 NumBindings = 0;
+				int32 LastSet = -1;
+				std::set<uint32> UniqueBindings;
 				for (auto OuterPair : PSO->Shaders)
 				{
 					for (auto Pair : OuterPair.second->SetInfoBindings)
 					{
+						if (LastSet == -1)
+						{
+							LastSet = (int32)Pair.first;
+						}
+						else
+						{
+							check(LastSet == (int32)Pair.first);
+						}
 						for (VkDescriptorSetLayoutBinding Binding : Pair.second)
 						{
+							check(Binding.descriptorCount == 1);
 							TypeCounts[Binding.descriptorType] += Binding.descriptorCount;
-							check(Binding.binding <= 63);
-							BindingMask |= (uint64_t)1 << (uint64_t)Binding.binding;
-							NumBindings = Max(NumBindings, Binding.binding + 1);
+							if (UniqueBindings.find(Binding.binding) == UniqueBindings.end())
+							{
+								UniqueBindings.insert(Binding.binding);
+							}
 						}
 					}
 				}
+
+				NumBindings += (uint32)UniqueBindings.size();
 				NumDescriptorsPerSet[0] = NumBindings;
 
 				for (auto Pair : TypeCounts)
@@ -2997,42 +3010,25 @@ struct FDescriptorPSOCache
 	SVulkan::FComputePSO* ComputePSO = nullptr;
 	SVulkan::FGfxPSO* GfxPSO = nullptr;
 	std::vector<VkWriteDescriptorSet> Writes;
-	std::vector<VkDescriptorImageInfo*> Images;
-	std::vector<VkDescriptorBufferInfo*> Buffers;
+	std::vector<VkDescriptorImageInfo> Images;
+	std::vector<VkDescriptorBufferInfo> Buffers;
+	bool bFinalized = false;
 
 	FDescriptorPSOCache(SVulkan::FComputePSO* InPSO)
 		: PSO(InPSO)
 		, ComputePSO(InPSO)
 	{
-		//Writes.reserve(32);
-		//Images.reserve(128);
-		//Buffers.reserve(64);
 	}
 
 	FDescriptorPSOCache(SVulkan::FGfxPSO* InPSO)
 		: PSO(InPSO)
 		, GfxPSO(InPSO)
 	{
-		//Writes.reserve(32);
-		//Images.reserve(128);
-		//Buffers.reserve(64);
-	}
-
-	~FDescriptorPSOCache()
-	{
-		for (auto* I : Images)
-		{
-			delete I;
-		}
-
-		for (auto* B : Buffers)
-		{
-			delete B;
-		}
 	}
 
 	void SetUniformBuffer(const char* Name, FBufferWithMem& Buffer)
 	{
+		check(!bFinalized);
 		uint32 Binding = UINT32_MAX;
 		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
 		bool bFound = GetParameter(Name, Binding, Type);
@@ -3044,11 +3040,11 @@ struct FDescriptorPSOCache
 			Write.descriptorCount = 1;
 			Write.dstBinding = Binding;
 			Write.descriptorType = Type;
-			VkDescriptorBufferInfo* BInfo = new VkDescriptorBufferInfo;
-			ZeroMem(*BInfo);
-			BInfo->buffer = Buffer.Buffer.Buffer;
-			BInfo->range = Buffer.Size;
-			Write.pBufferInfo = BInfo;
+			VkDescriptorBufferInfo BInfo;
+			ZeroMem(BInfo);
+			BInfo.buffer = Buffer.Buffer.Buffer;
+			BInfo.range = Buffer.Size;
+			Write.pBufferInfo = (VkDescriptorBufferInfo*)Buffers.size();
 			Buffers.push_back(BInfo);
 			Writes.push_back(Write);
 		}
@@ -3056,6 +3052,7 @@ struct FDescriptorPSOCache
 
 	void SetTexelBuffer(const char* Name, FBufferWithMemAndView& Buffer)
 	{
+		check(!bFinalized);
 		uint32 Binding = UINT32_MAX;
 		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
 		bool bFound = GetParameter(Name, Binding, Type);
@@ -3074,6 +3071,7 @@ struct FDescriptorPSOCache
 
 	void SetSampler(const char* Name, VkSampler Sampler)
 	{
+		check(!bFinalized);
 		uint32 Binding = UINT32_MAX;
 		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
 		bool bFound = GetParameter(Name, Binding, Type);
@@ -3085,11 +3083,11 @@ struct FDescriptorPSOCache
 			Write.descriptorCount = 1;
 			Write.dstBinding = Binding;
 			Write.descriptorType = Type;
-			VkDescriptorImageInfo* IInfo = new VkDescriptorImageInfo;
-			ZeroMem(*IInfo);
-			IInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			IInfo->sampler = Sampler;
-			Write.pImageInfo = IInfo;
+			VkDescriptorImageInfo IInfo;
+			ZeroMem(IInfo);
+			IInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			IInfo.sampler = Sampler;
+			Write.pImageInfo = (VkDescriptorImageInfo*)Images.size();
 			Images.push_back(IInfo);
 			Writes.push_back(Write);
 		}
@@ -3097,6 +3095,7 @@ struct FDescriptorPSOCache
 
 	void SetImage(const char* Name, FImageWithMemAndView& Image, VkSampler Sampler)
 	{
+		check(!bFinalized);
 		uint32 Binding = UINT32_MAX;
 		VkDescriptorType Type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
 		bool bFound = GetParameter(Name, Binding, Type);
@@ -3108,19 +3107,53 @@ struct FDescriptorPSOCache
 			Write.descriptorCount = 1;
 			Write.dstBinding = Binding;
 			Write.descriptorType = Type;
-			VkDescriptorImageInfo* IInfo = new VkDescriptorImageInfo;
-			ZeroMem(*IInfo);
-			IInfo->imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			IInfo->sampler = Sampler;
-			IInfo->imageView = Image.View;
-			Write.pImageInfo = IInfo;
+			VkDescriptorImageInfo IInfo;
+			ZeroMem(IInfo);
+			IInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			IInfo.sampler = Sampler;
+			IInfo.imageView = Image.View;
+			Write.pImageInfo = (VkDescriptorImageInfo*)Images.size();
 			Images.push_back(IInfo);
 			Writes.push_back(Write);
 		}
 	}
 
+	void Finalize()
+	{
+		check(!bFinalized);
+		for (auto& Write : Writes)
+		{
+			switch (Write.descriptorType)
+			{
+			case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+			case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+			case VK_DESCRIPTOR_TYPE_SAMPLER:
+			case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+			case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+				Write.pImageInfo = &Images[(uint32)(uint64)Write.pImageInfo];
+				break;
+			case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+			case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+			case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+			case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+				Write.pBufferInfo = &Buffers[(uint32)(uint64)Write.pBufferInfo];
+				break;
+			case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+			case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+				// No-op
+				break;
+			default:
+				check(0);
+				break;
+			}
+		}
+		bFinalized = true;
+	}
+
 	void UpdateDescriptors(FDescriptorCache& Cache, SVulkan::FCmdBuffer* CmdBuffer)
 	{
+		Finalize();
+		check(bFinalized);
 		if (GfxPSO)
 		{
 			Cache.UpdateDescriptors(CmdBuffer, (uint32)Writes.size(), Writes.data(), GfxPSO);
