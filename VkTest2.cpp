@@ -33,13 +33,93 @@ static FDescriptorCache GDescriptorCache;
 
 static FStagingBufferManager GStagingBufferMgr;
 
-static FVector3 g_vMove = {0, 0, 0};
-static FVector3 g_vRot = {0, 0, 0};
+struct FCamera
+{
+	FVector3 Pos = { 0, 0, 0 };
+	FVector3 Front = { 0, 0, 1 };
+	FVector3 Up = { 0, 1, 0 };
+
+	float LastX;
+	float LastY;
+	bool bFirstTime = true;
+
+	union
+	{
+		FVector2 Rot;
+		struct
+		{
+			float Yaw;
+			float Pitch;
+		};
+	};
+
+	FCamera()
+	{
+		Yaw = 0;
+		Pitch = 0;
+	}
+
+	void Init(float Width, float Height)
+	{
+		LastX = Width / 2.0f;
+		LastY = Height / 2.0f;
+	}
+
+	FMatrix4x4 Update()
+	{
+		Pitch = Clamp(-89.0f, Pitch, 89.0f);
+
+		FVector3 Direction;
+		Direction.x = cos(ToRadians(Yaw)) * cos(ToRadians(Pitch));
+		Direction.y = sin(ToRadians(Pitch));
+		Direction.z = sin(ToRadians(Yaw)) * cos(ToRadians(Pitch));
+		Front = Direction.GetNormalized();
+
+		FVector3 f = Front/*.GetNormalized()*/;
+		FVector3 u = Up.GetNormalized();
+		FVector3 s = FVector3::Cross(f, u).GetNormalized();
+		u = FVector3::Cross(s, f);
+
+		FMatrix4x4 ViewMtx = FMatrix4x4::GetIdentity();
+		ViewMtx.Set(0, 0, s.x);
+		ViewMtx.Set(1, 0, s.y);
+		ViewMtx.Set(2, 0, s.z);
+		ViewMtx.Set(0, 1, u.x);
+		ViewMtx.Set(1, 1, u.y);
+		ViewMtx.Set(2, 1, u.z);
+		ViewMtx.Set(0, 2, -f.x);
+		ViewMtx.Set(1, 2, -f.y);
+		ViewMtx.Set(2, 2, -f.z);
+		ViewMtx.Set(3, 0, FVector3::Dot(s, Pos));
+		ViewMtx.Set(3, 1, FVector3::Dot(u, Pos));
+		ViewMtx.Set(3, 2, -FVector3::Dot(f, Pos));
+
+		return ViewMtx;
+	}
+};
+
 static FIntVector4 g_vMode = {0, 0, 0 ,0};
 static FIntVector4 g_vMode2 = { 0, 0, 0 ,0 };
 static bool g_bWireframe = false;
 
 extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
+
+FVector2 TryGetVector2Prefix(const char* Prefix, FVector2 Value)
+{
+	check(Prefix);
+	uint32 PrefixLength = (uint32)strlen(Prefix);
+	for (const auto& Arg : RCUtils::FCmdLine::Get().Args)
+	{
+		if (!_strnicmp(Arg.c_str(), Prefix, PrefixLength))
+		{
+			const char* Vector3String = Arg.c_str() + PrefixLength;
+			sscanf(Vector3String, "%f,%f", &Value.x, &Value.y);
+			break;
+		}
+	}
+
+	return Value;
+}
 
 FVector3 TryGetVector3Prefix(const char* Prefix, FVector3 Value)
 {
@@ -60,6 +140,8 @@ FVector3 TryGetVector3Prefix(const char* Prefix, FVector3 Value)
 
 static void ResizeCallback(GLFWwindow*, int w, int h)
 {
+	// Unhandled
+	check(0);
 	//g_SwapChainRebuild = true;
 	//g_SwapChainResizeWidth = w;
 	//g_SwapChainResizeHeight = h;
@@ -68,6 +150,8 @@ static void ResizeCallback(GLFWwindow*, int w, int h)
 
 struct FApp
 {
+	bool bLMouseButtonHeld = false;
+	bool bRMouseButtonHeld = false;
 	uint32 FrameIndex = 0;
 	FImageWithMemAndView DepthBuffer;
 	FPSOCache::FPSOHandle PassThroughVSRedPSPSO;
@@ -83,8 +167,8 @@ struct FApp
 	FBufferWithMem TestCSUB;
 	FBufferWithMem ColorUB;
 	GLFWwindow* Window;
-	uint32 ImGuiMaxVertices = 16384 * 3;
-	uint32 ImGuiMaxIndices = 16384 * 3;
+	uint32 ImGuiMaxVertices = 32768 * 3;
+	uint32 ImGuiMaxIndices = 32768 * 3;
 	FImageWithMemAndView ImGuiFont;
 	VkSampler ImGuiFontSampler = VK_NULL_HANDLE;
 	VkSampler LinearMipSampler = VK_NULL_HANDLE;
@@ -101,8 +185,6 @@ struct FApp
 	FPSOCache::FPSOHandle ImGUIPSO;
 	int32 ImGUIVertexDecl = -1;
 	double Time = 0;
-	bool MouseJustPressed[5] = {false, false, false, false, false};
-	GLFWcursor* MouseCursors[ImGuiMouseCursor_COUNT] = {0};
 
 	float LastDelta = 1.0f / 60.0f;
 	double GpuDelta = 0;
@@ -272,6 +354,7 @@ struct FApp
 	{
 		++FrameIndex;
 		GStagingBufferMgr.Refresh();
+		Camera.UpdateMatrix();
 	}
 
 	void ImGuiNewFrame()
@@ -288,48 +371,72 @@ struct FApp
 
 	void ProcessInput()
 	{
+		bLMouseButtonHeld = (glfwGetMouseButton(Window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS);
+		bRMouseButtonHeld = (glfwGetMouseButton(Window, GLFW_MOUSE_BUTTON_2) == GLFW_PRESS);
+		//bCtrlHeld = bCtrlHeld || (glfwGetKey(Window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS);
+
 		if (glfwGetKey(Window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
 		{
 			glfwSetWindowShouldClose(Window, true);
 		}
 
-		float CameraSpeed = 2.5f * (float)Time;
+		float CameraSpeed = 0.5f * (float)Time;
 
 		if (glfwGetKey(Window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
 		{
-			CameraSpeed *= 2.5f;
+			CameraSpeed *= 2.2f;
 		}
 
-		FVector3 Front = Camera.ViewMtx.Rows[0].GetVector3();
-		FVector3 Up = Camera.ViewMtx.Rows[1].GetVector3();
-		if (glfwGetKey(Window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_UP) == GLFW_PRESS)
+
+		if (glfwGetKey(Window, GLFW_KEY_W) == GLFW_PRESS)
 		{
-			g_vMove += CameraSpeed * Front;
+			Camera.Pos -= CameraSpeed * Camera.Front;
 		}
 
-		if (glfwGetKey(Window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_DOWN) == GLFW_PRESS)
+		if (glfwGetKey(Window, GLFW_KEY_S) == GLFW_PRESS)
 		{
-			g_vMove -= CameraSpeed * Front;
+			Camera.Pos += CameraSpeed * Camera.Front;
 		}
 
-		if (glfwGetKey(Window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_LEFT) == GLFW_PRESS)
+		if (glfwGetKey(Window, GLFW_KEY_A) == GLFW_PRESS)
 		{
-			g_vMove -= FVector3::Cross(Front, Up).GetNormalized() * CameraSpeed;
+			Camera.Pos += FVector3::Cross(Camera.Front, Camera.Up).GetNormalized() * CameraSpeed;
 		}
 
-		if (glfwGetKey(Window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+		if (glfwGetKey(Window, GLFW_KEY_D) == GLFW_PRESS)
 		{
-			g_vMove += FVector3::Cross(Front, Up).GetNormalized() * CameraSpeed;
+			Camera.Pos -= FVector3::Cross(Camera.Front, Camera.Up).GetNormalized() * CameraSpeed;
+		}
+/*
+		if (glfwGetKey(Window, GLFW_KEY_UP) == GLFW_PRESS)
+		{
+			Camera.Pos -= CameraSpeed * Camera.Front;
+		}
+
+		if (glfwGetKey(Window, GLFW_KEY_DOWN) == GLFW_PRESS)
+		{
+			Camera.Pos += CameraSpeed * Camera.Front;
+		}
+*/
+		const float RotSpeed = 1.0f;
+		if (glfwGetKey(Window, GLFW_KEY_LEFT) == GLFW_PRESS)
+		{
+			Camera.Yaw -= RotSpeed;
+		}
+
+		if (glfwGetKey(Window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+		{
+			Camera.Yaw += RotSpeed;
 		}
 
 		if (glfwGetKey(Window, GLFW_KEY_PAGE_UP) == GLFW_PRESS)
 		{
-			g_vMove += Up * CameraSpeed;
+			Camera.Pos += Camera.Up * CameraSpeed;
 		}
 
 		if (glfwGetKey(Window, GLFW_KEY_PAGE_DOWN) == GLFW_PRESS)
 		{
-			g_vMove -= Up * CameraSpeed;
+			Camera.Pos -= Camera.Up * CameraSpeed;
 		}
 	}
 
@@ -447,13 +554,17 @@ struct FApp
 		}
 	}
 
-	struct
+	struct : FCamera
 	{
 		FMatrix4x4 ViewMtx;
-		FVector3 Pos = {0, 0, 0};
-		FVector3 Rot ={0, 0, 0};
 		FVector3 FOVNearFar = {35.0f, 100.0f, 3000.0f};
+
+		void UpdateMatrix()
+		{
+			ViewMtx = Update();
+		}
 	} Camera;
+
 	FVector4 LightDir = {0, 1, 0, 0};
 	bool bRotateObject = false;
 
@@ -470,14 +581,6 @@ struct FApp
 	{
 		FMatrix4x4 ObjMtx;
 	};
-
-	void UpdateCameraMatrices(const FVector3& DeltaPos, const FVector3& DeltaRot)
-	{
-		Camera.Rot += DeltaRot;
-		Camera.Pos += DeltaPos;
-		Camera.ViewMtx = FMatrix4x4::GetRotationY(ToRadians(Camera.Rot.y));
-		Camera.ViewMtx.Rows[3] += Camera.Pos;
-	}
 
 	void DrawScene(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
 	{
@@ -561,6 +664,7 @@ struct FApp
 		}
 	}
 };
+static FApp GApp;
 
 static void ClearColorImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 {
@@ -590,14 +694,6 @@ static void ClearDepthImage(VkCommandBuffer CmdBuffer, VkImage Image, float Dept
 	Range.layerCount = 1;
 	Range.levelCount = 1;
 	vkCmdClearDepthStencilImage(CmdBuffer, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &ClearDS, 1, &Range);
-}
-
-static void UpdateInput(FApp& App)
-{
-	App.UpdateCameraMatrices(g_vMove, g_vRot);
-
-	g_vMove = FVector3::GetZero();
-	g_vRot = FVector3::GetZero();
 }
 
 static double Render(FApp& App)
@@ -748,7 +844,7 @@ static double Render(FApp& App)
 			Value = (float)App.GpuDelta;
 			ImGui::SliderFloat("GPU", &Value, 0, 66);
 			ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
-			ImGui::InputFloat3("Rot", App.Camera.Rot.Values);
+			ImGui::InputFloat2("Yaw/Pitch", App.Camera.Rot.Values);
 			ImGui::Checkbox("Rotate Object", &App.bRotateObject);
 			ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
 			ImGui::InputFloat3("Light Dir", App.LightDir.Values);
@@ -936,6 +1032,46 @@ static void ErrorCallback(int Error, const char* Msg)
 	fprintf(stderr, "Glfw Error %d: %s\n", Error, Msg);
 }
 
+static void MouseCallback(GLFWwindow* Window, double XPos, double YPos)
+{
+	if (GApp.bLMouseButtonHeld || GApp.bRMouseButtonHeld)
+	{
+		if (GApp.Camera.bFirstTime) // initially set to true
+		{
+			GApp.Camera.LastX = (float)XPos;
+			GApp.Camera.LastY = (float)YPos;
+			GApp.Camera.bFirstTime = false;
+		}
+
+		float XOffset = (float)XPos - GApp.Camera.LastX;
+		float YOffset = (float)YPos - GApp.Camera.LastY; // reversed since y-coordinates range from bottom to top
+		GApp.Camera.LastX = (float)XPos;
+		GApp.Camera.LastY = (float)YPos;
+
+		if (GApp.bRMouseButtonHeld)
+		{
+			const float Sensitivity = 0.25f;
+			XOffset *= Sensitivity;
+			YOffset *= Sensitivity;
+			GApp.Camera.Yaw += XOffset;
+			GApp.Camera.Pitch += YOffset;
+		}
+
+		if (GApp.bLMouseButtonHeld)
+		{
+			const float Sensitivity = 1.25f;
+			XOffset *= Sensitivity;
+			YOffset *= Sensitivity;
+			GApp.Camera.Pos += YOffset * GApp.Camera.Front;
+			GApp.Camera.Pos -= FVector3::Cross(GApp.Camera.Front, GApp.Camera.Up).GetNormalized() * XOffset;
+		}
+	}
+	else
+	{
+		GApp.Camera.bFirstTime = true;
+	}
+}
+
 static GLFWwindow* Init(FApp& App)
 {
 	glfwSetErrorCallback(ErrorCallback);
@@ -944,20 +1080,23 @@ static GLFWwindow* Init(FApp& App)
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
+
 	uint32 ResX = RCUtils::FCmdLine::Get().TryGetIntPrefix("-resx=", 1920);
 	uint32 ResY = RCUtils::FCmdLine::Get().TryGetIntPrefix("-resy=", 1080);
 
-	g_vMove = TryGetVector3Prefix("-pos=", FVector3::GetZero());
-	g_vRot = TryGetVector3Prefix("-rot=", FVector3::GetZero());
-	App.Camera.FOVNearFar.x = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-fov=", App.Camera.FOVNearFar.x);
-	App.Camera.FOVNearFar.y = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-near=", App.Camera.FOVNearFar.y);
-	App.Camera.FOVNearFar.z = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-far=", App.Camera.FOVNearFar.z);
+	{
+		App.Camera.Pos = TryGetVector3Prefix("-pos=", FVector3::GetZero());
+		App.Camera.Rot = TryGetVector2Prefix("-rot=", FVector2::GetZero());
+		App.Camera.FOVNearFar.x = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-fov=", App.Camera.FOVNearFar.x);
+		App.Camera.FOVNearFar.y = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-near=", App.Camera.FOVNearFar.y);
+		App.Camera.FOVNearFar.z = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-far=", App.Camera.FOVNearFar.z);
+	}
 
 	App.LightDir = FVector4(TryGetVector3Prefix("-lightdir=", App.LightDir.GetVector3()), 0);
 	App.LightDir = App.LightDir.GetNormalized();
 
-	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
+	App.Camera.Init((float)ResX, (float)ResY);
 
 	glfwHideWindow(Window);
 	check(Window);
@@ -993,6 +1132,8 @@ static GLFWwindow* Init(FApp& App)
 
 	glfwShowWindow(Window);
 
+	glfwSetCursorPosCallback(Window, MouseCallback);
+
 	return Window;
 }
 
@@ -1020,7 +1161,7 @@ static void Deinit(FApp& App, GLFWwindow* Window)
 
 int main()
 {
-	FApp App;
+	FApp& App = GApp;
 	GLFWwindow* Window = Init(App);
 
 	uint32 ExitAfterNFrames = RCUtils::FCmdLine::Get().TryGetIntPrefix("-exitafterframes=", (uint32)-1);
@@ -1040,7 +1181,7 @@ int main()
 
 		glfwPollEvents();
 
-		UpdateInput(App);
+		App.Update();
 
 		App.GpuDelta = Render(App);
 

@@ -124,6 +124,9 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 			case VK_OBJECT_TYPE_SURFACE_KHR:
 				s += "\tSurface ";
 				break;
+			case VK_OBJECT_TYPE_SEMAPHORE:
+				s += "\tSemaphore ";
+				break;
 			case VK_OBJECT_TYPE_UNKNOWN:
 				continue;
 			default:
