@@ -67,77 +67,80 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 		}
 	}
 
-	if (CallbackData->pMessageIdName)
+	if (CallbackData)
 	{
-		if (!strcmp(CallbackData->pMessageIdName, "UNASSIGNED-GPU-Assisted Validation Setup Error."))
+		if (CallbackData->pMessageIdName)
 		{
-			return VK_FALSE;
-		}
-	}
-
-	for (uint32 Index = 0; Index < CallbackData->objectCount; ++Index)
-	{
-		const VkDebugUtilsObjectNameInfoEXT& Info = CallbackData->pObjects[Index];
-		switch (Info.objectType)
-		{
-		case VK_OBJECT_TYPE_COMMAND_BUFFER:
-			s += "\tCmdBuf ";
-			break;
-		case VK_OBJECT_TYPE_BUFFER:
-			s += "\tBuffer ";
-			break;
-		case VK_OBJECT_TYPE_BUFFER_VIEW:
-			s += "\tBufferView ";
-			break;
-		case VK_OBJECT_TYPE_SAMPLER:
-			s += "\tSampler ";
-			break;
-		case VK_OBJECT_TYPE_IMAGE:
-			s += "\tImage ";
-			break;
-		case VK_OBJECT_TYPE_IMAGE_VIEW:
-			s += "\tImageView ";
-			break;
-		case VK_OBJECT_TYPE_RENDER_PASS:
-			s += "\tRenderpass ";
-			break;
-		case VK_OBJECT_TYPE_FRAMEBUFFER:
-			s += "\tFramebuffer ";
-			break;
-		case VK_OBJECT_TYPE_DESCRIPTOR_SET:
-			s += "\tDescriptorSet ";
-			break;
-		case VK_OBJECT_TYPE_PIPELINE:
-			s += "\tPipeline ";
-			break;
-		case VK_OBJECT_TYPE_PIPELINE_LAYOUT:
-			s += "\tPipelineLayout ";
-			break;
-		case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT:
-			s += "\tDescriptorSetLayout ";
-			break;
-		case VK_OBJECT_TYPE_SHADER_MODULE:
-			s += "\tShaderModule ";
-			break;
-		case VK_OBJECT_TYPE_SURFACE_KHR:
-			s += "\tSurface ";
-			break;
-		case VK_OBJECT_TYPE_UNKNOWN:
-			continue;
-		default:
-			check(0);
+			if (!strcmp(CallbackData->pMessageIdName, "UNASSIGNED-GPU-Assisted Validation Setup Error."))
+			{
+				return VK_FALSE;
+			}
 		}
 
-		char Handle[128];
-		if (Info.pObjectName && *Info.pObjectName)
+		for (uint32 Index = 0; Index < CallbackData->objectCount; ++Index)
 		{
-			sprintf(Handle, "'%s' %p\n", Info.pObjectName, (void*)CallbackData->pObjects[Index].objectHandle);
+			const VkDebugUtilsObjectNameInfoEXT& Info = CallbackData->pObjects[Index];
+			switch (Info.objectType)
+			{
+			case VK_OBJECT_TYPE_COMMAND_BUFFER:
+				s += "\tCmdBuf ";
+				break;
+			case VK_OBJECT_TYPE_BUFFER:
+				s += "\tBuffer ";
+				break;
+			case VK_OBJECT_TYPE_BUFFER_VIEW:
+				s += "\tBufferView ";
+				break;
+			case VK_OBJECT_TYPE_SAMPLER:
+				s += "\tSampler ";
+				break;
+			case VK_OBJECT_TYPE_IMAGE:
+				s += "\tImage ";
+				break;
+			case VK_OBJECT_TYPE_IMAGE_VIEW:
+				s += "\tImageView ";
+				break;
+			case VK_OBJECT_TYPE_RENDER_PASS:
+				s += "\tRenderpass ";
+				break;
+			case VK_OBJECT_TYPE_FRAMEBUFFER:
+				s += "\tFramebuffer ";
+				break;
+			case VK_OBJECT_TYPE_DESCRIPTOR_SET:
+				s += "\tDescriptorSet ";
+				break;
+			case VK_OBJECT_TYPE_PIPELINE:
+				s += "\tPipeline ";
+				break;
+			case VK_OBJECT_TYPE_PIPELINE_LAYOUT:
+				s += "\tPipelineLayout ";
+				break;
+			case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT:
+				s += "\tDescriptorSetLayout ";
+				break;
+			case VK_OBJECT_TYPE_SHADER_MODULE:
+				s += "\tShaderModule ";
+				break;
+			case VK_OBJECT_TYPE_SURFACE_KHR:
+				s += "\tSurface ";
+				break;
+			case VK_OBJECT_TYPE_UNKNOWN:
+				continue;
+			default:
+				check(0);
+			}
+
+			char Handle[128];
+			if (Info.pObjectName && *Info.pObjectName)
+			{
+				sprintf(Handle, "'%s' %p\n", Info.pObjectName, (void*)CallbackData->pObjects[Index].objectHandle);
+			}
+			else
+			{
+				sprintf(Handle, "%p\n", (void*)CallbackData->pObjects[Index].objectHandle);
+			}
+			s += Handle;
 		}
-		else
-		{
-			sprintf(Handle, "%p\n", (void*)CallbackData->pObjects[Index].objectHandle);
-		}
-		s += Handle;
 	}
 
 	::OutputDebugStringA(s.c_str());
