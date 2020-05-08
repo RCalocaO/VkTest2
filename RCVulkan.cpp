@@ -30,13 +30,6 @@ static const std::vector<const char*> GDeviceExtensions =
 	//VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
 };
 
-static const std::vector<const char*> GDeviceExtensionsOptional =
-{
-	//VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-	//VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME,
-};
-
-
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
 	VkDebugUtilsMessageTypeFlagsEXT MessageType, const VkDebugUtilsMessengerCallbackDataEXT* CallbackData,
 	void* UserData)
@@ -452,11 +445,11 @@ void SVulkan::SDevice::Create()
 
 	std::vector<const char*> DeviceExtensions = GDeviceExtensions;
 
-	//bPushDescriptor = 0 && OptionalExtension(ExtensionProperties, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
-	//if (bPushDescriptor)
-	//{
-	//	GDeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
-	//}
+	bPushDescriptor = OptionalExtension(ExtensionProperties, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+	if (bPushDescriptor)
+	{
+		DeviceExtensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+	}
 
 	if (OptionalExtension(ExtensionProperties, VK_EXT_DEBUG_MARKER_EXTENSION_NAME))
 	{

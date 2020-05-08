@@ -161,6 +161,7 @@ struct FApp
 	FPSOCache::FPSOHandle DataClipVSColorPSO;
 	FPSOCache::FPSOHandle VBClipVSRedPSO;
 	FPSOCache::FPSOHandle TestGLTFPSO;
+	FPSOCache::FPSOHandle TestGLTFPSOBounds;
 	FBufferWithMemAndView ClipVB;
 	FPSOCache::FPSOHandle TestCSPSO;
 	FBufferWithMemAndView TestCSBuffer;
@@ -548,8 +549,16 @@ struct FApp
 
 	void TryLoadGLTF(SVulkan::SDevice& Device, const char* Filename)
 	{
+		double StartTime = glfwGetTime();
 		if (LoadGLTF(Device, Filename, GPSOCache, Scene, PendingOpsMgr, &GStagingBufferMgr))
 		{
+			double EndTime = glfwGetTime();
+			{
+				std::stringstream ss;
+				ss << "Loaded " << Filename << " in " << (float)(EndTime - StartTime) << "s\n";
+				ss.flush();
+				::OutputDebugStringA(ss.str().c_str());
+			}
 			LoadedGLTF = Filename;
 		}
 	}
@@ -567,6 +576,9 @@ struct FApp
 
 	FVector4 LightDir = {0, 1, 0, 0};
 	bool bRotateObject = false;
+	bool bSkipCull = true;
+	bool bForceCull = false;
+	bool bShowBounds = false;
 
 	struct FViewUB
 	{
@@ -581,6 +593,27 @@ struct FApp
 	{
 		FMatrix4x4 ObjMtx;
 	};
+
+	bool IsVisible(FScene::FPrim& Prim, FMatrix4x4 ObjToWorldMtx)
+	{
+		if (bSkipCull)
+		{
+			return true;
+		}
+
+		FVector4 BoundsMin = ObjToWorldMtx.Transform(FVector4(Prim.ObjectSpaceBounds.Min, 1.0f));
+		FVector4 BoundsMax = ObjToWorldMtx.Transform(FVector4(Prim.ObjectSpaceBounds.Max, 1.0f));
+		FVector4 Min = Camera.ViewMtx.Transform(BoundsMin);
+		FVector4 Max = Camera.ViewMtx.Transform(BoundsMax);
+		FVector4 Center = (Min + Max) * 0.5f;
+		FVector4 R = Max - Min;
+		float SquareRadius = FVector4::Dot(R, R);
+		if (Center.z + sqrtf(SquareRadius) < 0)
+		{
+			return false;
+		}
+		return true;
+	}
 
 	void DrawScene(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
 	{
@@ -617,10 +650,16 @@ struct FApp
 			auto& Mesh = Scene.Meshes[Instance.Mesh];
 			for (auto& Prim : Mesh.Prims)
 			{
+				FMatrix4x4 ObjectMatrix = FMatrix4x4::GetIdentity();//FMatrix4x4::GetRotationZ(ToRadians(180));
+				ObjectMatrix.Rows[3] = Instance.Pos;
+				ObjectMatrix *= FMatrix4x4::GetRotationY(RotateObjectAngle);
+				if (!IsVisible(Prim, ObjectMatrix))
+				{
+					continue;
+				}
+
 				FObjUB ObjUB;
-				ObjUB.ObjMtx = FMatrix4x4::GetIdentity();//FMatrix4x4::GetRotationZ(ToRadians(180));
-				ObjUB.ObjMtx.Rows[3] = Instance.Pos;
-				ObjUB.ObjMtx *= FMatrix4x4::GetRotationY(RotateObjectAngle);
+				ObjUB.ObjMtx = ObjectMatrix;
 				FStagingBuffer* ObjBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ObjUB), CmdBuffer);
 				*(FObjUB*)ObjBuffer->Buffer->Lock() = ObjUB;
 				ObjBuffer->Buffer->Unlock();
@@ -659,9 +698,106 @@ struct FApp
 					Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
 				}
 
-				vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Prim.NumIndices, 1, 0, 0, 0);
+				if (!bForceCull)
+				{
+					vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Prim.NumIndices, 1, 0, 0, 0);
+				}
+
+				if (bShowBounds)
+				{
+					RenderBoundingBox(CmdBuffer, Prim, ViewBuffer, ObjBuffer);
+				}
 			}
 		}
+	}
+
+	void RenderBoundingBox(SVulkan::FCmdBuffer* CmdBuffer, const FScene::FPrim& Prim, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer)
+	{
+		struct FPosOnlyDecl : public FPSOCache::FVertexDecl
+		{
+			FPosOnlyDecl()
+			{
+				AddAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0, "POSITION");
+				AddBinding(0, sizeof(FVector3));
+			}
+		};
+		static FPosOnlyDecl NewDecl;
+		int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(NewDecl);
+
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOBounds, FPSOCache::FPSOSecondHandle(VertexDeclHandle, true, false));
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
+#if SCENE_USE_SINGLE_BUFFERS
+		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(8 * sizeof(FVector3), CmdBuffer);
+		FVector3* Pos = (FVector3*)VB->Buffer->Lock();
+		enum
+		{
+			iii,
+			aii,
+			aia,
+			iia,
+			iai,
+			aai,
+			aaa,
+			iaa,
+		};
+		Pos[iii] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Min.z);
+		Pos[aii] = FVector3(Prim.ObjectSpaceBounds.Max.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Min.z);
+		Pos[iia] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Max.z);
+		Pos[aia] = FVector3(Prim.ObjectSpaceBounds.Max.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Max.z);
+		Pos[iai] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Max.y, Prim.ObjectSpaceBounds.Min.z);
+		Pos[aai] = FVector3(Prim.ObjectSpaceBounds.Max.x, Prim.ObjectSpaceBounds.Max.y, Prim.ObjectSpaceBounds.Min.z);
+		Pos[iaa] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Max.y, Prim.ObjectSpaceBounds.Max.z);
+		Pos[aaa] = FVector3(Prim.ObjectSpaceBounds.Max.x, Prim.ObjectSpaceBounds.Max.y, Prim.ObjectSpaceBounds.Max.z);
+		VB->Buffer->Unlock();
+
+		FStagingBuffer* IB = GStagingBufferMgr.AcquireBuffer(12 * 2 * sizeof(uint32), CmdBuffer);
+		uint32* Indices = (uint32*)IB->Buffer->Lock();
+		Indices[0] = iii; Indices[1] = aii;
+		Indices[2] = iii; Indices[3] = iai;
+		Indices[4] = iii; Indices[5] = iia;
+		Indices[6] = aii; Indices[7] = aia;
+		Indices[8] = aii; Indices[9] = aai;
+		Indices[10] = iia; Indices[11] = aia;
+		Indices[12] = aia; Indices[13] = aaa;
+		Indices[14] = aaa; Indices[15] = aai;
+		Indices[16] = aaa; Indices[17] = iaa;
+		Indices[18] = aai; Indices[19] = iai;
+		Indices[20] = iai; Indices[21] = iaa;
+		Indices[22] = iia; Indices[23] = iaa;
+		IB->Buffer->Unlock();
+
+		VkDeviceSize VBs[1] = { 0 };
+		vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB->Buffer->Buffer.Buffer, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &VB->Buffer->Buffer.Buffer, VBs);
+
+		{
+			FDescriptorPSOCache Cache(PSO);
+			Cache.SetUniformBuffer("ViewUB", *ViewBuffer->Buffer);
+			Cache.SetUniformBuffer("ObjUB", *ObjBuffer->Buffer);
+			Cache.SetSampler("SS", LinearMipSampler);
+			Cache.SetImage("BaseTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].BaseColor == -1 ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image, LinearMipSampler);
+			Cache.SetImage("NormalTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].Normal == -1 ? DefaultNormalMapTexture : Scene.Textures[Scene.Materials[Prim.Material].Normal].Image, LinearMipSampler);
+			Cache.SetImage("MetallicRoughnessTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].MetallicRoughness == -1 ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].MetallicRoughness].Image, LinearMipSampler);
+			Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
+		}
+
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 24, 1, 0, 0, 0);
+
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 0, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 2, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 4, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 6, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 8, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 10, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 12, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 14, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 16, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 18, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 20, 0, 0);
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 22, 0, 0);
+#else
+		check(0);
+#endif
 	}
 };
 static FApp GApp;
@@ -845,6 +981,9 @@ static double Render(FApp& App)
 			ImGui::SliderFloat("GPU", &Value, 0, 66);
 			ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
 			ImGui::InputFloat2("Yaw/Pitch", App.Camera.Rot.Values);
+			ImGui::Checkbox("Skip Culling", &App.bSkipCull);
+			ImGui::Checkbox("Force Cull", &App.bForceCull);
+			ImGui::Checkbox("Show Bounds (even if culled)", &App.bShowBounds);
 			ImGui::Checkbox("Rotate Object", &App.bRotateObject);
 			ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
 			ImGui::InputFloat3("Light Dir", App.LightDir.Values);
@@ -964,6 +1103,7 @@ static void SetupShaders(FApp& App)
 	FShaderInfo* UIVS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* UIPS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* TestGLTFVS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFVS", FShaderInfo::EStage::Vertex);
+	FShaderInfo* TestGLTFVSBounds = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFVSBounds", FShaderInfo::EStage::Vertex);
 	FShaderInfo* TestGLTFPS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* ShowDebugVectorsGS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ShowDebugVectorsGS", FShaderInfo::EStage::Geometry);
 	FShaderInfo* PassThroughVS = GShaderLibrary.RegisterShader("Shaders/PassThroughVS.hlsl", "MainVS", FShaderInfo::EStage::Vertex);
@@ -1017,6 +1157,21 @@ static void SetupShaders(FApp& App)
 				RasterizerInfo->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 			});
 
+		App.TestGLTFPSOBounds = GPSOCache.CreateGfxPSO("TestGLTFPSOBounds", TestGLTFVSBounds, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+			{
+				VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
+				DSInfo->depthTestEnable = VK_TRUE;
+				DSInfo->depthWriteEnable = VK_FALSE;// VK_TRUE;
+				DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+				VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
+				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
+				//RasterizerInfo->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+				VkPipelineInputAssemblyStateCreateInfo* IAInfo = (VkPipelineInputAssemblyStateCreateInfo*)GfxPipelineInfo.pInputAssemblyState;
+				IAInfo->topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+			});
+
 		for (auto& Mesh : App.Scene.Meshes)
 		{
 			for (auto& Prim : Mesh.Prims)
@@ -1030,6 +1185,12 @@ static void SetupShaders(FApp& App)
 static void ErrorCallback(int Error, const char* Msg)
 {
 	fprintf(stderr, "Glfw Error %d: %s\n", Error, Msg);
+}
+
+static void ScrollCallback(GLFWwindow* Window, double XOffset, double YOffset)
+{
+	GApp.Camera.FOVNearFar.x -= (float)YOffset;
+	GApp.Camera.FOVNearFar.x = Clamp(1.0f, GApp.Camera.FOVNearFar.x, 45.0f);
 }
 
 static void MouseCallback(GLFWwindow* Window, double XPos, double YPos)
@@ -1092,6 +1253,11 @@ static GLFWwindow* Init(FApp& App)
 		App.Camera.FOVNearFar.z = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-far=", App.Camera.FOVNearFar.z);
 	}
 
+	if (RCUtils::FCmdLine::Get().Contains("-nocull"))
+	{
+		GApp.bSkipCull = true;
+	}
+
 	App.LightDir = FVector4(TryGetVector3Prefix("-lightdir=", App.LightDir.GetVector3()), 0);
 	App.LightDir = App.LightDir.GetNormalized();
 
@@ -1133,6 +1299,7 @@ static GLFWwindow* Init(FApp& App)
 	glfwShowWindow(Window);
 
 	glfwSetCursorPosCallback(Window, MouseCallback);
+	glfwSetScrollCallback(Window, ScrollCallback);
 
 	return Window;
 }

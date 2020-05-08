@@ -103,6 +103,14 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	return Out;
 }
 
+
+FGLTFPS TestGLTFVSBounds(float3 In : POSITION)
+{
+	FGLTFVS NewIn = (FGLTFVS)0;
+	NewIn.POSITION = In;
+	return TestGLTFVS(NewIn);
+}
+
 float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 {
 #if 0

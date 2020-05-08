@@ -2742,7 +2742,7 @@ struct FStagingBufferManager
 
 		FStagingBuffer* Entry = new FStagingBuffer;
 		Entry->Buffer = new FBufferWithMem;
-		Entry->Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, EMemLocation::CPU, Size, true);
+		Entry->Buffer->Create(*Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, EMemLocation::CPU, Size, true);
 		Entry->CmdBuffer = CurrentCmdBuffer;
 		Entry->Fence = CurrentCmdBuffer ? CurrentCmdBuffer->Fence.Counter : 0;
 		UsedEntries.push_back(Entry);

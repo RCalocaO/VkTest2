@@ -116,24 +116,18 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 
 		tinygltf::BufferView& BufferView = Model.bufferViews[Accessor.bufferView];
 
-		auto FixNormalOrPosition = [](const std::string& InName, uint32 Size, FVector3* Data)
+		auto FixNormalOrPosition = [&](const std::string& InName, uint32 Count, FVector3* Data)
 		{
 			if (/*InName == "NORMAL" ||*/ InName == "POSITION")
 			{
-				FVector3 Min = {FLT_MAX, FLT_MAX, FLT_MAX};
-				FVector3 Max = {FLT_MIN, FLT_MIN, FLT_MIN};
-				check(Size % 3 == 0);
-				check(Size % sizeof(FVector3) == 0);
-				while (Size > 0)
+				for (uint32 Index = 0; Index < Count; ++Index)
 				{
 					// Flip Ys
 					Data->y *= -1;
-					Min = FVector3::Min(Min, *Data);
-					Max = FVector3::Max(Max, *Data);
-					Size -= 3 * sizeof(float);
+					OutPrim.ObjectSpaceBounds.Min = FVector3::Min(OutPrim.ObjectSpaceBounds.Min, *Data);
+					OutPrim.ObjectSpaceBounds.Max = FVector3::Max(OutPrim.ObjectSpaceBounds.Max, *Data);
 					++Data;
 				}
-				check(Size == 0);
 			}
 		};
 #if SCENE_USE_SINGLE_BUFFERS
@@ -149,7 +143,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 			SrcData += BufferView.byteOffset + Accessor.byteOffset;
 			float* DestData = (float*)VB.Lock();
 			memcpy(DestData, SrcData, Size);
-			FixNormalOrPosition(Name, Size, (FVector3*)DestData);
+			FixNormalOrPosition(Name, (uint32)Accessor.count, (FVector3*)DestData);
 			VB.Unlock();
 		}
 		Device.SetDebugName(VB.Buffer.Buffer, "GLTFVB");

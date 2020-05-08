@@ -7,6 +7,12 @@
 #define SCENE_USE_SINGLE_BUFFERS	1
 
 
+struct FBoundingBox
+{
+	FVector3 Min = { FLT_MAX, FLT_MAX, FLT_MAX };
+	FVector3 Max = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+};
+
 struct FScene
 {
 	std::vector<FBufferWithMem> Buffers;
@@ -29,6 +35,8 @@ struct FScene
 		VkPrimitiveTopology PrimType;
 		int Material;
 		int VertexDecl;
+
+		FBoundingBox ObjectSpaceBounds;
 	};
 
 	struct FMesh
