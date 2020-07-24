@@ -20,8 +20,9 @@
 
 #include "../RCUtils/RCUtilsMath.h"
 
-static SVulkan GVulkan;
+extern void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDescriptorCache& DescriptorCache, SVulkan::FGfxPSO* PSO, SVulkan::FCmdBuffer*);
 
+static SVulkan GVulkan;
 
 static FShaderLibrary GShaderLibrary;
 
@@ -184,6 +185,7 @@ struct FApp
 	FBufferWithMem ImGuiIB[NUM_IMGUI_BUFFERS];
 	FBufferWithMem ImGuiScaleTranslateUB[NUM_IMGUI_BUFFERS];
 	FPSOCache::FPSOHandle ImGUIPSO;
+	FPSOCache::FPSOHandle UIPSO;
 	int32 ImGUIVertexDecl = -1;
 	double Time = 0;
 
@@ -606,7 +608,7 @@ struct FApp
 		FVector4 Min = Camera.ViewMtx.Transform(BoundsMin);
 		FVector4 Max = Camera.ViewMtx.Transform(BoundsMax);
 		FVector4 Center = (Min + Max) * 0.5f;
-		FVector4 R = Max - Min;
+		FVector4 R = (Max - Min) * 0.5f;
 		float SquareRadius = FVector4::Dot(R, R);
 		if (Center.z + sqrtf(SquareRadius) < 0)
 		{
@@ -647,15 +649,27 @@ struct FApp
 
 		for (auto& Instance : Scene.Instances)
 		{
+			std::stringstream ss;
+			ss << "InstanceID " << Instance.ID;
+			ss.flush();
+			FMarkerScope MarkerScope(Device, CmdBuffer, ss.str().c_str());
+
 			auto& Mesh = Scene.Meshes[Instance.Mesh];
 			for (auto& Prim : Mesh.Prims)
 			{
+				std::stringstream ss2;
+				ss2 << "PrimID " << Prim.ID;
+				ss2.flush();
+				FMarkerScope MarkerScope(Device, CmdBuffer, ss2.str().c_str());
+
 				FMatrix4x4 ObjectMatrix = FMatrix4x4::GetIdentity();//FMatrix4x4::GetRotationZ(ToRadians(180));
+				//ObjectMatrix *= FMatrix4x4::GetScale(Instance.Scale);
 				ObjectMatrix.Rows[3] = Instance.Pos;
 				ObjectMatrix *= FMatrix4x4::GetRotationY(RotateObjectAngle);
-				if (!IsVisible(Prim, ObjectMatrix))
+				if (Prim.ID == 96)
 				{
-					continue;
+					int i = 0;
+					++i;
 				}
 
 				FObjUB ObjUB;
@@ -664,43 +678,46 @@ struct FApp
 				*(FObjUB*)ObjBuffer->Buffer->Lock() = ObjUB;
 				ObjBuffer->Buffer->Unlock();
 
-				SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, FPSOCache::FPSOSecondHandle(Prim.VertexDecl, Scene.Materials[Prim.Material].bDoubleSided, g_bWireframe));
-				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
-				GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
-				std::vector<VkBuffer> VBs;
-#if SCENE_USE_SINGLE_BUFFERS
-				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, Prim.IndexBuffer.Buffer.Buffer, 0, Prim.IndexType);
-				std::vector<VkDeviceSize> VertexOffsets;
-				for (auto VB : Prim.VertexBuffers)
+				if (IsVisible(Prim, ObjectMatrix))
 				{
-					VBs.push_back(VB.Buffer.Buffer);
-					VertexOffsets.push_back(0);
-				}
-				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), VertexOffsets.data());
-#else
-				SVulkan::FBuffer& IB = Scene.Buffers[Prim.IndexBuffer].Buffer;
-				vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB.Buffer, Prim.IndexOffset, Prim.IndexType);
-				for (int VBIndex : Prim.VertexBuffers)
-				{
-					VBs.push_back(Scene.Buffers[VBIndex].Buffer.Buffer);
-				}
-				check(VBs.size() == Prim.VertexOffsets.size());
-				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), Prim.VertexOffsets.data());
-#endif
-				{
-					FDescriptorPSOCache Cache(PSO);
-					Cache.SetUniformBuffer("ViewUB", *ViewBuffer->Buffer);
-					Cache.SetUniformBuffer("ObjUB", *ObjBuffer->Buffer);
-					Cache.SetSampler("SS", LinearMipSampler);
-					Cache.SetImage("BaseTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].BaseColor == -1 ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image, LinearMipSampler);
-					Cache.SetImage("NormalTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].Normal == -1 ? DefaultNormalMapTexture : Scene.Textures[Scene.Materials[Prim.Material].Normal].Image, LinearMipSampler);
-					Cache.SetImage("MetallicRoughnessTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].MetallicRoughness == -1 ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].MetallicRoughness].Image, LinearMipSampler);
-					Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
-				}
+					SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, FPSOCache::FPSOSecondHandle(Prim.VertexDecl, Scene.Materials[Prim.Material].bDoubleSided, g_bWireframe));
+					vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
+					GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
+					std::vector<VkBuffer> VBs;
+	#if SCENE_USE_SINGLE_BUFFERS
+					vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, Prim.IndexBuffer.Buffer.Buffer, 0, Prim.IndexType);
+					std::vector<VkDeviceSize> VertexOffsets;
+					for (auto VB : Prim.VertexBuffers)
+					{
+						VBs.push_back(VB.Buffer.Buffer);
+						VertexOffsets.push_back(0);
+					}
+					vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), VertexOffsets.data());
+	#else
+					SVulkan::FBuffer& IB = Scene.Buffers[Prim.IndexBuffer].Buffer;
+					vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB.Buffer, Prim.IndexOffset, Prim.IndexType);
+					for (int VBIndex : Prim.VertexBuffers)
+					{
+						VBs.push_back(Scene.Buffers[VBIndex].Buffer.Buffer);
+					}
+					check(VBs.size() == Prim.VertexOffsets.size());
+					vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, (uint32)VBs.size(), VBs.data(), Prim.VertexOffsets.data());
+	#endif
+					{
+						FDescriptorPSOCache Cache(PSO);
+						Cache.SetUniformBuffer("ViewUB", *ViewBuffer->Buffer);
+						Cache.SetUniformBuffer("ObjUB", *ObjBuffer->Buffer);
+						Cache.SetSampler("SS", LinearMipSampler);
+						Cache.SetImage("BaseTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].BaseColor == -1 ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].BaseColor].Image, LinearMipSampler);
+						Cache.SetImage("NormalTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].Normal == -1 ? DefaultNormalMapTexture : Scene.Textures[Scene.Materials[Prim.Material].Normal].Image, LinearMipSampler);
+						Cache.SetImage("MetallicRoughnessTexture", Scene.Textures.empty() || Scene.Materials[Prim.Material].MetallicRoughness == -1 ? WhiteTexture : Scene.Textures[Scene.Materials[Prim.Material].MetallicRoughness].Image, LinearMipSampler);
+						Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
+					}
 
-				if (!bForceCull)
-				{
-					vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Prim.NumIndices, 1, 0, 0, 0);
+					if (!bForceCull)
+					{
+						vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Prim.NumIndices, 1, 0, 0, 0);
+					}
 				}
 
 				if (bShowBounds)
@@ -782,19 +799,6 @@ struct FApp
 		}
 
 		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 24, 1, 0, 0, 0);
-
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 0, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 2, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 4, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 6, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 8, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 10, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 12, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 14, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 16, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 18, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 20, 0, 0);
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 2, 1, 22, 0, 0);
 #else
 		check(0);
 #endif
@@ -938,13 +942,27 @@ static double Render(FApp& App)
 		vkCmdDraw(CmdBuffer->CmdBuffer, 3, 1, 0, 0);
 	}
 
-	if (!App.Scene.Meshes.empty())
+	bool bGH = RCUtils::FCmdLine::Get().Contains("-ghjotl");
+	if (bGH)
 	{
-		App.DrawScene(Device, CmdBuffer);
+		GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
+
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(App.UIPSO, App.ImGUIVertexDecl);
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
+
+		RenderJOTL(Device, GStagingBufferMgr, GDescriptorCache, PSO, CmdBuffer);
+	}
+	else
+	{
+		if (!App.Scene.Meshes.empty())
+		{
+			App.DrawScene(Device, CmdBuffer);
+		}
 	}
 
 	CmdBuffer->EndRenderPass();
 
+	if (!bGH)
 	{
 		FMarkerScope MarkerScope(Device, CmdBuffer, "TestCompute");
 		SVulkan::FComputePSO* PSO = GPSOCache.GetComputePSO(App.TestCSPSO);
@@ -965,7 +983,12 @@ static double Render(FApp& App)
 	bool bRecompileShaders = false;
 	{
 		FMarkerScope MarkerScope(Device, CmdBuffer, "ImGUI");
-		if (ImGui::Begin("Debug"))
+		if (bGH)
+		{
+			extern void Tick(float);
+			Tick(App.LastDelta / 1000.0f);
+		}
+		else if (ImGui::Begin("Debug"))
 		{
 			if (!App.LoadedGLTF.empty())
 			{
@@ -1102,6 +1125,7 @@ static void SetupShaders(FApp& App)
 	FShaderInfo* ColorPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ColorPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* UIVS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* UIPS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainPS", FShaderInfo::EStage::Pixel);
+	FShaderInfo* UIColorPS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainColorPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* TestGLTFVS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* TestGLTFVSBounds = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFVSBounds", FShaderInfo::EStage::Vertex);
 	FShaderInfo* TestGLTFPS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFPS", FShaderInfo::EStage::Pixel);
@@ -1142,6 +1166,7 @@ static void SetupShaders(FApp& App)
 		Decl.AddBinding(0, sizeof(ImDrawVert));
 		App.ImGUIVertexDecl = GPSOCache.FindOrAddVertexDecl(Decl);
 		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass);
+		App.UIPSO = GPSOCache.CreateGfxPSO("UIPSO", UIVS, UIColorPS, RenderPass);
 	}
 
 	{

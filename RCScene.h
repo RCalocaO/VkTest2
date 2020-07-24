@@ -21,6 +21,7 @@ struct FScene
 
 	struct FPrim
 	{
+		uint32 ID = ~0;
 #if SCENE_USE_SINGLE_BUFFERS
 		FBufferWithMem IndexBuffer;
 		std::vector<FBufferWithMem> VertexBuffers;
@@ -48,7 +49,15 @@ struct FScene
 
 	struct FInstance
 	{
+		uint32 ID;
+		FInstance(uint32 InID)
+			: ID(InID)
+		{
+		}
+
 		FVector4 Pos =  {0, 0, 0, 1};
+		FVector3 Scale = {1, 1, 1};
+		FVector3 Rotation = {0, 0, 0};
 		uint32 Mesh = 0;
 	};
 

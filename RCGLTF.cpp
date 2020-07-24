@@ -272,6 +272,10 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 #endif
 				Prim.IndexType = GetIndexType(Indices.componentType);
 
+				static uint32 ID = 0;
+				Prim.ID = ID;
+				++ID;
+
 				Mesh.Prims.push_back(Prim);
 			}
 
@@ -380,17 +384,29 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 			}
 		}
 
-		uint32 Index = 0;
 		for (tinygltf::Node Node : Model.nodes)
 		{
 			if (Node.mesh != -1)
 			{
-				FScene::FInstance Instance;
+				static uint32 ID = 0;
+				FScene::FInstance Instance(ID++);
 				Instance.Mesh = Node.mesh;
 				if (Node.translation.size() != 0)
 				{
 					check(Node.translation.size() == 3);
 					Instance.Pos.Set((float)Node.translation[0], (float)Node.translation[1], (float)Node.translation[2], 1);
+				}
+
+				if (Node.scale.size() != 0)
+				{
+					check(Node.scale.size() == 3);
+					Instance.Scale.Set((float)Node.scale[0], (float)Node.scale[1], (float)Node.scale[2]);
+				}
+
+				if (Node.rotation.size() != 0)
+				{
+					check(Node.rotation.size() == 3);
+					Instance.Rotation.Set((float)Node.rotation[0], (float)Node.rotation[1], (float)Node.rotation[2]);
 				}
 				Scene.Instances.push_back(Instance);
 			}
@@ -400,7 +416,8 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 		{
 			for (int32 Index = 0; Index < (int32)Scene.Meshes.size(); ++Index)
 			{
-				FScene::FInstance Instance;
+				static uint32 ID = 0;
+				FScene::FInstance Instance(ID++);
 				Instance.Mesh = Index;
 				Scene.Instances.push_back(Instance);
 			}

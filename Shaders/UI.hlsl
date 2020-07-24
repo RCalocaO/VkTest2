@@ -17,6 +17,7 @@ cbuffer CB : register(b0)
 {
 	float2 Scale;
 	float2 Translate;
+	float4 Color;
 }
 
 SamplerState Sampler : register(s1);
@@ -34,4 +35,9 @@ FVSOut UIMainVS(in FVSIn In) : SV_Position
 float4 UIMainPS(FVSOut In) : SV_Target0
 {
 	return In.Color * Font.Sample(Sampler, In.UVs);
+}
+
+float4 UIMainColorPS(FVSOut In) : SV_Target0
+{
+	return In.Color * Color;
 }

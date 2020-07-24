@@ -81,6 +81,9 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 			case VK_OBJECT_TYPE_BUFFER:
 				s += "\tBuffer ";
 				break;
+			case VK_OBJECT_TYPE_DEVICE:
+				s += "\tDevice ";
+				break;
 			case VK_OBJECT_TYPE_BUFFER_VIEW:
 				s += "\tBufferView ";
 				break;
