@@ -18,6 +18,9 @@
 #include <sstream>
 #include <time.h>
 
+const float TTL = 2.5;
+
+
 template <typename T>
 inline void ShuffleDeck(std::vector<T>& Deck)
 {
@@ -147,30 +150,57 @@ struct FCharacter
 
 	ECharacter Type;
 	std::string Name;
-	int HP = 0;
-	bool bExhausted = false;
+	int MaxHP = 0;
 	FModifierDeck Modifiers;
 
-	FCharacter(ECharacter InType, std::string InName, int InHP)
+	FCharacter(ECharacter InType, std::string InName, int InMaxHP)
 	{
 		Type = InType;
 		Name = InName;
-		HP = InHP;
-	}
-
-	void Setup()
-	{
-		Available = Cards;
-		Hand.Reset();
-		Lost.clear();
-		Discarded.clear();
-		bExhausted = false;
-		Modifiers.Shuffle();
+		MaxHP = InMaxHP;
 	}
 
 	FModifier GetModifier()
 	{
 		return Modifiers.GetNext();
+	}
+};
+
+struct FCharacterInstance
+{
+	int PosX = -1;
+	int PosY = -1;
+	int HP = -1;
+	int XP = 0;
+
+	bool bExhausted = false;
+	FAbilityCardPair Hand;
+	std::vector<FAbilityCard*> Available;
+	std::vector<FAbilityCard*> Lost;
+	std::vector<FAbilityCard*> Discarded;
+
+	FCharacter* Character;
+
+	FCharacterInstance(FCharacter* InCharacter)
+	{
+		Character = InCharacter;
+		HP = Character->MaxHP;
+	}
+
+	void SetPos(int InPosX, int InPosY)
+	{
+		PosX = InPosX;
+		PosY = InPosY;
+	}
+
+	void Setup()
+	{
+		Available = Character->Cards;
+		Hand.Reset();
+		Lost.clear();
+		Discarded.clear();
+		bExhausted = false;
+		Character->Modifiers.Shuffle();
 	}
 
 	bool IsExhausted()
@@ -225,11 +255,6 @@ struct FCharacter
 		Discarded.push_back(Hand.Bottom);
 		Hand.Reset();
 	}
-
-	std::vector<FAbilityCard*> Available;
-	FAbilityCardPair Hand;
-	std::vector<FAbilityCard*> Lost;
-	std::vector<FAbilityCard*> Discarded;
 };
 
 struct FDemolitionist : FCharacter
@@ -401,14 +426,17 @@ struct FMonsterInstance
 	int MonsterIndex;
 	bool bElite;
 	int HP;
+	int PosX, PosY;
 	std::string Name;
 
-	FMonsterInstance(FMonster* InMonster, int InMonsterIndex, bool bInElite)
+	FMonsterInstance(FMonster* InMonster, int InMonsterIndex, bool bInElite, int InPosX, int InPosY)
 	{
 		Monster = InMonster;
 		MonsterIndex = InMonsterIndex;
 		bElite = bInElite;
 		HP = Monster->GetStartHP(bElite);
+		PosX = InPosX;
+		PosY = InPosY;
 
 		std::stringstream ss;
 		if (bElite)
@@ -430,13 +458,13 @@ struct FTurn
 {
 	int Initiative = 0;
 
-	FCharacter* Character = nullptr;
+	FCharacterInstance* Character = nullptr;
 	FAbilityCardPair* CharacterCards = nullptr;
 
 	FMonster* Monster = nullptr;
 	FMonsterCard* MonsterCard = nullptr;
 
-	FTurn(FCharacter* InCharacter, FAbilityCardPair* InCharacterCards)
+	FTurn(FCharacterInstance* InCharacter, FAbilityCardPair* InCharacterCards)
 	{
 		Character = InCharacter;
 		CharacterCards = InCharacterCards;
@@ -454,9 +482,17 @@ struct FTurn
 struct FScenario
 {
 	int Round = 0;
-	std::vector<FCharacter*> Characters;
+	std::vector<FCharacterInstance*> CharacterInstances;
 	std::map<FMonster*, std::vector<FMonsterInstance*>> MonsterInstances;
 	std::vector<FMonster*> Monsters;
+
+	enum
+	{
+		NumRows = 7,
+		NumCols = 11,
+	};
+
+	char Map[NumRows][NumCols];
 
 	FScenario()
 	{
@@ -482,24 +518,27 @@ struct FScenario
 		MonsterModifiers.Modifiers.push_back(FModifier(FModifier::MissShuffle, 0));
 	}
 
+	virtual ~FScenario() {}
+
 	void Setup(std::vector<FCharacter*>& InCharacters)
 	{
-		Characters = InCharacters;
-		for (FCharacter* C : Characters)
+		for (FCharacter* C : InCharacters)
 		{
-			C->Setup();
+			FCharacterInstance* CI = new FCharacterInstance(C);
+			CharacterInstances.push_back(CI);
+			CI->Setup();
 		}
+		SetupCharacterPositions();
 
-		AddAndSetupMonsters();
+		AddMonsters((int)CharacterInstances.size());
+		SetupMonsters();
 	}
 
-	void AddAndSetupMonsters()
-	{
-		Monsters.push_back(&GVermlingRaider);
-		MonsterInstances[&GVermlingRaider].push_back(new FMonsterInstance(&GVermlingRaider, 1, false));
-		MonsterInstances[&GVermlingRaider].push_back(new FMonsterInstance(&GVermlingRaider, 3, false));
-		MonsterInstances[&GVermlingRaider].push_back(new FMonsterInstance(&GVermlingRaider, 6, true));
+	virtual void SetupCharacterPositions() = 0;
+	virtual void AddMonsters(int NumCharacters) = 0;
 
+	void SetupMonsters()
+	{
 		// Set Elite first
 		for (auto& Pair : MonsterInstances)
 		{
@@ -538,11 +577,11 @@ struct FScenario
 		std::cout << "*** Player Cards" << std::endl;
 
 		int NotExhausted = 0;
-		for (FCharacter* C : Characters)
+		for (FCharacterInstance* C : CharacterInstances)
 		{
 			if (!C->IsExhausted())
 			{
-				std::cout << "\t" << C->Name << std::endl;
+				std::cout << "\t" << C->Character->Name << std::endl;
 				if (C->SelectHand())
 				{
 					Turns.push_back(FTurn(C, &C->Hand));
@@ -562,42 +601,47 @@ struct FScenario
 
 	void PrintInfo()
 	{
-		ImGui::Begin("Game Info");
-		{
-			char s[64];
-			sprintf(s, "Round %d", Round);
-			ImGui::Text(s);
-		}
-
 		//std::cout << "***** ROUND " << Round << "*****" << std::endl;
-		ImGui::Text("*** Characters ***");
+		//ImGui::Text("*** Characters ***");
 		//std::cout << "\t*** Characters" << std::endl;
-		for (FCharacter* C : Characters)
+		for (FCharacterInstance* C : CharacterInstances)
 		{
 			char s[64];
-			//std::cout << "\t\t" << C->Name << " ";
+			//std::cout << "\t\t" <<  << " ";
+			ImGui::Begin(C->Character->Name.c_str());
+
 			if (C->IsExhausted())
 			{
-				sprintf(s, "%s EXHAUSTED!", C->Name.c_str());
+				sprintf(s, "%s EXHAUSTED!", C->Character->Name.c_str());
 			}
 			else
 			{
-				sprintf(s, "%s HP %d!", C->Name.c_str(), C->HP);
+				sprintf(s, "%s HP %d!", C->Character->Name.c_str(), C->HP);
 			}
 			ImGui::Text(s);
+			ImGui::End();
 		}
 
-		ImGui::Text("*** Monsters ***");
+		//ImGui::Text("*** Monsters ***");
 		//std::cout << "\t*** Monsters" << std::endl;
 		for (FMonster* Monster : Monsters)
 		{
 			for (FMonsterInstance* Instance : MonsterInstances[Monster])
 			{
+				ImGui::Begin(Instance->Name.c_str());
 				//std::cout << "\t\t" << Instance->Name << " " << "HP " << Instance->HP << std::endl;
 				char s[64];
 				sprintf(s, "%s HP %d!", Instance->Name.c_str(), Instance->HP);
 				ImGui::Text(s);
+				ImGui::End();
 			}
+		}
+
+		ImGui::Begin("Game Info");
+		{
+			char s[64];
+			sprintf(s, "Round %d", Round);
+			ImGui::Text(s);
 		}
 	}
 
@@ -674,7 +718,7 @@ struct FScenario
 			std::cout << "\t" << Turn.Initiative << " ";
 			if (Turn.Character)
 			{
-				std::cout << Turn.Character->Name;
+				std::cout << Turn.Character->Character->Name;
 			}
 			else
 			{
@@ -693,7 +737,7 @@ struct FScenario
 			{
 				if (!Turn.Character->bExhausted)
 				{
-					std::cout << "\t** " << Turn.Character->Name << "'s Turn" << std::endl;
+					std::cout << "\t** " << Turn.Character->Character->Name << "'s Turn" << std::endl;
 					PlayCharacterTurn(Turn);
 				}
 			}
@@ -753,21 +797,21 @@ struct FScenario
 		}
 	}
 
-	void AttackMonster(FCharacter* Character, FModifier Modifier, FMonsterInstance* Instance)
+	void AttackMonster(FCharacterInstance* Character, FModifier Modifier, FMonsterInstance* Instance)
 	{
 		int Damage = 2;
 		std::cout << "\t\t\tAttack " << Damage << " ";
 		if (Modifier.Type == FModifier::MissShuffle)
 		{
 			std::cout << " to " << Instance->GetName() << "... MISS!" << std::endl;
-			Character->Modifiers.Shuffle();
+			Character->Character->Modifiers.Shuffle();
 			return;
 		}
 		else if (Modifier.Type == FModifier::DoubleShuffle)
 		{
 			std::cout << Damage << "... 2X!";
 			Damage *= 2;
-			Character->Modifiers.Shuffle();
+			Character->Character->Modifiers.Shuffle();
 		}
 		else
 		{
@@ -791,13 +835,13 @@ struct FScenario
 		std::cout << std::endl;
 	}
 
-	void AttackCharacter(FMonsterInstance* Instance, FModifier Modifier, FCharacter* Character)
+	void AttackCharacter(FMonsterInstance* Instance, FModifier Modifier, FCharacterInstance* Character)
 	{
 		int Damage = Instance->Monster->GetBaseDamage(Instance->bElite);
 		std::cout << "\t\t\tAttack " << Damage << " ";
 		if (Modifier.Type == FModifier::MissShuffle)
 		{
-			std::cout << " to " << Character->Name << "... MISS!" << std::endl;
+			std::cout << " to " << Character->Character->Name << "... MISS!" << std::endl;
 			MonsterModifiers.Shuffle();
 			return;
 		}
@@ -820,7 +864,7 @@ struct FScenario
 
 		Character->HP = Max(Character->HP - Damage, 0);
 
-		std::cout << " to " << Character->Name << ", final HP " << Character->HP;
+		std::cout << " to " << Character->Character->Name << ", final HP " << Character->HP;
 		if (Character->HP == 0)
 		{
 			std::cout << " EXHAUSTED!";
@@ -829,13 +873,13 @@ struct FScenario
 		std::cout << std::endl;
 	}
 
-	void PlayCharacterAbility(FCharacter* Character, FAbilityCard* Card)
+	void PlayCharacterAbility(FCharacterInstance* Character, FAbilityCard* Card)
 	{
 		std::cout << "\t\t" << Card->Name << std::endl;
 		FMonsterInstance* Instance = FindClosestMonsterInstance();
 		if (Instance)
 		{
-			FModifier Modifier = Character->GetModifier();
+			FModifier Modifier = Character->Character->GetModifier();
 			AttackMonster(Character, Modifier, Instance);
 		}
 		else
@@ -850,16 +894,16 @@ struct FScenario
 		PlayCharacterAbility(Turn.Character, Turn.CharacterCards->Bottom);
 	}
 
-	FCharacter* FindClosestCharacter()
+	FCharacterInstance* FindClosestCharacter()
 	{
 		if (!AreAllCharactersExhausted())
 		{
 			while (true)
 			{
-				auto Index = rand() % Characters.size();
-				if (!Characters[Index]->bExhausted)
+				auto Index = rand() % CharacterInstances.size();
+				if (!CharacterInstances[Index]->bExhausted)
 				{
-					return Characters[Index];
+					return CharacterInstances[Index];
 				}
 			}
 		}
@@ -869,7 +913,7 @@ struct FScenario
 
 	void PlayMonsterTurn(FTurn& Turn, FMonsterInstance* Instance)
 	{
-		FCharacter* Character = FindClosestCharacter();
+		FCharacterInstance* Character = FindClosestCharacter();
 		if (Character && !Character->bExhausted)
 		{
 			FModifier Modifier = MonsterModifiers.GetNext();
@@ -879,7 +923,7 @@ struct FScenario
 
 	void ChekEndOfRound()
 	{
-		for (FCharacter* C : Characters)
+		for (FCharacterInstance* C : CharacterInstances)
 		{
 			C->EndRound();
 		}
@@ -887,7 +931,7 @@ struct FScenario
 
 	bool AreAllCharactersExhausted()
 	{
-		for (FCharacter* C : Characters)
+		for (FCharacterInstance* C : CharacterInstances)
 		{
 			if (!C->IsExhausted())
 			{
@@ -901,26 +945,73 @@ struct FScenario
 	FModifierDeck MonsterModifiers;
 };
 
+struct FScenarioOne : FScenario
+{
+	FScenarioOne()
+	{
+#if 0
+		//						   1
+		//				 01234567890
+		strncpy(Map[0], "       ..OE", NumCols);
+		strncpy(Map[1], "       .O..", NumCols);
+		strncpy(Map[2], "XX....N.O..", NumCols);
+		strncpy(Map[3], "X..N...O...", NumCols);
+		strncpy(Map[4], "X O ...O...", NumCols);
+		strncpy(Map[5], "     ..EN.N", NumCols);
+		strncpy(Map[6], "      . . .", NumCols);
+#else
+		//						   1
+		//				 01234567890
+		strncpy(Map[0], "       ..O.", NumCols);
+		strncpy(Map[1], "       .O..", NumCols);
+		strncpy(Map[2], "........O..", NumCols);
+		strncpy(Map[3], ".......O...", NumCols);
+		strncpy(Map[4], ". O ...O...", NumCols);
+		strncpy(Map[5], "     ......", NumCols);
+		strncpy(Map[6], "      . . .", NumCols);
+#endif
+	}
+
+	virtual void SetupCharacterPositions() override
+	{
+		CharacterInstances[0]->SetPos(3, 0);
+		CharacterInstances[1]->SetPos(2, 1);
+	}
+
+	virtual void AddMonsters(int NumCharacters) override
+	{
+		Monsters.push_back(&GVermlingRaider);
+		MonsterInstances[&GVermlingRaider].push_back(new FMonsterInstance(&GVermlingRaider, 1, false, 3, 3));
+		MonsterInstances[&GVermlingRaider].push_back(new FMonsterInstance(&GVermlingRaider, 4, false, 2, 6));
+		MonsterInstances[&GVermlingRaider].push_back(new FMonsterInstance(&GVermlingRaider, 5, false, 5, 8));
+		//MonsterInstances[&GVermlingRaider].push_back(new FMonsterInstance(&GVermlingRaider, 3, false, 5, 10));
+		//MonsterInstances[&GVermlingRaider].push_back(new FMonsterInstance(&GVermlingRaider, 6, true, 5, 7));
+		MonsterInstances[&GVermlingRaider].push_back(new FMonsterInstance(&GVermlingRaider, 2, true, 0, 10));
+	}
+};
+
 struct FGame
 {
-	FScenario Scenario;
+	FScenario* Scenario = nullptr;
 
 	FGame()
 	{
 		srand((unsigned int)time(NULL));
 		AddCharacter(&GDemolitionist);
 		AddCharacter(&GRedGuard);
+
 		SetupScenario();
 	}
 
 	void SetupScenario()
 	{
-		Scenario.Setup(Characters);
+		Scenario = new FScenarioOne;
+		Scenario->Setup(Characters);
 	}
 
 	bool IsScenarioFinishedOrAllCharactersExhausted()
 	{
-		return Scenario.IsFinished() || Scenario.AreAllCharactersExhausted();
+		return Scenario->IsFinished() || Scenario->AreAllCharactersExhausted();
 	}
 
 	float RoundTimer = 0;
@@ -928,11 +1019,10 @@ struct FGame
 	{
 		RoundTimer += DeltaTime;
 
-		Scenario.PrintInfo();
-		const float TTL = 2;
+		Scenario->PrintInfo();
 		if (RoundTimer > TTL)
 		{
-			Scenario.PlayRound();
+			Scenario->PlayRound();
 			RoundTimer = 0;
 		}
 	}
@@ -946,18 +1036,19 @@ struct FGame
 };
 
 
+static FGame Game;
+
 void Tick(float DeltaTime)
 {
-	static FGame Game;
-
 	if (!Game.IsScenarioFinishedOrAllCharactersExhausted())
 	{
 		Game.PlayRound(DeltaTime);
 	}
 	else
 	{
-		ImGui::Begin("Game Over");
-		if (Game.Scenario.AreAllCharactersExhausted())
+		Game.Scenario->PrintInfo();
+
+		if (Game.Scenario->AreAllCharactersExhausted())
 		{
 			ImGui::Text("***** YOU LOSE *****");
 		}
@@ -1035,19 +1126,6 @@ void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDe
 		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 24, 1, 0, 0, 0);
 	};
 
-	const char* Map[] =
-	{
-		"       ..OE",
-		"       .O..",
-		"XX....N.O..",
-		"X..N...O...",
-		"X O ...O...",
-		"     ..EN.N",
-		"      . . .",
-	};
-
-	const int NumRows = 7;
-	const int NumCols = 11;
 	const float Scale = 0.1f;
 
 	auto GetTranslation = [&](int Row, int Col)
@@ -1061,26 +1139,64 @@ void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDe
 		return FVector2(x, y);
 	};
 
-	for (int Row = 0; Row < NumRows; ++Row)
+	auto GetScaledTranslation = [&](int Row, int Col, float InScale)
 	{
-		for (int Col = 0; Col < NumCols; ++Col)
+		float x = Scale * ((float)Col * ((HexWidth - HexSideLength) * 0.5f + HexSideLength));
+		x += InScale * Scale * HexSideLength;
+		float y = (float)Row * Scale * HexHeight;
+		if (Col % 2)
+		{
+			y += 0.5f * HexHeight * Scale;
+		}
+		y += InScale * Scale * HexHeight * 0.5f;
+		return FVector2(x, y);
+	};
+
+	for (int Row = 0; Row < Game.Scenario->NumRows; ++Row)
+	{
+		for (int Col = 0; Col < Game.Scenario->NumCols; ++Col)
 		{
 			FVector2 Translation = GetTranslation(Row, Col);
 			FVector4 Color = FVector4::GetZero();
-			char Hex = Map[Row][Col];
+			char Hex = Game.Scenario->Map[Row][Col];
 			switch (Hex)
 			{
 			case ' ': continue;
-			case 'X': Color.Set(0, 0, 0.7f, 1); break;
+			//case 'X': Color.Set(0, 0, 0.7f, 1); break;
 			case 'O': Color.Set(0, 0.7f, 0, 1); break;
-			case 'E': Color.Set(0.7f, 0.7f, 0, 1); break;
-			case '.': Color.Set(1, 1, 1, 1); break;
-			case 'N': Color.Set(0.3f, 0.3f, 0.3f, 1); break;
+			//case 'E': Color.Set(0.7f, 0.7f, 0, 1); break;
+			case '.': Color.Set(0.6f, 0.8f, 0.8f, 1); break;
+			//case 'N': Color.Set(0.3f, 0.3f, 0.3f, 1); break;
 			default:
 				check(0);
 			}
 
 			DrawHex(Scale, Translation, Color);
+		}
+	}
+
+	for (FCharacterInstance* CI : Game.Scenario->CharacterInstances)
+	{
+		if (!CI->bExhausted)
+		{
+			FVector2 Translation = GetScaledTranslation(CI->PosX, CI->PosY, 0.5f);
+			DrawHex(Scale * 0.5f, Translation, FVector4(0, 0, 1, 1));
+		}
+	}
+
+	for (FMonster* Monster : Game.Scenario->Monsters)
+	{
+		for (FMonsterInstance* MonsterInstance : Game.Scenario->MonsterInstances[Monster])
+		{
+			FVector2 Translation = GetScaledTranslation(MonsterInstance->PosX, MonsterInstance->PosY, 0.5f);
+			if (MonsterInstance->bElite)
+			{
+				DrawHex(Scale * 0.5f, Translation, FVector4(0.85f, 0.85f, 0, 1));
+			}
+			else
+			{
+				DrawHex(Scale * 0.5f, Translation, FVector4(0.3f, 0.3f, 0.3f, 1));
+			}
 		}
 	}
 

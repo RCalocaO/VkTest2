@@ -875,8 +875,13 @@ static double Render(FApp& App)
 		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
 		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 
-	static float F = 0;
-	F += 0.005f;
+	static float F = 0.7f;
+
+	bool bGH = RCUtils::FCmdLine::Get().Contains("-ghjotl");
+	if (!bGH)
+	{
+		F += 0.005f;
+	}
 	float ClearColor[4] = {0.0f, abs(sin(F)), abs(cos(F)), 0.0f};
 	ClearColorImage(CmdBuffer->CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
 	ClearDepthImage(CmdBuffer->CmdBuffer, App.DepthBuffer.Image.Image, 1.0f, 0);
@@ -942,7 +947,6 @@ static double Render(FApp& App)
 		vkCmdDraw(CmdBuffer->CmdBuffer, 3, 1, 0, 0);
 	}
 
-	bool bGH = RCUtils::FCmdLine::Get().Contains("-ghjotl");
 	if (bGH)
 	{
 		GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
