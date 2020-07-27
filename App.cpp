@@ -213,7 +213,7 @@ void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDe
 	{
 		if (!CI->bExhausted)
 		{
-			FVector2 Translation = GetScaledTranslation(CI->Col, CI->Row, 0.5f);
+			FVector2 Translation = GetScaledTranslation(CI->Row, CI->Col, 0.5f);
 			DrawHex(Scale * 0.5f, Translation, FVector4(0, 0, 1, 1));
 		}
 	}
@@ -222,7 +222,7 @@ void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDe
 	{
 		for (FMonsterInstance* MonsterInstance : Pair.second)
 		{
-			FVector2 Translation = GetScaledTranslation(MonsterInstance->Col, MonsterInstance->Row, 0.5f);
+			FVector2 Translation = GetScaledTranslation(MonsterInstance->Row, MonsterInstance->Col, 0.5f);
 			if (MonsterInstance->bElite)
 			{
 				DrawHex(Scale * 0.5f, Translation, FVector4(0.85f, 0.85f, 0, 1));
