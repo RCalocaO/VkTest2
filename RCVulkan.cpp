@@ -372,13 +372,13 @@ void SVulkan::FSwapchain::SetupSurface(SDevice* InDevice, VkInstance InInstance,
 	}
 
 	VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(Device->PhysicalDevice, Surface, &SurfaceCaps));
-
-	AcquireBackbufferSemaphore = Device->CreateSemaphore();
-	FinalSemaphore = Device->CreateSemaphore();
 }
 
 void SVulkan::FSwapchain::Create(SDevice& Device, GLFWwindow* Window)
 {
+	AcquireBackbufferSemaphore = Device.CreateSemaphore();
+	FinalSemaphore = Device.CreateSemaphore();
+
 	VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(Device.PhysicalDevice, Surface, &SurfaceCaps));
 
 	DestroyImages();
@@ -432,7 +432,10 @@ void SVulkan::FSwapchain::Create(SDevice& Device, GLFWwindow* Window)
 
 void SVulkan::FSwapchain::Recreate(SDevice& Device, GLFWwindow* Window)
 {
+	DestroySemaphores();
 	Create(Device, Window);
+	bool bAcquire = AcquireBackbuffer();
+	check(bAcquire);
 }
 
 

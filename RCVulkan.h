@@ -905,13 +905,19 @@ struct SVulkan
 			return FRenderTargetInfo(ImageViews[ImageIndex], Format, LoadOp, StoreOp);
 		}
 
-		void Destroy()
+		void DestroySemaphores()
 		{
-			DestroyImages();
 			vkDestroySemaphore(Device->Device, AcquireBackbufferSemaphore, nullptr);
 			AcquireBackbufferSemaphore = VK_NULL_HANDLE;
 			vkDestroySemaphore(Device->Device, FinalSemaphore, nullptr);
 			FinalSemaphore = VK_NULL_HANDLE;
+		}
+
+		void Destroy()
+		{
+			DestroyImages();
+			DestroySemaphores();
+
 			vkDestroySwapchainKHR(Device->Device, Swapchain, nullptr);
 			Swapchain = VK_NULL_HANDLE;
 
