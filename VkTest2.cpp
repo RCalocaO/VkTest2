@@ -20,7 +20,7 @@
 
 #include "../RCUtils/RCUtilsMath.h"
 
-extern void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDescriptorCache& DescriptorCache, SVulkan::FGfxPSO* PSO, SVulkan::FCmdBuffer*);
+//extern void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDescriptorCache& DescriptorCache, SVulkan::FGfxPSO* PSO, SVulkan::FCmdBuffer*);
 
 static SVulkan GVulkan;
 
@@ -139,18 +139,11 @@ FVector3 TryGetVector3Prefix(const char* Prefix, FVector3 Value)
 	return Value;
 }
 
-static void ResizeCallback(GLFWwindow*, int w, int h)
-{
-	// Unhandled
-	check(0);
-	//g_SwapChainRebuild = true;
-	//g_SwapChainResizeWidth = w;
-	//g_SwapChainResizeHeight = h;
-}
-
+static void ResizeCallback(GLFWwindow*, int w, int h);
 
 struct FApp
 {
+	bool bResizeSwapchain = false;
 	bool bLMouseButtonHeld = false;
 	bool bRMouseButtonHeld = false;
 	uint32 FrameIndex = 0;
@@ -168,7 +161,7 @@ struct FApp
 	FBufferWithMemAndView TestCSBuffer;
 	FBufferWithMem TestCSUB;
 	FBufferWithMem ColorUB;
-	GLFWwindow* Window;
+	GLFWwindow* Window = nullptr;
 	uint32 ImGuiMaxVertices = 32768 * 3;
 	uint32 ImGuiMaxIndices = 32768 * 3;
 	FImageWithMemAndView ImGuiFont;
@@ -261,6 +254,12 @@ struct FApp
 		}
 
 		GPUTiming.Init(&Device, PendingOpsMgr);
+		RecreateDepthBuffer(Device);
+	}
+
+	void RecreateDepthBuffer(SVulkan::SDevice& Device)
+	{
+		DepthBuffer.Destroy();
 
 		int32 Width = 0, Height = 1;
 		glfwGetFramebufferSize(Window, &Width, &Height);
@@ -803,8 +802,27 @@ struct FApp
 		check(0);
 #endif
 	}
+
+	void RecreateSwapchain(SVulkan::SDevice& Device, SVulkan::FSwapchain& Swapchain)
+	{
+		int W = 0, H = 0;
+		glfwGetFramebufferSize(Window, &W, &H);
+		while (W == 0 || H == 0)
+		{
+			glfwGetFramebufferSize(Window, &W, &H);
+			glfwWaitEvents();
+		}
+		Device.WaitForIdle();
+
+		Swapchain.Recreate(Device, Window);
+	}
 };
 static FApp GApp;
+
+static void ResizeCallback(GLFWwindow*, int w, int h)
+{
+	GApp.bResizeSwapchain = true;
+}
 
 static void ClearColorImage(VkCommandBuffer CmdBuffer, VkImage Image, float Color[4])
 {
@@ -839,7 +857,14 @@ static void ClearDepthImage(VkCommandBuffer CmdBuffer, VkImage Image, float Dept
 static double Render(FApp& App)
 {
 	SVulkan::SDevice& Device = GVulkan.Devices[GVulkan.PhysicalDevice];
-	GVulkan.Swapchain.AcquireBackbuffer();
+	if (!GVulkan.Swapchain.AcquireBackbuffer() || App.bResizeSwapchain)
+	{
+		App.RecreateSwapchain(Device, GVulkan.Swapchain);
+		GRenderTargetCache.Destroy();
+		App.RecreateDepthBuffer(Device);
+
+		App.bResizeSwapchain = false;
+	}
 
 	Device.RefreshCommandBuffers();
 	App.Update();
@@ -877,7 +902,7 @@ static double Render(FApp& App)
 
 	static float F = 0.7f;
 
-	bool bGH = RCUtils::FCmdLine::Get().Contains("-ghjotl");
+	bool bGH = false;//RCUtils::FCmdLine::Get().Contains("-ghjotl");
 	if (!bGH)
 	{
 		F += 0.005f;
@@ -954,7 +979,7 @@ static double Render(FApp& App)
 		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(App.UIPSO, App.ImGUIVertexDecl);
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 
-		RenderJOTL(Device, GStagingBufferMgr, GDescriptorCache, PSO, CmdBuffer);
+		//RenderJOTL(Device, GStagingBufferMgr, GDescriptorCache, PSO, CmdBuffer);
 	}
 	else
 	{
@@ -989,8 +1014,8 @@ static double Render(FApp& App)
 		FMarkerScope MarkerScope(Device, CmdBuffer, "ImGUI");
 		if (bGH)
 		{
-			extern void Tick(float);
-			Tick(App.LastDelta / 1000.0f);
+			//extern void Tick(float);
+			//Tick(App.LastDelta / 1000.0f);
 		}
 		else if (ImGui::Begin("Debug"))
 		{
@@ -1052,7 +1077,10 @@ static double Render(FApp& App)
 
 	Device.Submit(Device.PresentQueue, CmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, GVulkan.Swapchain.AcquireBackbufferSemaphore, GVulkan.Swapchain.FinalSemaphore);
 
-	GVulkan.Swapchain.Present(Device.PresentQueue, GVulkan.Swapchain.FinalSemaphore);
+	if (!GVulkan.Swapchain.Present(Device.PresentQueue, GVulkan.Swapchain.FinalSemaphore))
+	{
+		App.bResizeSwapchain = true;
+	}
 
 	if (bRecompileShaders)
 	{

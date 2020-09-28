@@ -867,6 +867,7 @@ struct SVulkan
 		}
 
 		void Create(SDevice& Device, GLFWwindow* Window);
+		void Recreate(SDevice& Device, GLFWwindow* Window);
 
 		void DestroyImages()
 		{
@@ -918,13 +919,23 @@ struct SVulkan
 			Surface = VK_NULL_HANDLE;
 		}
 
-		void AcquireBackbuffer()
+		bool AcquireBackbuffer()
 		{
 			uint64 Timeout = 5 * 1000 * 1000;
-			VERIFY_VKRESULT(vkAcquireNextImageKHR(Device->Device, Swapchain, Timeout, AcquireBackbufferSemaphore, VK_NULL_HANDLE, &ImageIndex));
+			VkResult Result = vkAcquireNextImageKHR(Device->Device, Swapchain, Timeout, AcquireBackbufferSemaphore, VK_NULL_HANDLE, &ImageIndex);
+			if (Result == VK_ERROR_OUT_OF_DATE_KHR)
+			{
+				return false;
+			}
+			else if (Result != VK_SUBOPTIMAL_KHR)
+			{
+				VERIFY_VKRESULT(Result);
+			}
+
+			return true;
 		}
 
-		void Present(VkQueue Queue, VkSemaphore WaitSemaphore)
+		bool Present(VkQueue Queue, VkSemaphore WaitSemaphore)
 		{
 			VkPresentInfoKHR Info;
 			ZeroVulkanMem(Info, VK_STRUCTURE_TYPE_PRESENT_INFO_KHR);
@@ -934,7 +945,17 @@ struct SVulkan
 			Info.pSwapchains = &Swapchain;
 			Info.pImageIndices = &ImageIndex;
 
-			VERIFY_VKRESULT(vkQueuePresentKHR(Queue, &Info));
+			VkResult Result = vkQueuePresentKHR(Queue, &Info);
+			if (Result == VK_ERROR_OUT_OF_DATE_KHR  || Result == VK_SUBOPTIMAL_KHR)
+			{
+				return false;
+			}
+			else if (Result != VK_SUCCESS)
+			{
+				VERIFY_VKRESULT(Result);
+			}
+
+			return true;
 		}
 
 		void SetViewportAndScissor(FCmdBuffer* CmdBuffer)
@@ -1473,9 +1494,12 @@ struct FImageWithMemAndView : public FImageWithMem
 
 	void Destroy()
 	{
-		vkDestroyImageView(Image.Device, View, nullptr);
-		View = VK_NULL_HANDLE;
-		FImageWithMem::Destroy();
+		if (View != VK_NULL_HANDLE)
+		{
+			vkDestroyImageView(Image.Device, View, nullptr);
+			View = VK_NULL_HANDLE;
+			FImageWithMem::Destroy();
+		}
 	}
 };
 

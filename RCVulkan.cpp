@@ -120,8 +120,14 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 			case VK_OBJECT_TYPE_SURFACE_KHR:
 				s += "\tSurface ";
 				break;
+			case VK_OBJECT_TYPE_SWAPCHAIN_KHR:
+				s += "\tSwapchain ";
+				break;
 			case VK_OBJECT_TYPE_SEMAPHORE:
 				s += "\tSemaphore ";
+				break;
+			case VK_OBJECT_TYPE_QUEUE:
+				s += "\tQueue ";
 				break;
 			case VK_OBJECT_TYPE_UNKNOWN:
 				continue;
@@ -371,10 +377,14 @@ void SVulkan::FSwapchain::SetupSurface(SDevice* InDevice, VkInstance InInstance,
 	FinalSemaphore = Device->CreateSemaphore();
 }
 
-
 void SVulkan::FSwapchain::Create(SDevice& Device, GLFWwindow* Window)
 {
+	VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(Device.PhysicalDevice, Surface, &SurfaceCaps));
+
 	DestroyImages();
+
+	int Width = 0, Height = 0;
+	glfwGetFramebufferSize(Window, &Width, &Height);
 
 	VkSwapchainCreateInfoKHR CreateInfo;
 	ZeroVulkanMem(CreateInfo, VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
@@ -389,8 +399,17 @@ void SVulkan::FSwapchain::Create(SDevice& Device, GLFWwindow* Window)
 	CreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 	CreateInfo.presentMode = GetPresentMode(Device.PhysicalDevice, Surface);
 	CreateInfo.clipped = VK_TRUE;
-	CreateInfo.imageExtent.width = SurfaceCaps.currentExtent.width;
-	CreateInfo.imageExtent.height = SurfaceCaps.currentExtent.height;
+	VkExtent2D Extents = {(uint32)Width, (uint32)Height};
+	if (SurfaceCaps.currentExtent.width != UINT32_MAX)
+	{
+		Extents = SurfaceCaps.currentExtent;
+	}
+	else
+	{
+		Extents.width = Max(SurfaceCaps.minImageExtent.width, Min(SurfaceCaps.maxImageExtent.width, (uint32)Width));
+		Extents.height = Max(SurfaceCaps.minImageExtent.height, Min(SurfaceCaps.maxImageExtent.height, (uint32)Height));
+	}
+	CreateInfo.imageExtent = Extents;
 	CreateInfo.queueFamilyIndexCount = 1;
 	CreateInfo.pQueueFamilyIndices = &Device.PresentQueueIndex;
 	CreateInfo.oldSwapchain = Swapchain;
@@ -407,7 +426,15 @@ void SVulkan::FSwapchain::Create(SDevice& Device, GLFWwindow* Window)
 	{
 		ImageViews[i] = Device.CreateImageView(Images[i], Format, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D);
 	}
+
+	VERIFY_VKRESULT(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(Device.PhysicalDevice, Surface, &SurfaceCaps));
 }
+
+void SVulkan::FSwapchain::Recreate(SDevice& Device, GLFWwindow* Window)
+{
+	Create(Device, Window);
+}
+
 
 bool FDescriptorPSOCache::GetParameter(const char* Name, uint32& OutBinding, VkDescriptorType& OutType)
 {

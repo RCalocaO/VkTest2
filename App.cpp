@@ -18,6 +18,7 @@
 #include <sstream>
 #include <time.h>
 
+#if 0
 #include "../GHJOTL/GHJOTL.h"
 
 struct FGameUI : FGame
@@ -267,4 +268,5 @@ int main()
 		MaxRounds = Max(Game.Scenario.Round, MaxRounds);
 	}
 }
+#endif
 #endif
