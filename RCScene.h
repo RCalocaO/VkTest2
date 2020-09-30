@@ -31,11 +31,11 @@ struct FScene
 		std::vector<int> VertexBuffers;
 		std::vector<VkDeviceSize> VertexOffsets;
 #endif
-		uint32 NumIndices;
-		VkIndexType IndexType;
-		VkPrimitiveTopology PrimType;
-		int Material;
-		int VertexDecl;
+		uint32 NumIndices = 0;
+		VkIndexType IndexType = VK_INDEX_TYPE_UINT32;
+		VkPrimitiveTopology PrimType = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;;
+		int Material = -1;
+		int VertexDecl = -1;
 
 		FBoundingBox ObjectSpaceBounds;
 	};

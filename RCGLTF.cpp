@@ -2,7 +2,9 @@
 
 #include "VkTest2.h"
 
-#pragma optimize( "", on)
+#ifdef _DEBUG
+//#pragma optimize( "gt", on)
+#endif
 
 #include "RCVulkan.h"
 #include "RCScene.h"
@@ -202,14 +204,63 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 	return PSOCache.FindOrAddVertexDecl(VertexDecl);
 }
 
-
-bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr)
+struct FGLTFLoader
 {
 	tinygltf::TinyGLTF Loader;
 	tinygltf::Model Model;
 	std::string Error;
 	std::string Warnings;
-	if (Loader.LoadASCIIFromFile(&Model, &Error, &Warnings, Filename))
+	std::string Filename;
+
+	std::atomic<bool> bFinishedLoading = false;
+};
+
+const char* GetGLTFFilename(FGLTFLoader* Loader)
+{
+	return Loader ? Loader->Filename.c_str() : nullptr;
+}
+
+FGLTFLoader* CreateGLTFLoader(const char* Filename)
+{
+	FGLTFLoader* Loader = new FGLTFLoader;
+	Loader->Filename = Filename;
+	//Loader->bFinishedLoading = false;
+	if (Loader->Loader.LoadASCIIFromFile(&Loader->Model, &Loader->Error, &Loader->Warnings, Filename))
+	{
+		Loader->bFinishedLoading = true;
+		return Loader;
+	}
+	
+	delete Loader;
+	return nullptr;
+}
+
+bool IsGLTFLoaderFinished(FGLTFLoader* Loader)
+{
+	return Loader->bFinishedLoading;
+}
+
+void FreeGLTFLoader(FGLTFLoader* Loader)
+{
+	if (Loader)
+	{
+		delete Loader;
+	}
+}
+
+//double GetTimeInMs();
+
+void CreateGLTFGfxResources(FGLTFLoader* Loader, SVulkan::SDevice& Device, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr)
+{
+	//double Begin = GetTimeInMs();
+	//bool bLoaded = Loader->Loader.LoadASCIIFromFile(&Model, &Error, &Warnings, Filename);
+	//double End = GetTimeInMs();
+	//double Delta = End - Begin;
+	//char s[128];
+	//sprintf(s, "*** tinyGLTF Time %f\n", (float)Delta);
+	//::OutputDebugStringA(s);
+	//Begin = GetTimeInMs();
+	if (Loader)
 	{
 		auto FindTextureValueDouble = [](tinygltf::Material& GLTFMaterial, const char* Name, bool bIsAdditional) -> double
 		{
@@ -228,7 +279,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 				: false;
 		};
 
-		for (tinygltf::Material& GLTFMaterial : Model.materials)
+		for (tinygltf::Material& GLTFMaterial : Loader->Model.materials)
 		{
 			FScene::FMaterial Mtl;
 			Mtl.Name = GLTFMaterial.name;
@@ -240,18 +291,18 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 			Scene.Materials.push_back(Mtl);
 		}
 
-		for (tinygltf::Mesh& GLTFMesh : Model.meshes)
+		for (tinygltf::Mesh& GLTFMesh : Loader->Model.meshes)
 		{
 			FScene::FMesh Mesh;
 			for (tinygltf::Primitive& GLTFPrim : GLTFMesh.primitives)
 			{
 				FScene::FPrim Prim;
-				tinygltf::Accessor& Indices = Model.accessors[GLTFPrim.indices];
+				tinygltf::Accessor& Indices = Loader->Model.accessors[GLTFPrim.indices];
 				check(Indices.type == TINYGLTF_TYPE_SCALAR);
 
-				tinygltf::BufferView& IndicesBufferView = Model.bufferViews[Indices.bufferView];
+				tinygltf::BufferView& IndicesBufferView = Loader->Model.bufferViews[Indices.bufferView];
 
-				Prim.VertexDecl = GetOrAddVertexDecl(Device, Model, GLTFPrim, Prim, PSOCache);
+				Prim.VertexDecl = GetOrAddVertexDecl(Device, Loader->Model, GLTFPrim, Prim, PSOCache);
 				Prim.Material = GLTFPrim.material;
 				Prim.PrimType = GetPrimType(GLTFPrim.mode);
 				Prim.NumIndices = (uint32)IndicesBufferView.byteLength / GetSizeInBytes(Indices.componentType);
@@ -259,7 +310,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 				uint32 Size = (uint32)IndicesBufferView.byteLength;
 				Prim.IndexBuffer.Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, Size, true);
 				{
-					unsigned char* SrcData = Model.buffers[IndicesBufferView.buffer].data.data();
+					unsigned char* SrcData = Loader->Model.buffers[IndicesBufferView.buffer].data.data();
 					SrcData += IndicesBufferView.byteOffset + Indices.byteOffset;
 					unsigned short* DestData = (unsigned short*)Prim.IndexBuffer.Lock();
 					memcpy(DestData, SrcData, Size);
@@ -285,7 +336,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 #if !SCENE_USE_SINGLE_BUFFERS
 		//#todo Flip Y
 		check(Model.buffers.size() == 1);
-		for (tinygltf::Buffer& GLTFBuffer : Model.buffers)
+		for (tinygltf::Buffer& GLTFBuffer : Loader->Model.buffers)
 		{
 			FBufferWithMem Buffer;
 			uint32 Size = (uint32)GLTFBuffer.data.size();
@@ -299,7 +350,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 #endif
 		//AddDefaultVertexInputs(Device);
 
-		for (tinygltf::Image& GLTFImage : Model.images)
+		for (tinygltf::Image& GLTFImage : Loader->Model.images)
 		{
 			check(!GLTFImage.as_is);
 			check(GLTFImage.bufferView == -1);
@@ -384,7 +435,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 			}
 		}
 
-		for (tinygltf::Node Node : Model.nodes)
+		for (tinygltf::Node Node : Loader->Model.nodes)
 		{
 			if (Node.mesh != -1)
 			{
@@ -412,7 +463,7 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 			}
 		}
 
-		if (Model.nodes.size() == 0)
+		if (Loader->Model.nodes.size() == 0)
 		{
 			for (int32 Index = 0; Index < (int32)Scene.Meshes.size(); ++Index)
 			{
@@ -424,5 +475,10 @@ bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCach
 		}
 	}
 
-	return true;
+	//End = GetTimeInMs();
+	//Delta = End - Begin;
+	//sprintf(s, "*** RC GLTF Time %f\n", (float)Delta);
+	//::OutputDebugStringA(s);
+
+	//return true;
 }

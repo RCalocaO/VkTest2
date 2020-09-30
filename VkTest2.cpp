@@ -20,6 +20,8 @@
 
 #include "../RCUtils/RCUtilsMath.h"
 
+#include <thread>
+
 //extern void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDescriptorCache& DescriptorCache, SVulkan::FGfxPSO* PSO, SVulkan::FCmdBuffer*);
 
 static SVulkan GVulkan;
@@ -33,6 +35,13 @@ static FPSOCache GPSOCache;
 static FDescriptorCache GDescriptorCache;
 
 static FStagingBufferManager GStagingBufferMgr;
+
+struct FGLTFLoader;
+extern FGLTFLoader* CreateGLTFLoader(const char* Filename);
+extern bool IsGLTFLoaderFinished(FGLTFLoader* Loader);
+extern const char* GetGLTFFilename(FGLTFLoader* Loader);
+extern void CreateGLTFGfxResources(FGLTFLoader* Loader, SVulkan::SDevice& Device, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
+extern void FreeGLTFLoader(FGLTFLoader* Loader);
 
 struct FCamera
 {
@@ -103,7 +112,14 @@ static FIntVector4 g_vMode = {0, 0, 0 ,0};
 static FIntVector4 g_vMode2 = { 0, 0, 0 ,0 };
 static bool g_bWireframe = false;
 
-extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
+//extern bool LoadGLTF(SVulkan::SDevice& Device, const char* Filename, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
+
+
+double GetTimeInMs()
+{
+	double Time = glfwGetTime() * 1000.0;
+	return Time;
+}
 
 FVector2 TryGetVector2Prefix(const char* Prefix, FVector2 Value)
 {
@@ -141,8 +157,18 @@ FVector3 TryGetVector3Prefix(const char* Prefix, FVector3 Value)
 
 static void ResizeCallback(GLFWwindow*, int w, int h);
 
+enum class ELoadingState
+{
+	Idle,
+	BeginLoading,
+	Loading,
+	FinishedLoading,
+};
+
 struct FApp
 {
+	std::atomic<ELoadingState> LoadingState = ELoadingState::Idle;
+
 	bool bResizeSwapchain = false;
 	bool bLMouseButtonHeld = false;
 	bool bRMouseButtonHeld = false;
@@ -352,11 +378,19 @@ struct FApp
 		}
 	}
 
-	void Update()
+	void Update(SVulkan::SDevice& Device)
 	{
 		++FrameIndex;
 		GStagingBufferMgr.Refresh();
 		Camera.UpdateMatrix();
+
+		if (LoadingState == ELoadingState::Loading)
+		{
+			if (IsGLTFLoaderFinished(GLTFLoader))
+			{
+				TryLoadGLTF(Device);
+			}
+		}
 	}
 
 	void ImGuiNewFrame()
@@ -548,19 +582,122 @@ struct FApp
 	std::string LoadedGLTF;
 	FPendingOpsManager PendingOpsMgr;
 
-	void TryLoadGLTF(SVulkan::SDevice& Device, const char* Filename)
+	FGLTFLoader* GLTFLoader = nullptr;
+
+	static void AsyncLoadingThread(FApp* This, std::string Filename)
 	{
-		double StartTime = glfwGetTime();
-		if (LoadGLTF(Device, Filename, GPSOCache, Scene, PendingOpsMgr, &GStagingBufferMgr))
+		This->LoadingState = ELoadingState::BeginLoading;
+
+		This->GLTFLoader = CreateGLTFLoader(Filename.c_str());
+		if (This->GLTFLoader)
 		{
-			double EndTime = glfwGetTime();
+			This->LoadingState = ELoadingState::Loading;
+		}
+		else
+		{
+			This->LoadingState = ELoadingState::Idle;
+		}
+	}
+
+	std::thread* AsyncLoadingThreadHandle = nullptr;
+
+	void BeginAsyncLoading(const char* Filename)
+	{
+		check(!AsyncLoadingThreadHandle);
+		static bool b = true;
+		if (b)
+		{
+			AsyncLoadingThreadHandle = new std::thread(AsyncLoadingThread, this, std::string(Filename));
+		}
+		else
+		{
+			AsyncLoadingThread(this, std::string(Filename));
+		}
+	}
+
+	static void FixGLTFVertexDecl(SVulkan::FShader* Shader, int32& PrimVertexDeclHandle)
+	{
+		SpvReflectShaderModule Module;
+
+		SpvReflectResult result = spvReflectCreateShaderModule(Shader->SpirV.size(), Shader->SpirV.data(), &Module);
+		check(result == SPV_REFLECT_RESULT_SUCCESS);
+
+		uint32 Count = 0;
+		result = spvReflectEnumerateInputVariables(&Module, &Count, nullptr);
+		check(result == SPV_REFLECT_RESULT_SUCCESS);
+
+		std::vector<SpvReflectInterfaceVariable*> Variables(Count);
+		result = spvReflectEnumerateInputVariables(&Module, &Count, Variables.data());
+		check(result == SPV_REFLECT_RESULT_SUCCESS);
+
+		FPSOCache::FVertexDecl NewDecl = GPSOCache.VertexDecls[PrimVertexDeclHandle];
+
+		auto FindSemantic = [&](const char* Name) -> int32
+		{
+			for (auto* Var : Variables)
 			{
-				std::stringstream ss;
-				ss << "Loaded " << Filename << " in " << (float)(EndTime - StartTime) << "s\n";
-				ss.flush();
-				::OutputDebugStringA(ss.str().c_str());
+				if (strstr(Var->name, Name))
+				{
+					return (int32)Var->location;
+				}
 			}
-			LoadedGLTF = Filename;
+
+			return -1;
+		};
+
+		uint32 Index = 0;
+		for (auto& Name : NewDecl.Names)
+		{
+			int32 Found = FindSemantic(Name.c_str());
+			check(Found != -1);
+			{
+				NewDecl.AttrDescs[Index].location = (uint32)Found;
+			}
+
+			++Index;
+		}
+
+		spvReflectDestroyShaderModule(&Module);
+
+		PrimVertexDeclHandle = GPSOCache.FindOrAddVertexDecl(NewDecl);
+	}
+
+	void TryLoadGLTF(SVulkan::SDevice& Device)
+	{
+		//double StartTime = glfwGetTime();
+		CreateGLTFGfxResources(GLTFLoader, Device, GPSOCache, Scene, PendingOpsMgr, &GStagingBufferMgr);
+		LoadingState = ELoadingState::FinishedLoading;
+		LoadedGLTF = GetGLTFFilename(GLTFLoader);
+		FreeGLTFLoader(GLTFLoader);
+		GLTFLoader = nullptr;
+
+		{
+			std::stringstream ss;
+			ss << "VkTest2 - " << LoadedGLTF;
+			ss.flush();
+			::glfwSetWindowTitle(Window, ss.str().c_str());
+		}
+
+		//if (LoadGLTF(Device, Filename, GPSOCache, Scene, PendingOpsMgr, &GStagingBufferMgr))
+		//{
+		//	double EndTime = glfwGetTime();
+		//	{
+		//		std::stringstream ss;
+		//		ss << "Loaded " << Filename << " in " << (float)(EndTime - StartTime) << "s\n";
+		//		ss.flush();
+		//		::OutputDebugStringA(ss.str().c_str());
+		//	}
+		//}
+
+		FShaderInfo* TestGLTFVS = GShaderLibrary.GetShader("Shaders/TestMesh.hlsl", "TestGLTFVS", FShaderInfo::EStage::Vertex);
+		check(TestGLTFVS);
+
+		for (auto& Mesh : Scene.Meshes)
+		{
+			for (auto& Prim : Mesh.Prims)
+			{
+				FixGLTFVertexDecl(TestGLTFVS->Shader, Prim.VertexDecl);
+			}
 		}
 	}
 
@@ -867,7 +1004,7 @@ static double Render(FApp& App)
 	}
 
 	Device.RefreshCommandBuffers();
-	App.Update();
+	App.Update(Device);
 
 	SVulkan::FCmdBuffer* CmdBuffer = Device.BeginCommandBuffer(Device.GfxQueueIndex);
 	if (!App.PendingOpsMgr.Ops.empty())
@@ -1098,53 +1235,6 @@ static double Render(FApp& App)
 	return GpuTimeMS;
 }
 
-static void FixGLTFVertexDecl(SVulkan::FShader* Shader, int32& PrimVertexDeclHandle)
-{
-	SpvReflectShaderModule Module;
-
-	SpvReflectResult result = spvReflectCreateShaderModule(Shader->SpirV.size(), Shader->SpirV.data(), &Module);
-	check(result == SPV_REFLECT_RESULT_SUCCESS);
-
-	uint32 Count = 0;
-	result = spvReflectEnumerateInputVariables(&Module, &Count, nullptr);
-	check(result == SPV_REFLECT_RESULT_SUCCESS);
-
-	std::vector<SpvReflectInterfaceVariable*> Variables(Count);
-	result = spvReflectEnumerateInputVariables(&Module, &Count, Variables.data());
-	check(result == SPV_REFLECT_RESULT_SUCCESS);
-
-	FPSOCache::FVertexDecl NewDecl = GPSOCache.VertexDecls[PrimVertexDeclHandle];
-
-	auto FindSemantic = [&](const char* Name) -> int32
-	{
-		for (auto* Var : Variables)
-		{
-			if (strstr(Var->name, Name))
-			{
-				return (int32)Var->location;
-			}
-		}
-
-		return -1;
-	};
-
-	uint32 Index = 0;
-	for (auto& Name : NewDecl.Names)
-	{
-		int32 Found = FindSemantic(Name.c_str());
-		check(Found != -1);
-		{
-			NewDecl.AttrDescs[Index].location = (uint32)Found;
-		}
-
-		++Index;
-	}
-
-	spvReflectDestroyShaderModule(&Module);
-
-	PrimVertexDeclHandle = GPSOCache.FindOrAddVertexDecl(NewDecl);
-}
-
 static void SetupShaders(FApp& App)
 {
 	FShaderInfo* TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "TestCS", FShaderInfo::EStage::Compute);
@@ -1228,14 +1318,6 @@ static void SetupShaders(FApp& App)
 				VkPipelineInputAssemblyStateCreateInfo* IAInfo = (VkPipelineInputAssemblyStateCreateInfo*)GfxPipelineInfo.pInputAssemblyState;
 				IAInfo->topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
 			});
-
-		for (auto& Mesh : App.Scene.Meshes)
-		{
-			for (auto& Prim : Mesh.Prims)
-			{
-				FixGLTFVertexDecl(TestGLTFVS->Shader, Prim.VertexDecl);
-			}
-		}
 	}
 }
 
@@ -1292,6 +1374,7 @@ static void MouseCallback(GLFWwindow* Window, double XPos, double YPos)
 
 static GLFWwindow* Init(FApp& App)
 {
+	double Begin = GetTimeInMs();
 	glfwSetErrorCallback(ErrorCallback);
 	int RC = glfwInit();
 	check(RC != 0);
@@ -1345,7 +1428,8 @@ static GLFWwindow* Init(FApp& App)
 	const char* Filename = nullptr;
 	if (RCUtils::FCmdLine::Get().TryGetStringFromPrefix("-gltf=", Filename))
 	{
-		App.TryLoadGLTF(Device, Filename);
+		App.BeginAsyncLoading(Filename);
+		//App.TryLoadGLTF(Device, Filename);
 	}
 
 	SetupShaders(App);
@@ -1357,6 +1441,12 @@ static GLFWwindow* Init(FApp& App)
 
 	glfwSetCursorPosCallback(Window, MouseCallback);
 	glfwSetScrollCallback(Window, ScrollCallback);
+
+	double End = GetTimeInMs();
+	double Delta = End - Begin;
+	char s[128];
+	sprintf(s, "*** INIT Time %f\n", (float)Delta);
+	::OutputDebugStringA(s);
 
 	return Window;
 }
@@ -1390,12 +1480,16 @@ int main()
 
 	uint32 ExitAfterNFrames = RCUtils::FCmdLine::Get().TryGetIntPrefix("-exitafterframes=", (uint32)-1);
 
-	if (!App.LoadedGLTF.empty())
+	if (Window)
 	{
-		std::stringstream ss;
-		ss << "VkTest2: " << App.LoadedGLTF;
-		ss.flush();
-		::glfwSetWindowTitle(Window, ss.str().c_str());
+		if (App.LoadingState == ELoadingState::BeginLoading || App.LoadingState == ELoadingState::Loading)
+		{
+			::glfwSetWindowTitle(Window, "VkTest2: Loading...");
+		}
+		else
+		{
+			::glfwSetWindowTitle(Window, "VkTest2");
+		}
 	}
 
 	uint32 Frame = 1;
@@ -1405,7 +1499,7 @@ int main()
 
 		glfwPollEvents();
 
-		App.Update();
+		//App.Update();
 
 		App.GpuDelta = Render(App);
 

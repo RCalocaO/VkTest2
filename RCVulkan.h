@@ -1523,6 +1523,7 @@ struct FShaderInfo
 		Compute = 16,
 	};
 	EStage Stage = EStage::Unknown;
+	std::string OriginalFilename;
 	std::string EntryPoint;
 	std::string SourceFile;
 	std::string BinaryFile;
@@ -1552,6 +1553,8 @@ struct FShaderLibrary
 
 	FShaderInfo* RegisterShader(const char* OriginalFilename, const char* EntryPoint, FShaderInfo::EStage Stage)
 	{
+		check(OriginalFilename);
+		check(EntryPoint);
 		FShaderInfo* Info = new FShaderInfo;
 		Info->EntryPoint = EntryPoint;
 		Info->Stage = Stage;
@@ -1563,6 +1566,7 @@ struct FShaderLibrary
 		std::string OutDir = RCUtils::MakePath(RootDir, "out");
 		_mkdir(OutDir.c_str());
 
+		Info->OriginalFilename = OriginalFilename;
 		Info->SourceFile = RCUtils::MakePath(RootDir, BaseFilename + "." + Extension);
 		Info->BinaryFile = RCUtils::MakePath(OutDir, BaseFilename + "." + Info->EntryPoint + ".spv");
 		Info->AsmFile = RCUtils::MakePath(OutDir, BaseFilename + "." + Info->EntryPoint + ".spvasm");
@@ -1570,6 +1574,22 @@ struct FShaderLibrary
 		ShaderInfos.push_back(Info);
 
 		return Info;
+	}
+
+	FShaderInfo* GetShader(const char* OriginalFilename, const char* EntryPoint, FShaderInfo::EStage Stage)
+	{
+		for (FShaderInfo* Info : ShaderInfos)
+		{
+			if (Info->EntryPoint == EntryPoint &&
+				Info->Stage == Stage &&
+				Info->OriginalFilename == OriginalFilename)
+			{
+				return Info;
+			}
+		}
+
+		check(0);
+		return nullptr;
 	}
 
 	bool RecompileShaders()
