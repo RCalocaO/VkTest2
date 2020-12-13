@@ -412,7 +412,21 @@ void CreateGLTFGfxResources(FGLTFLoader* Loader, SVulkan::SDevice& Device, FPSOC
 					Region.dstSubresource.layerCount = 1;
 					vkCmdBlitImage(CmdBuffer->CmdBuffer, Texture.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 						Texture.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region, VK_FILTER_LINEAR);
-
+/*
+					// Test mips cleared to different colors
+					VkImageSubresourceRange Range = {};
+					Range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+					Range.baseMipLevel = Mip;
+					Range.layerCount = 1;
+					Range.levelCount = 1;
+					VkClearColorValue Color;
+					Color.float32[0] = (Mip & 4) ? 1 : 0;
+					Color.float32[1] = (Mip & 2) ? 1 : 0;
+					Color.float32[2] = (Mip & 1) ? 1 : 0;
+					Color.float32[3] = 1;
+					vkCmdClearColorImage(CmdBuffer->CmdBuffer, Texture.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+						&Color, 1, &Range);
+*/
 					// Prev mip to DST
 					Device.TransitionImage(CmdBuffer, Texture.GetImage(),
 						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,

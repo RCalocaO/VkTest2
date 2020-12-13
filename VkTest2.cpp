@@ -374,6 +374,7 @@ struct FApp
 			Info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 			Info.magFilter = VK_FILTER_LINEAR;
 			Info.minFilter = VK_FILTER_LINEAR;
+			Info.maxLod = 1.0f;
 			VERIFY_VKRESULT(vkCreateSampler(Device.Device, &Info, nullptr, &LinearMipSampler));
 		}
 	}
