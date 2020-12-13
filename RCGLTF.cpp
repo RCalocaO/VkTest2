@@ -3,7 +3,7 @@
 #include "VkTest2.h"
 
 #ifdef _DEBUG
-//#pragma optimize( "gt", on)
+#pragma optimize( "gt", on)
 #endif
 
 #include "RCVulkan.h"

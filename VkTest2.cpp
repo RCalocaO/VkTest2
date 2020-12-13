@@ -417,6 +417,11 @@ struct FApp
 			glfwSetWindowShouldClose(Window, true);
 		}
 
+		if (ImGui::IsAnyWindowHovered())
+		{
+			return;
+		}
+
 		float CameraSpeed = 0.5f * (float)Time;
 
 		if (glfwGetKey(Window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
@@ -1329,12 +1334,22 @@ static void ErrorCallback(int Error, const char* Msg)
 
 static void ScrollCallback(GLFWwindow* Window, double XOffset, double YOffset)
 {
+	if (ImGui::IsAnyWindowHovered())
+	{
+		return;
+	}
+
 	GApp.Camera.FOVNearFar.x -= (float)YOffset;
 	GApp.Camera.FOVNearFar.x = Clamp(1.0f, GApp.Camera.FOVNearFar.x, 45.0f);
 }
 
 static void MouseCallback(GLFWwindow* Window, double XPos, double YPos)
 {
+	if (ImGui::IsAnyWindowHovered())
+	{
+		return;
+	}
+
 	if (GApp.bLMouseButtonHeld || GApp.bRMouseButtonHeld)
 	{
 		if (GApp.Camera.bFirstTime) // initially set to true
