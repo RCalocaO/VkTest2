@@ -749,6 +749,7 @@ struct FApp
 	} Camera;
 
 	FVector4 LightDir = {0, 1, 0, 0};
+	FVector4 PointLight = {0, 0, 0, 0};
 	bool bRotateObject = false;
 	bool bSkipCull = true;
 	bool bForceCull = false;
@@ -759,6 +760,7 @@ struct FApp
 		FMatrix4x4 ViewMtx;
 		FMatrix4x4 ProjMtx;
 		FVector4 LightDir;
+		FVector4 PointLight;
 		FIntVector4 Mode;
 		FIntVector4 Mode2;
 	};
@@ -813,6 +815,7 @@ struct FApp
 		ViewUB.Mode = g_vMode;
 		ViewUB.Mode2 = g_vMode2;
 		ViewUB.LightDir = LightDir.GetNormalized();
+		ViewUB.PointLight = PointLight;
 		ViewUB.ViewMtx = Camera.ViewMtx;
 		ViewUB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
 		FStagingBuffer* ViewBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ViewUB), CmdBuffer);
@@ -1048,6 +1051,7 @@ static bool GenerateImGuiUI(SVulkan::SDevice& Device, FApp& App, SVulkan::FCmdBu
 		ImGui::Checkbox("Rotate Object", &App.bRotateObject);
 		ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
 		ImGui::InputFloat3("Light Dir", App.LightDir.Values);
+		ImGui::InputFloat4("Point Light", App.PointLight.Values);
 
 #define TEXT_ENTRY(Index, String, Enum)		String,
 		const char* List[] = {
@@ -1448,6 +1452,8 @@ static GLFWwindow* Init(FApp& App)
 
 	App.LightDir = FVector4(TryGetVector3Prefix("-lightdir=", App.LightDir.GetVector3()), 0);
 	App.LightDir = App.LightDir.GetNormalized();
+
+	App.PointLight = TryGetVector4Prefix("-pointlight=", App.PointLight);
 
 	GLFWwindow* Window = glfwCreateWindow(ResX, ResY, "VkTest2", 0, 0);
 	App.Camera.Init((float)ResX, (float)ResY);
