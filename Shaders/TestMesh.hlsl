@@ -91,7 +91,7 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 		Out.Tangent = normalize(Out.Tangent);
 	}
 
-	Out.BiTangent = In.TANGENT.w * cross(In.NORMAL.xyz, In.TANGENT.xyz);
+	Out.BiTangent = mul((float3x3)WorldMtx, In.TANGENT.w * cross(In.NORMAL.xyz, In.TANGENT.xyz));
 	Out.BiTangent = mul((float3x3)ViewMtx, Out.BiTangent);
 	if (bNormalize)
 	{
@@ -114,7 +114,9 @@ FGLTFPS TestGLTFVSBounds(float3 In : POSITION)
 float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 {
 #if 0
-	return float4((In.Normal + 1) * 0.5, 1);
+	float3 LightDir = normalize(In.LightDir);
+	float L = max(0, dot(In.Normal, LightDir));
+	return float4(L, L, L, 1);
 #else
 	float4 Diffuse = BaseTexture.Sample(SS, In.UV0);
 	float3 vNormalMap = NormalTexture.Sample(SS, In.UV0).xyz * 2 - 1;
@@ -145,20 +147,7 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 		}
 	}
 
-	float3 LightDir = mul(mTangentBasis, LightDirWS);
-	float3 NonPrecomputedNormal;
-	{
-		float3 q1 = ddx(In.WorldPos.xyz);
-		float3 q2 = ddy(In.WorldPos.xyz);
-		float2 st1 = ddx(In.UV0);
-		float2 st2 = ddy(In.UV0);
-
-		float3 N = normalize(In.Normal);
-		float3 T = normalize(q1 * st2.t - q2 * st1.t);
-		float3 B = -normalize(cross(N, T));
-		float3x3 TBN = float3x3(T, B, N);
-		NonPrecomputedNormal = normalize(mul(TBN, vNormalMap));
-	}
+	float3 LightDir = mul(mTangentBasis, LightDirWS.xyz);
 
 	if (Mode.x == MODE_SHOWTEX_DIFFUSE)
 	{
@@ -166,7 +155,7 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	}
 	else if (Mode.x == MODE_SHOWTEX_NORMALMAP)
 	{
-		return float4(vNormalMap, 1);
+		return float4((vNormalMap + 1) * 0.5, 1);
 	}
 	else if (Mode.x == MODE_SHOW_VERTEX_NORMALS)
 	{
@@ -206,6 +195,16 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	vNormalMap = mul(mTangentBasis, vNormalMap);
 	if (bNoPrecomputedTangents)
 	{
+		float3 q1 = ddx(In.WorldPos.xyz);
+		float3 q2 = ddy(In.WorldPos.xyz);
+		float2 st1 = ddx(In.UV0);
+		float2 st2 = ddy(In.UV0);
+
+		float3 N = normalize(In.Normal);
+		float3 T = normalize(q1 * st2.t - q2 * st1.t);
+		float3 B = -normalize(cross(N, T));
+		float3x3 TBN = float3x3(T, B, N);
+		float3 NonPrecomputedNormal = normalize(mul(TBN, vNormalMap));
 		vNormalMap = NonPrecomputedNormal;
 	}
 	if (bNormalize)
@@ -217,3 +216,4 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	return (bLightingOnly ? float4(1, 1, 1, 1) : Diffuse) * float4(L, L, L, 1);
 #endif
 }
+

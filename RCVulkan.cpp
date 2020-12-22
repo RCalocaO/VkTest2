@@ -129,6 +129,9 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugReport(VkDebugUtilsMessageSeverityFla
 			case VK_OBJECT_TYPE_QUEUE:
 				s += "\tQueue ";
 				break;
+			case VK_OBJECT_TYPE_INSTANCE:
+				s += "\tInstance ";
+				break;
 			case VK_OBJECT_TYPE_UNKNOWN:
 				continue;
 			default:

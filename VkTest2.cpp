@@ -22,6 +22,19 @@
 
 #include <thread>
 
+
+enum EBoundingBoxCorners
+{
+	iii,
+	aii,
+	aia,
+	iia,
+	iai,
+	aai,
+	aaa,
+	iaa,
+};
+
 //extern void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDescriptorCache& DescriptorCache, SVulkan::FGfxPSO* PSO, SVulkan::FCmdBuffer*);
 
 static SVulkan GVulkan;
@@ -148,6 +161,23 @@ FVector3 TryGetVector3Prefix(const char* Prefix, FVector3 Value)
 		{
 			const char* Vector3String = Arg.c_str() + PrefixLength;
 			sscanf(Vector3String, "%f,%f,%f", &Value.x, &Value.y, &Value.z);
+			break;
+		}
+	}
+
+	return Value;
+}
+
+FVector4 TryGetVector4Prefix(const char* Prefix, FVector4 Value)
+{
+	check(Prefix);
+	uint32 PrefixLength = (uint32)strlen(Prefix);
+	for (const auto& Arg : RCUtils::FCmdLine::Get().Args)
+	{
+		if (!_strnicmp(Arg.c_str(), Prefix, PrefixLength))
+		{
+			const char* Vector4String = Arg.c_str() + PrefixLength;
+			sscanf(Vector4String, "%f,%f,%f,%f", &Value.x, &Value.y, &Value.z, &Value.w);
 			break;
 		}
 	}
@@ -888,17 +918,6 @@ struct FApp
 #if SCENE_USE_SINGLE_BUFFERS
 		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(8 * sizeof(FVector3), CmdBuffer);
 		FVector3* Pos = (FVector3*)VB->Buffer->Lock();
-		enum
-		{
-			iii,
-			aii,
-			aia,
-			iia,
-			iai,
-			aai,
-			aaa,
-			iaa,
-		};
 		Pos[iii] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Min.z);
 		Pos[aii] = FVector3(Prim.ObjectSpaceBounds.Max.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Min.z);
 		Pos[iia] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Max.z);
@@ -996,6 +1015,72 @@ static void ClearDepthImage(VkCommandBuffer CmdBuffer, VkImage Image, float Dept
 	Range.levelCount = 1;
 	vkCmdClearDepthStencilImage(CmdBuffer, Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &ClearDS, 1, &Range);
 }
+
+static bool GenerateImGuiUI(SVulkan::SDevice& Device, FApp& App, SVulkan::FCmdBuffer* CmdBuffer, SVulkan::FFramebuffer* Framebuffer)
+{
+	bool bRecompileShaders = false;
+	FMarkerScope MarkerScope(Device, CmdBuffer, "ImGUI");
+	//if (bGH)
+	{
+		//extern void Tick(float);
+		//Tick(App.LastDelta / 1000.0f);
+	}
+	//else
+	if (ImGui::Begin("Debug"))
+	{
+		if (!App.LoadedGLTF.empty())
+		{
+			ImGui::MenuItem(RCUtils::GetBaseName(App.LoadedGLTF, true).c_str(), nullptr, false, false);
+		}
+		char s[64];
+		sprintf(s, "FPS %3.2f", (float)(1000.0 / App.CpuDelta));
+		float Value = (float)(1000.0 / App.CpuDelta);
+		ImGui::SliderFloat("FPS", &Value, 0, 60);
+		Value = (float)App.CpuDelta;
+		ImGui::SliderFloat("CPU", &Value, 0, 66);
+		Value = (float)App.GpuDelta;
+		ImGui::SliderFloat("GPU", &Value, 0, 66);
+		ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
+		ImGui::InputFloat2("Yaw/Pitch", App.Camera.Rot.Values);
+		ImGui::Checkbox("Skip Culling", &App.bSkipCull);
+		ImGui::Checkbox("Force Cull", &App.bForceCull);
+		ImGui::Checkbox("Show Bounds (even if culled)", &App.bShowBounds);
+		ImGui::Checkbox("Rotate Object", &App.bRotateObject);
+		ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
+		ImGui::InputFloat3("Light Dir", App.LightDir.Values);
+
+#define TEXT_ENTRY(Index, String, Enum)		String,
+		const char* List[] = {
+			ENTRY_LIST(TEXT_ENTRY)
+		};
+#undef TEXT_ENTRY
+		ImGui::ListBox("Show mode", &g_vMode.x, List, IM_ARRAYSIZE(List));
+		ImGui::Checkbox("Identity World xfrm", (bool*)&g_vMode.w);
+		ImGui::Checkbox("Identity Normal xfrm", (bool*)&g_vMode.y);
+		ImGui::Checkbox("Lighting only", (bool*)&g_vMode.z);
+		ImGui::Checkbox("Transpose tangent basis", (bool*)&g_vMode2.x);
+		ImGui::Checkbox("Normalize", (bool*)&g_vMode2.y);
+		ImGui::Checkbox("Wireframe", (bool*)&g_bWireframe);
+		ImGui::Checkbox("No precomputed tangents", (bool*)&g_vMode2.z);
+		const char* Lights[] = {"Point Light", "Directional Light"};
+		ImGui::Combo("Light", (int*)&g_vMode2.w, Lights, IM_ARRAYSIZE(Lights));
+
+		if (ImGui::Button("Recompile shaders"))
+		{
+			bRecompileShaders = true;
+		}
+	}
+	ImGui::End();
+
+	//ImGui::ShowDemoWindow();
+
+	ImGui::Render();
+
+	ImDrawData* DrawData = ImGui::GetDrawData();
+	App.DrawDataImGui(DrawData, CmdBuffer, Framebuffer);
+	return bRecompileShaders;
+}
+
 
 static double Render(FApp& App)
 {
@@ -1152,65 +1237,7 @@ static double Render(FApp& App)
 
 	App.GPUTiming.EndTimestamp(CmdBuffer);
 
-	bool bRecompileShaders = false;
-	{
-		FMarkerScope MarkerScope(Device, CmdBuffer, "ImGUI");
-		if (bGH)
-		{
-			//extern void Tick(float);
-			//Tick(App.LastDelta / 1000.0f);
-		}
-		else if (ImGui::Begin("Debug"))
-		{
-			if (!App.LoadedGLTF.empty())
-			{
-				ImGui::MenuItem(RCUtils::GetBaseName(App.LoadedGLTF, true).c_str(), nullptr, false, false);
-			}
-			char s[64];
-			sprintf(s, "FPS %3.2f", (float)(1000.0 / App.CpuDelta));
-			float Value = (float)(1000.0 / App.CpuDelta);
-			ImGui::SliderFloat("FPS", &Value, 0, 60);
-			Value = (float)App.CpuDelta;
-			ImGui::SliderFloat("CPU", &Value, 0, 66);
-			Value = (float)App.GpuDelta;
-			ImGui::SliderFloat("GPU", &Value, 0, 66);
-			ImGui::InputFloat3("Pos", App.Camera.Pos.Values);
-			ImGui::InputFloat2("Yaw/Pitch", App.Camera.Rot.Values);
-			ImGui::Checkbox("Skip Culling", &App.bSkipCull);
-			ImGui::Checkbox("Force Cull", &App.bForceCull);
-			ImGui::Checkbox("Show Bounds (even if culled)", &App.bShowBounds);
-			ImGui::Checkbox("Rotate Object", &App.bRotateObject);
-			ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
-			ImGui::InputFloat3("Light Dir", App.LightDir.Values);
-
-#define TEXT_ENTRY(Index, String, Enum)		String,
-			const char* List[] = {
-				ENTRY_LIST(TEXT_ENTRY)
-			};
-#undef TEXT_ENTRY
-			ImGui::ListBox("Show mode", &g_vMode.x, List, IM_ARRAYSIZE(List));
-			ImGui::Checkbox("Identity World xfrm", (bool*)&g_vMode.w);
-			ImGui::Checkbox("Identity Normal xfrm", (bool*)&g_vMode.y);
-			ImGui::Checkbox("Lighting only", (bool*)&g_vMode.z);
-			ImGui::Checkbox("Transpose tangent basis", (bool*)&g_vMode2.x);
-			ImGui::Checkbox("Normalize", (bool*)&g_vMode2.y);
-			ImGui::Checkbox("Wireframe", (bool*)&g_bWireframe);
-			ImGui::Checkbox("No precomputed tangents", (bool*)&g_vMode2.z);
-
-			if (ImGui::Button("Recompile shaders"))
-			{
-				bRecompileShaders = true;
-			}
-		}
-		ImGui::End();
-
-		//ImGui::ShowDemoWindow();
-
-		ImGui::Render();
-
-		ImDrawData* DrawData = ImGui::GetDrawData();
-		App.DrawDataImGui(DrawData, CmdBuffer, Framebuffer);
-	}
+	bool bRecompileShaders = GenerateImGuiUI(Device, App, CmdBuffer, Framebuffer);
 
 	Device.TransitionImage(CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex],
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -1293,7 +1320,11 @@ static void SetupShaders(FApp& App)
 		Decl.AddAttribute(0, 2, VK_FORMAT_R8G8B8A8_UNORM, IM_OFFSETOF(ImDrawVert, col), "col");
 		Decl.AddBinding(0, sizeof(ImDrawVert));
 		App.ImGUIVertexDecl = GPSOCache.FindOrAddVertexDecl(Decl);
-		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass);
+		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+			{
+				VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
+				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
+			});
 		App.UIPSO = GPSOCache.CreateGfxPSO("UIPSO", UIVS, UIColorPS, RenderPass);
 	}
 
@@ -1307,6 +1338,7 @@ static void SetupShaders(FApp& App)
 
 				VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
 				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
+				// Flip handed-ness as we mirrored it
 				RasterizerInfo->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 			});
 

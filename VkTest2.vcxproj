@@ -208,7 +208,7 @@
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Speed</FavorSizeOrSpeed>
     </ClCompile>
     <ClCompile Include="..\imgui\imgui_widgets.cpp">
-      <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">MaxSpeed</Optimization>
+      <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Disabled</Optimization>
       <InlineFunctionExpansion Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AnySuitable</InlineFunctionExpansion>
       <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</IntrinsicFunctions>
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Speed</FavorSizeOrSpeed>

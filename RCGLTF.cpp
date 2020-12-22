@@ -120,14 +120,18 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 
 		auto FixNormalOrPosition = [&](const std::string& InName, uint32 Count, FVector3* Data)
 		{
-			if (/*InName == "NORMAL" ||*/ InName == "POSITION")
+			bool bPosition = InName == "POSITION";
+			if (bPosition || InName == "NORMAL")
 			{
 				for (uint32 Index = 0; Index < Count; ++Index)
 				{
 					// Flip Ys
 					Data->y *= -1;
-					OutPrim.ObjectSpaceBounds.Min = FVector3::Min(OutPrim.ObjectSpaceBounds.Min, *Data);
-					OutPrim.ObjectSpaceBounds.Max = FVector3::Max(OutPrim.ObjectSpaceBounds.Max, *Data);
+					if (bPosition)
+					{
+						OutPrim.ObjectSpaceBounds.Min = FVector3::Min(OutPrim.ObjectSpaceBounds.Min, *Data);
+						OutPrim.ObjectSpaceBounds.Max = FVector3::Max(OutPrim.ObjectSpaceBounds.Max, *Data);
+					}
 					++Data;
 				}
 			}
@@ -161,7 +165,7 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		++BindingIndex;
 	}
 
-	auto AddDummyStream = [&](const char* Semantic, VkFormat Format)
+	auto AddDummyStream = [&](const char* Semantic, VkFormat Format, uint8* Values, uint8 NumComponents)
 	{
 		if (GLTFPrim.attributes.find(Semantic) == GLTFPrim.attributes.end())
 		{
@@ -181,8 +185,15 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 				FBufferWithMem& VB = OutPrim.VertexBuffers.back();
 				VB.Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, MaxSize, true);
 				{
-					float* DestData = (float*)VB.Lock();
-					memset(DestData, 0xff, MaxSize);
+					uint8* DestData = (uint8*)VB.Lock();
+					check(NumComponents > 0);
+					for (uint32 N = 0; N < MaxSize; N += NumComponents)
+					{
+						for (uint8 C = 0; C < NumComponents; ++C)
+						{
+							*DestData++ = Values[C];
+						}
+					}
 					VB.Unlock();
 				}
 				Device.SetDebugName(VB.Buffer.Buffer, "GLTFVB");
@@ -195,11 +206,14 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		}
 	};
 
-	//AddDummyStream("POSITION");
-	AddDummyStream("NORMAL", VK_FORMAT_R8G8B8_UNORM);
-	AddDummyStream("TANGENT", VK_FORMAT_R8G8B8A8_UNORM);
-	AddDummyStream("TEXCOORD_0", VK_FORMAT_R8G8_UNORM);
-	AddDummyStream("COLOR", VK_FORMAT_R8G8B8A8_UNORM);
+	uint8 NormalValue[] = {0, 0, 255};
+	uint8 TangentValue[] = {0, 255, 0};
+	uint8 TexCoordValue[] = {0, 0};
+	uint8 ColorValue[] = {255, 255, 255, 255};
+	AddDummyStream("NORMAL", VK_FORMAT_R8G8B8_UNORM, NormalValue, 3);
+	AddDummyStream("TANGENT", VK_FORMAT_R8G8B8A8_UNORM, TangentValue, 3);
+	AddDummyStream("TEXCOORD_0", VK_FORMAT_R8G8_UNORM, TexCoordValue, 2);
+	AddDummyStream("COLOR", VK_FORMAT_R8G8B8A8_UNORM, ColorValue, 4);
 
 	return PSOCache.FindOrAddVertexDecl(VertexDecl);
 }
@@ -301,7 +315,6 @@ void CreateGLTFGfxResources(FGLTFLoader* Loader, SVulkan::SDevice& Device, FPSOC
 				check(Indices.type == TINYGLTF_TYPE_SCALAR);
 
 				tinygltf::BufferView& IndicesBufferView = Loader->Model.bufferViews[Indices.bufferView];
-
 				Prim.VertexDecl = GetOrAddVertexDecl(Device, Loader->Model, GLTFPrim, Prim, PSOCache);
 				Prim.Material = GLTFPrim.material;
 				Prim.PrimType = GetPrimType(GLTFPrim.mode);
