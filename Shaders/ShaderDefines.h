@@ -5,7 +5,7 @@
 #endif
 
 
-#define ENTRY_LIST(ENTRY)	\
+#define VIEW_ENTRY_LIST(ENTRY)	\
 ENTRY(0, "Default (Normal Mapping Lit)",	MODE_NORMAL_MAP_LIT) \
 ENTRY(1, "Show Vertex Normals",				MODE_SHOW_VERTEX_NORMALS) \
 ENTRY(2, "Show Vertex Tangents",			MODE_SHOW_VERTEX_TANGENT) \

@@ -3,15 +3,15 @@
 #include "ShaderDefines.h"
 
 #define CONST_ENTRY(Index, String, Enum)	static const int Enum = Index;
-ENTRY_LIST(CONST_ENTRY)
+VIEW_ENTRY_LIST(CONST_ENTRY)
 #undef CONST_ENTRY
 
 cbuffer ViewUB : register(b0)
 {
 	float4x4 ViewMtx;
 	float4x4 ProjectionMtx;
-	float4 LightDirWS;
-	float4 PointLightWS;
+	float4 DirLightWS;		// x, y, z, N/A
+	float4 PointLightWS;	// x, y, z, attenuation
 	int4 Mode;
 	int4 Mode2;
 };
@@ -46,12 +46,21 @@ struct FGLTFPS
 	float4 Color : COLOR;
 	float4 WorldPos : WORLD_POS;
 	float4 ViewPos : VIEW_POS;
-	float3 LightDir : LIGHTDIR;
+	float4 LightDir : LIGHTDIR;
 float4 TEST0 : TEST0;
 float4 TEST1 : TEST1;
 float4 TEST2 : TEST2;
 float4 TEST3 : TEST3;
 };
+
+float4 CalculatePointLight(float3 VertexViewPos)
+{
+	float3 LightPosCam = PointLightWS.xyz - VertexViewPos;
+	float4 LightDir;
+	LightDir.xyz = -normalize(LightPosCam - ViewMtx[3].xyz);
+	LightDir.w = 1 / (1 + PointLightWS.w * sqrt(dot(LightPosCam, LightPosCam)));
+	return LightDir;
+}
 
 FGLTFPS TestGLTFVS(FGLTFVS In)
 {
@@ -110,19 +119,23 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	bool bIsDirLight = Mode2.w != 0;
 	if (bIsDirLight)
 	{
-		Out.LightDir = mul((float3x3)ViewMtx, mul((float3x3)WorldMtx, LightDirWS.xyz));
+		Out.LightDir.xyz = mul((float3x3)ViewMtx, mul((float3x3)WorldMtx, DirLightWS.xyz));
 	}
 	else
 	{
 		// Point light
-		float3 LightPosCam = normalize(PointLightWS.xyz - Out.ViewPos.xyz);
-		Out.LightDir = -normalize(LightPosCam - ViewMtx[3].xyz);
+		bool bVertexLighting = Mode2.z != 0;
+		if (bVertexLighting)
+		{
+			Out.LightDir = CalculatePointLight(Out.ViewPos.xyz);
+		}
 	}
-			//float3 CamNorm = Out.Normal;
-			//float CosAngIncidence = dot(CamNorm, Out.LightDir);
-			//Out.TEST1 = float4(CamNorm.xyz, 0);
-			//Out.TEST2 = float4(Out.LightDir.xyz, CosAngIncidence);
-			//Out.TEST0 = clamp(CosAngIncidence, 0, 1);
+
+	//float3 CamNorm = Out.Normal;
+	//float CosAngIncidence = dot(CamNorm, Out.LightDir);
+	//Out.TEST1 = float4(CamNorm.xyz, 0);
+	//Out.TEST2 = float4(Out.LightDir.xyz, CosAngIncidence);
+	//Out.TEST0 = clamp(CosAngIncidence, 0, 1);
 
 	return Out;
 }
@@ -157,13 +170,23 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	float3x3 mTangentBasis = bIdentityNormalBasis ? float3x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1)) : transpose(float3x3(In.Tangent, In.BiTangent, In.Normal));
 	bool bTransposeTangentBasis = Mode2.x != 0;
 	bool bNormalize = Mode2.y != 0;
-	bool bNoPrecomputedTangents = Mode2.z != 0;
+	bool bVertexLighting = Mode2.z != 0;
 	if (bTransposeTangentBasis)
 	{
 		mTangentBasis = transpose(mTangentBasis);
 	}
 
-	float3 LightDir = mul(mTangentBasis, normalize(In.LightDir.xyz));
+	float4 LightDir = In.LightDir;
+
+	bool bIsDirLight = Mode2.w != 0;
+
+	if (!bIsDirLight && !bVertexLighting)
+	{
+		// Point light
+		LightDir = CalculatePointLight(In.ViewPos.xyz);
+	}
+
+	LightDir.xyz = mul(mTangentBasis, normalize(LightDir.xyz));
 
 	if (Mode.x == MODE_SHOWTEX_DIFFUSE)
 	{
@@ -192,7 +215,7 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	}
 	else if (Mode.x == MODE_VERTEX_NORMAL_LIT)
 	{
-		float L = max(0, dot(In.Normal, -LightDir));
+		float L = max(0, dot(In.Normal, -LightDir.xyz));
 		return (bLightingOnly ? float4(1, 1, 1, 1) : Diffuse) * float4(L, L, L, 1);
 	}
 	else if (Mode.x == MODE_SHOW_VERTEX_BITANGENT)
@@ -209,27 +232,17 @@ float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 	}
 
 	vNormalMap = mul(mTangentBasis, vNormalMap);
-	if (bNoPrecomputedTangents)
-	{
-		float3 q1 = ddx(In.WorldPos.xyz);
-		float3 q2 = ddy(In.WorldPos.xyz);
-		float2 st1 = ddx(In.UV0);
-		float2 st2 = ddy(In.UV0);
-
-		float3 N = normalize(In.Normal);
-		float3 T = normalize(q1 * st2.t - q2 * st1.t);
-		float3 B = -normalize(cross(N, T));
-		float3x3 TBN = float3x3(T, B, N);
-		float3 NonPrecomputedNormal = normalize(mul(TBN, vNormalMap));
-		vNormalMap = NonPrecomputedNormal;
-	}
 	if (bNormalize)
 	{
 		vNormalMap = normalize(vNormalMap);
 	}
 
 	float L = max(0, dot(vNormalMap, -LightDir));
+	if (!bIsDirLight)
+	{
+		float Attenuation = LightDir.w;
+		L *= Attenuation;
+	}
 	return (bLightingOnly ? float4(1, 1, 1, 1) : Diffuse) * float4(L, L, L, 1);
 #endif
 }
-

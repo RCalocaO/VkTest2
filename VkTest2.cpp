@@ -447,12 +447,14 @@ struct FApp
 			glfwSetWindowShouldClose(Window, true);
 		}
 
-		if (ImGui::IsAnyWindowHovered())
+		if (ImGui::IsAnyWindowFocused())
 		{
+			bLMouseButtonHeld = false;
+			bRMouseButtonHeld = false;
 			return;
 		}
 
-		float CameraSpeed = 0.5f * (float)Time;
+		float CameraSpeed = 0.1f * (float)Time;
 
 		if (glfwGetKey(Window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
 		{
@@ -1055,7 +1057,7 @@ static bool GenerateImGuiUI(SVulkan::SDevice& Device, FApp& App, SVulkan::FCmdBu
 
 #define TEXT_ENTRY(Index, String, Enum)		String,
 		const char* List[] = {
-			ENTRY_LIST(TEXT_ENTRY)
+			VIEW_ENTRY_LIST(TEXT_ENTRY)
 		};
 #undef TEXT_ENTRY
 		ImGui::ListBox("Show mode", &g_vMode.x, List, IM_ARRAYSIZE(List));
@@ -1065,7 +1067,7 @@ static bool GenerateImGuiUI(SVulkan::SDevice& Device, FApp& App, SVulkan::FCmdBu
 		ImGui::Checkbox("Transpose tangent basis", (bool*)&g_vMode2.x);
 		ImGui::Checkbox("Normalize", (bool*)&g_vMode2.y);
 		ImGui::Checkbox("Wireframe", (bool*)&g_bWireframe);
-		ImGui::Checkbox("No precomputed tangents", (bool*)&g_vMode2.z);
+		ImGui::Checkbox("Vertex Lighting Calc", (bool*)&g_vMode2.z);
 		const char* Lights[] = {"Point Light", "Directional Light"};
 		ImGui::Combo("Light", (int*)&g_vMode2.w, Lights, IM_ARRAYSIZE(Lights));
 
@@ -1370,7 +1372,7 @@ static void ErrorCallback(int Error, const char* Msg)
 
 static void ScrollCallback(GLFWwindow* Window, double XOffset, double YOffset)
 {
-	if (ImGui::IsAnyWindowHovered())
+	if (ImGui::IsAnyWindowFocused())
 	{
 		return;
 	}
@@ -1381,12 +1383,7 @@ static void ScrollCallback(GLFWwindow* Window, double XOffset, double YOffset)
 
 static void MouseCallback(GLFWwindow* Window, double XPos, double YPos)
 {
-	if (ImGui::IsAnyWindowHovered())
-	{
-		return;
-	}
-
-	if (GApp.bLMouseButtonHeld || GApp.bRMouseButtonHeld)
+	if (!ImGui::IsAnyWindowFocused() && GApp.bLMouseButtonHeld || GApp.bRMouseButtonHeld)
 	{
 		if (GApp.Camera.bFirstTime) // initially set to true
 		{
