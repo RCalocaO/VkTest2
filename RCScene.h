@@ -11,6 +11,18 @@ struct FBoundingBox
 {
 	FVector3 Min = { FLT_MAX, FLT_MAX, FLT_MAX };
 	FVector3 Max = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+
+	FVector3 GetCenter() const
+	{
+		return (Min + Max) * 0.5f;
+	}
+
+	float GetRadius() const
+	{
+		FVector3 Distance = (Min - Max) * 0.5f;
+		Distance = FVector3::Abs(Distance);
+		return ::Max(Distance.x, ::Max(Distance.y, Distance.z));
+	}
 };
 
 struct FScene

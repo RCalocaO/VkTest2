@@ -22,18 +22,102 @@
 
 #include <thread>
 
-
-enum EBoundingBoxCorners
+static void GenerateBoundingBox(FStagingBuffer* VB, FStagingBuffer* IB, const FBoundingBox& BB)
 {
-	iii,
-	aii,
-	aia,
-	iia,
-	iai,
-	aai,
-	aaa,
-	iaa,
-};
+	enum EBoundingBoxCorners
+	{
+		iii,
+		aii,
+		aia,
+		iia,
+		iai,
+		aai,
+		aaa,
+		iaa,
+	};
+
+#if SCENE_USE_SINGLE_BUFFERS
+	FVector3* Pos = (FVector3*)VB->Buffer->Lock();
+	Pos[iii] = FVector3(BB.Min.x, BB.Min.y, BB.Min.z);
+	Pos[aii] = FVector3(BB.Max.x, BB.Min.y, BB.Min.z);
+	Pos[iia] = FVector3(BB.Min.x, BB.Min.y, BB.Max.z);
+	Pos[aia] = FVector3(BB.Max.x, BB.Min.y, BB.Max.z);
+	Pos[iai] = FVector3(BB.Min.x, BB.Max.y, BB.Min.z);
+	Pos[aai] = FVector3(BB.Max.x, BB.Max.y, BB.Min.z);
+	Pos[iaa] = FVector3(BB.Min.x, BB.Max.y, BB.Max.z);
+	Pos[aaa] = FVector3(BB.Max.x, BB.Max.y, BB.Max.z);
+	VB->Buffer->Unlock();
+
+	uint32* Indices = (uint32*)IB->Buffer->Lock();
+	Indices[0] = iii; Indices[1] = aii;
+	Indices[2] = iii; Indices[3] = iai;
+	Indices[4] = iii; Indices[5] = iia;
+	Indices[6] = aii; Indices[7] = aia;
+	Indices[8] = aii; Indices[9] = aai;
+	Indices[10] = iia; Indices[11] = aia;
+	Indices[12] = aia; Indices[13] = aaa;
+	Indices[14] = aaa; Indices[15] = aai;
+	Indices[16] = aaa; Indices[17] = iaa;
+	Indices[18] = aai; Indices[19] = iai;
+	Indices[20] = iai; Indices[21] = iaa;
+	Indices[22] = iia; Indices[23] = iaa;
+	IB->Buffer->Unlock();
+#else
+	check(0);
+#endif
+}
+
+static void GenerateIcosahedron(FStagingBuffer* VB, FStagingBuffer* IB, FVector3 Center, float Radius)
+{
+	uint32 SrcIndices[] = { 
+		0,4,1,
+		0,9,4,
+		9,5,4,
+		4,5,8,
+		4,8,1,
+		8,10,1,
+		8,3,10,
+		5,3,8,
+		5,2,3,
+		2,7,3,
+		7,10,3,
+		7,6,10,
+		7,11,6,
+		11,0,6,
+		0,1,6,
+		6,1,10,
+		9,0,11,
+		9,11,2,
+		9,2,5,
+		7,2,11 };
+	uint32* Indices = (uint32*)IB->Buffer->Lock();
+	memcpy(Indices, SrcIndices, sizeof(SrcIndices));
+	IB->Buffer->Unlock();
+
+#if SCENE_USE_SINGLE_BUFFERS
+	FVector3* Pos = (FVector3*)VB->Buffer->Lock();
+
+	float X = 0.525731112119133606f * Radius;
+	float Z = 0.850650808352039932f * Radius;
+
+	*Pos++ = FVector3(-X, 0, Z) + Center;
+	*Pos++ = FVector3(X, 0, Z) + Center;
+	*Pos++ = FVector3(-X, 0, -Z) + Center;
+	*Pos++ = FVector3(X, 0, -Z) + Center;
+	*Pos++ = FVector3(0, Z, X) + Center;
+	*Pos++ = FVector3(0, Z, -X) + Center;
+	*Pos++ = FVector3(0, -Z, X) + Center;
+	*Pos++ = FVector3(0, -Z, -X) + Center;
+	*Pos++ = FVector3(Z, X, 0) + Center;
+	*Pos++ = FVector3(-Z, X, 0) + Center;
+	*Pos++ = FVector3(Z, -X, 0) + Center;
+	*Pos++ = FVector3(-Z, -X, 0) + Center; 
+
+	VB->Buffer->Unlock();
+#else
+	check(0);
+#endif
+}
 
 //extern void RenderJOTL(SVulkan::SDevice& Device, FStagingBufferManager& StagingMgr, FDescriptorCache& DescriptorCache, SVulkan::FGfxPSO* PSO, SVulkan::FCmdBuffer*);
 
@@ -212,6 +296,7 @@ struct FApp
 	FPSOCache::FPSOHandle VBClipVSRedPSO;
 	FPSOCache::FPSOHandle TestGLTFPSO;
 	FPSOCache::FPSOHandle TestGLTFPSOBounds;
+	FPSOCache::FPSOHandle TestGLTFPSOBoundsSphere;
 	FBufferWithMemAndView ClipVB;
 	FPSOCache::FPSOHandle TestCSPSO;
 	FBufferWithMemAndView TestCSBuffer;
@@ -447,18 +532,18 @@ struct FApp
 			glfwSetWindowShouldClose(Window, true);
 		}
 
-		if (ImGui::IsAnyWindowFocused())
+		if (ImGui::IsAnyWindowHovered())
 		{
 			bLMouseButtonHeld = false;
 			bRMouseButtonHeld = false;
 			return;
 		}
 
-		float CameraSpeed = 0.1f * (float)Time;
+		float CameraSpeed = 0.5f * (float)Time;
 
 		if (glfwGetKey(Window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(Window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
 		{
-			CameraSpeed *= 2.2f;
+			CameraSpeed *= 2.5f;
 		}
 
 
@@ -760,6 +845,7 @@ struct FApp
 	struct FViewUB
 	{
 		FMatrix4x4 ViewMtx;
+		FVector4 CameraPosition;
 		FMatrix4x4 ProjMtx;
 		FVector4 LightDir;
 		FVector4 PointLight;
@@ -819,6 +905,7 @@ struct FApp
 		ViewUB.LightDir = LightDir.GetNormalized();
 		ViewUB.PointLight = PointLight;
 		ViewUB.ViewMtx = Camera.ViewMtx;
+		ViewUB.CameraPosition = FVector4(Camera.Pos, 1.0f);
 		ViewUB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
 		FStagingBuffer* ViewBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ViewUB), CmdBuffer);
 		*(FViewUB*)ViewBuffer->Buffer->Lock() = ViewUB;
@@ -903,56 +990,74 @@ struct FApp
 				}
 			}
 		}
+
+		FObjUB ObjUB;
+		ObjUB.ObjMtx = FMatrix4x4::GetIdentity();
+		FStagingBuffer* ObjBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ObjUB), CmdBuffer);
+		*(FObjUB*)ObjBuffer->Buffer->Lock() = ObjUB;
+		ObjBuffer->Buffer->Unlock();
+		RenderPointLight(CmdBuffer, ViewBuffer, ObjBuffer);
+	}
+
+	struct FPosOnlyDecl : public FPSOCache::FVertexDecl
+	{
+		FPosOnlyDecl()
+		{
+			AddAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0, "POSITION");
+			AddBinding(0, sizeof(FVector3));
+		}
+	};
+
+	FPosOnlyDecl GetPosOnlyDecl()
+	{
+		static FPosOnlyDecl NewDecl;
+		return NewDecl;
+	}
+
+	void RenderPointLight(SVulkan::FCmdBuffer* CmdBuffer, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer)
+	{
+		int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(GetPosOnlyDecl());
+		int NumIndices = 20 * 3;
+		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(12 * sizeof(FVector3), CmdBuffer);
+		FStagingBuffer* IB = GStagingBufferMgr.AcquireBuffer(NumIndices * sizeof(uint32), CmdBuffer);
+		GenerateIcosahedron(VB, IB, PointLight.GetVector3(), 10);
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOBoundsSphere, FPSOCache::FPSOSecondHandle(VertexDeclHandle, true, true));
+
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
+		VkDeviceSize VBs[1] = { 0 };
+		vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB->Buffer->Buffer.Buffer, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &VB->Buffer->Buffer.Buffer, VBs);
+		{
+			FDescriptorPSOCache Cache(PSO);
+			Cache.SetUniformBuffer("ViewUB", *ViewBuffer->Buffer);
+			Cache.SetUniformBuffer("ObjUB", *ObjBuffer->Buffer);
+			Cache.SetSampler("SS", LinearMipSampler);
+			Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
+		}
+
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, NumIndices, 1, 0, 0, 0);
 	}
 
 	void RenderBoundingBox(SVulkan::FCmdBuffer* CmdBuffer, const FScene::FPrim& Prim, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer)
 	{
-		struct FPosOnlyDecl : public FPSOCache::FVertexDecl
-		{
-			FPosOnlyDecl()
-			{
-				AddAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0, "POSITION");
-				AddBinding(0, sizeof(FVector3));
-			}
-		};
-		static FPosOnlyDecl NewDecl;
-		int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(NewDecl);
-
-		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOBounds, FPSOCache::FPSOSecondHandle(VertexDeclHandle, true, false));
-		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
-#if SCENE_USE_SINGLE_BUFFERS
+		int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(GetPosOnlyDecl());
+#if 1
+		int NumIndices = 12 * 2;
 		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(8 * sizeof(FVector3), CmdBuffer);
-		FVector3* Pos = (FVector3*)VB->Buffer->Lock();
-		Pos[iii] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Min.z);
-		Pos[aii] = FVector3(Prim.ObjectSpaceBounds.Max.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Min.z);
-		Pos[iia] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Max.z);
-		Pos[aia] = FVector3(Prim.ObjectSpaceBounds.Max.x, Prim.ObjectSpaceBounds.Min.y, Prim.ObjectSpaceBounds.Max.z);
-		Pos[iai] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Max.y, Prim.ObjectSpaceBounds.Min.z);
-		Pos[aai] = FVector3(Prim.ObjectSpaceBounds.Max.x, Prim.ObjectSpaceBounds.Max.y, Prim.ObjectSpaceBounds.Min.z);
-		Pos[iaa] = FVector3(Prim.ObjectSpaceBounds.Min.x, Prim.ObjectSpaceBounds.Max.y, Prim.ObjectSpaceBounds.Max.z);
-		Pos[aaa] = FVector3(Prim.ObjectSpaceBounds.Max.x, Prim.ObjectSpaceBounds.Max.y, Prim.ObjectSpaceBounds.Max.z);
-		VB->Buffer->Unlock();
-
-		FStagingBuffer* IB = GStagingBufferMgr.AcquireBuffer(12 * 2 * sizeof(uint32), CmdBuffer);
-		uint32* Indices = (uint32*)IB->Buffer->Lock();
-		Indices[0] = iii; Indices[1] = aii;
-		Indices[2] = iii; Indices[3] = iai;
-		Indices[4] = iii; Indices[5] = iia;
-		Indices[6] = aii; Indices[7] = aia;
-		Indices[8] = aii; Indices[9] = aai;
-		Indices[10] = iia; Indices[11] = aia;
-		Indices[12] = aia; Indices[13] = aaa;
-		Indices[14] = aaa; Indices[15] = aai;
-		Indices[16] = aaa; Indices[17] = iaa;
-		Indices[18] = aai; Indices[19] = iai;
-		Indices[20] = iai; Indices[21] = iaa;
-		Indices[22] = iia; Indices[23] = iaa;
-		IB->Buffer->Unlock();
-
+		FStagingBuffer* IB = GStagingBufferMgr.AcquireBuffer(NumIndices * sizeof(uint32), CmdBuffer);
+		GenerateBoundingBox(VB, IB, Prim.ObjectSpaceBounds);
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOBounds, FPSOCache::FPSOSecondHandle(VertexDeclHandle, true, false));
+#else
+		int NumIndices = 20 * 3;
+		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(12 * sizeof(FVector3), CmdBuffer);
+		FStagingBuffer* IB = GStagingBufferMgr.AcquireBuffer(NumIndices * sizeof(uint32), CmdBuffer);
+		GenerateIcosahedron(VB, IB, Prim.ObjectSpaceBounds.GetCenter(), Prim.ObjectSpaceBounds.GetRadius());
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOBoundsSphere, FPSOCache::FPSOSecondHandle(VertexDeclHandle, true, true));
+#endif
+		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 		VkDeviceSize VBs[1] = { 0 };
 		vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB->Buffer->Buffer.Buffer, 0, VK_INDEX_TYPE_UINT32);
 		vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &VB->Buffer->Buffer.Buffer, VBs);
-
 		{
 			FDescriptorPSOCache Cache(PSO);
 			Cache.SetUniformBuffer("ViewUB", *ViewBuffer->Buffer);
@@ -964,10 +1069,7 @@ struct FApp
 			Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
 		}
 
-		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, 24, 1, 0, 0, 0);
-#else
-		check(0);
-#endif
+		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, NumIndices, 1, 0, 0, 0);
 	}
 
 	void RecreateSwapchain(SVulkan::SDevice& Device, SVulkan::FSwapchain& Swapchain)
@@ -1362,6 +1464,18 @@ static void SetupShaders(FApp& App)
 				VkPipelineInputAssemblyStateCreateInfo* IAInfo = (VkPipelineInputAssemblyStateCreateInfo*)GfxPipelineInfo.pInputAssemblyState;
 				IAInfo->topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
 			});
+
+		App.TestGLTFPSOBoundsSphere = GPSOCache.CreateGfxPSO("TestGLTFPSOBoundsSphere", TestGLTFVSBounds, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
+			{
+				VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
+				DSInfo->depthTestEnable = VK_TRUE;
+				DSInfo->depthWriteEnable = VK_FALSE;// VK_TRUE;
+				DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+				VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
+				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
+				//RasterizerInfo->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+			});
 	}
 }
 
@@ -1372,7 +1486,7 @@ static void ErrorCallback(int Error, const char* Msg)
 
 static void ScrollCallback(GLFWwindow* Window, double XOffset, double YOffset)
 {
-	if (ImGui::IsAnyWindowFocused())
+	if (ImGui::IsAnyWindowHovered())
 	{
 		return;
 	}
@@ -1383,7 +1497,7 @@ static void ScrollCallback(GLFWwindow* Window, double XOffset, double YOffset)
 
 static void MouseCallback(GLFWwindow* Window, double XPos, double YPos)
 {
-	if (!ImGui::IsAnyWindowFocused() && GApp.bLMouseButtonHeld || GApp.bRMouseButtonHeld)
+	if (!ImGui::IsAnyWindowHovered() && GApp.bLMouseButtonHeld || GApp.bRMouseButtonHeld)
 	{
 		if (GApp.Camera.bFirstTime) // initially set to true
 		{
