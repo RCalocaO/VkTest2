@@ -6,21 +6,6 @@
 VIEW_ENTRY_LIST(CONST_ENTRY)
 #undef CONST_ENTRY
 
-cbuffer ViewUB : register(b0)
-{
-	float4x4 ViewMtx;
-	float4x4 ProjectionMtx;
-	float4 DirLightWS;		// x, y, z, N/A
-	float4 PointLightWS;	// x, y, z, attenuation
-	int4 Mode;
-	int4 Mode2;
-};
-
-cbuffer ObjUB : register(b1)
-{
-	float4x4 ObjMtx;
-};
-
 SamplerState SS : register(s2);
 Texture2D BaseTexture : register(t3);
 Texture2D NormalTexture : register(t4);
@@ -55,11 +40,19 @@ float4 TEST3 : TEST3;
 
 float4 CalculatePointLight(float3 VertexViewPos)
 {
+#if 1
+	float3 LightPosCamSpace = PointLightWS.xyz - CameraPosition.xyz;
+	float4 LightDir;
+	LightDir.xyz = -normalize(LightPosCamSpace - VertexViewPos);
+	LightDir.w = 1;//1 / (1 + PointLightWS.w * sqrt(dot(LightPosCamSpace - VertexViewPos, LightPosCamSpace - VertexViewPos)));
+	return LightDir;
+#else
 	float3 LightPosCam = PointLightWS.xyz - VertexViewPos;
 	float4 LightDir;
 	LightDir.xyz = -normalize(LightPosCam - ViewMtx[3].xyz);
 	LightDir.w = 1 / (1 + PointLightWS.w * sqrt(dot(LightPosCam, LightPosCam)));
 	return LightDir;
+#endif
 }
 
 FGLTFPS TestGLTFVS(FGLTFVS In)
@@ -140,13 +133,6 @@ FGLTFPS TestGLTFVS(FGLTFVS In)
 	return Out;
 }
 
-
-FGLTFPS TestGLTFVSBounds(float3 In : POSITION)
-{
-	FGLTFVS NewIn = (FGLTFVS)0;
-	NewIn.POSITION = In;
-	return TestGLTFVS(NewIn);
-}
 
 float4 TestGLTFPS(FGLTFPS In) : SV_Target0
 {

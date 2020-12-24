@@ -136,9 +136,6 @@
     <FxCompile Include="Shaders\Unlit.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="Shaders\PassThroughVS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
     <FxCompile Include="Shaders\TestCS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>

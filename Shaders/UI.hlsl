@@ -36,8 +36,3 @@ float4 UIMainPS(FVSOut In) : SV_Target0
 {
 	return In.Color * Font.Sample(Sampler, In.UVs);
 }
-
-float4 UIMainColorPS(FVSOut In) : SV_Target0
-{
-	return In.Color * Color;
-}

@@ -22,6 +22,19 @@
 
 #include <thread>
 
+
+struct FUnlitVertex
+{
+	FVector3 Position;
+	uint32 Color;
+
+	void Set(FVector3 V, uint32 C)
+	{
+		Position = V;
+		Color = C;
+	}
+};
+
 static void GenerateBoundingBox(FStagingBuffer* VB, FStagingBuffer* IB, const FBoundingBox& BB)
 {
 	enum EBoundingBoxCorners
@@ -37,15 +50,16 @@ static void GenerateBoundingBox(FStagingBuffer* VB, FStagingBuffer* IB, const FB
 	};
 
 #if SCENE_USE_SINGLE_BUFFERS
-	FVector3* Pos = (FVector3*)VB->Buffer->Lock();
-	Pos[iii] = FVector3(BB.Min.x, BB.Min.y, BB.Min.z);
-	Pos[aii] = FVector3(BB.Max.x, BB.Min.y, BB.Min.z);
-	Pos[iia] = FVector3(BB.Min.x, BB.Min.y, BB.Max.z);
-	Pos[aia] = FVector3(BB.Max.x, BB.Min.y, BB.Max.z);
-	Pos[iai] = FVector3(BB.Min.x, BB.Max.y, BB.Min.z);
-	Pos[aai] = FVector3(BB.Max.x, BB.Max.y, BB.Min.z);
-	Pos[iaa] = FVector3(BB.Min.x, BB.Max.y, BB.Max.z);
-	Pos[aaa] = FVector3(BB.Max.x, BB.Max.y, BB.Max.z);
+	uint32 Color = 0xff00ffff;
+	FUnlitVertex* Pos = (FUnlitVertex*)VB->Buffer->Lock();
+	Pos[iii].Set(FVector3(BB.Min.x, BB.Min.y, BB.Min.z), Color);
+	Pos[aii].Set(FVector3(BB.Max.x, BB.Min.y, BB.Min.z), Color);
+	Pos[iia].Set(FVector3(BB.Min.x, BB.Min.y, BB.Max.z), Color);
+	Pos[aia].Set(FVector3(BB.Max.x, BB.Min.y, BB.Max.z), Color);
+	Pos[iai].Set(FVector3(BB.Min.x, BB.Max.y, BB.Min.z), Color);
+	Pos[aai].Set(FVector3(BB.Max.x, BB.Max.y, BB.Min.z), Color);
+	Pos[iaa].Set(FVector3(BB.Min.x, BB.Max.y, BB.Max.z), Color);
+	Pos[aaa].Set(FVector3(BB.Max.x, BB.Max.y, BB.Max.z), Color);
 	VB->Buffer->Unlock();
 
 	uint32* Indices = (uint32*)IB->Buffer->Lock();
@@ -95,23 +109,24 @@ static void GenerateIcosahedron(FStagingBuffer* VB, FStagingBuffer* IB, FVector3
 	IB->Buffer->Unlock();
 
 #if SCENE_USE_SINGLE_BUFFERS
-	FVector3* Pos = (FVector3*)VB->Buffer->Lock();
+	FUnlitVertex* Pos = (FUnlitVertex*)VB->Buffer->Lock();
 
 	float X = 0.525731112119133606f * Radius;
 	float Z = 0.850650808352039932f * Radius;
 
-	*Pos++ = FVector3(-X, 0, Z) + Center;
-	*Pos++ = FVector3(X, 0, Z) + Center;
-	*Pos++ = FVector3(-X, 0, -Z) + Center;
-	*Pos++ = FVector3(X, 0, -Z) + Center;
-	*Pos++ = FVector3(0, Z, X) + Center;
-	*Pos++ = FVector3(0, Z, -X) + Center;
-	*Pos++ = FVector3(0, -Z, X) + Center;
-	*Pos++ = FVector3(0, -Z, -X) + Center;
-	*Pos++ = FVector3(Z, X, 0) + Center;
-	*Pos++ = FVector3(-Z, X, 0) + Center;
-	*Pos++ = FVector3(Z, -X, 0) + Center;
-	*Pos++ = FVector3(-Z, -X, 0) + Center; 
+	uint32 Color = 0xff0000ff;
+	Pos[0].Set(FVector3(-X, 0, Z) + Center, Color);
+	Pos[1].Set(FVector3(X, 0, Z) + Center, Color);
+	Pos[2].Set(FVector3(-X, 0, -Z) + Center, Color);
+	Pos[3].Set(FVector3(X, 0, -Z) + Center, Color);
+	Pos[4].Set(FVector3(0, Z, X) + Center, Color);
+	Pos[5].Set(FVector3(0, Z, -X) + Center, Color);
+	Pos[6].Set(FVector3(0, -Z, X) + Center, Color);
+	Pos[7].Set(FVector3(0, -Z, -X) + Center, Color);
+	Pos[8].Set(FVector3(Z, X, 0) + Center, Color);
+	Pos[9].Set(FVector3(-Z, X, 0) + Center, Color);
+	Pos[10].Set(FVector3(Z, -X, 0) + Center, Color);
+	Pos[11].Set(FVector3(-Z, -X, 0) + Center, Color);
 
 	VB->Buffer->Unlock();
 #else
@@ -139,6 +154,7 @@ extern bool IsGLTFLoaderFinished(FGLTFLoader* Loader);
 extern const char* GetGLTFFilename(FGLTFLoader* Loader);
 extern void CreateGLTFGfxResources(FGLTFLoader* Loader, SVulkan::SDevice& Device, FPSOCache& PSOCache, FScene& Scene, FPendingOpsManager& PendingStagingOps, FStagingBufferManager* StagingMgr);
 extern void FreeGLTFLoader(FGLTFLoader* Loader);
+
 
 struct FCamera
 {
@@ -287,18 +303,19 @@ struct FApp
 	bool bLMouseButtonHeld = false;
 	bool bRMouseButtonHeld = false;
 	uint32 FrameIndex = 0;
+
 	FImageWithMemAndView DepthBuffer;
-	FPSOCache::FPSOHandle PassThroughVSRedPSPSO;
-	//FPSOCache::FPSOHandle DataClipVSColorTessPSO;
-	FPSOCache::FPSOHandle NoVBClipVSRedPSO;
-	FPSOCache::FPSOHandle DataClipVSRedPSO;
-	FPSOCache::FPSOHandle DataClipVSColorPSO;
-	FPSOCache::FPSOHandle VBClipVSRedPSO;
+
 	FPSOCache::FPSOHandle TestGLTFPSO;
-	FPSOCache::FPSOHandle TestGLTFPSOBounds;
-	FPSOCache::FPSOHandle TestGLTFPSOBoundsSphere;
-	FBufferWithMemAndView ClipVB;
 	FPSOCache::FPSOHandle TestCSPSO;
+
+	FPSOCache::FPSOHandle ImGUIPSO;
+	int32 ImGUIVertexDecl = -1;
+
+	FPSOCache::FPSOHandle UnlitPSO;
+	int32 UnlitVertexDecl = -1;
+
+	FBufferWithMemAndView ClipVB;
 	FBufferWithMemAndView TestCSBuffer;
 	FBufferWithMem TestCSUB;
 	FBufferWithMem ColorUB;
@@ -318,9 +335,6 @@ struct FApp
 	FBufferWithMem ImGuiVB[NUM_IMGUI_BUFFERS];
 	FBufferWithMem ImGuiIB[NUM_IMGUI_BUFFERS];
 	FBufferWithMem ImGuiScaleTranslateUB[NUM_IMGUI_BUFFERS];
-	FPSOCache::FPSOHandle ImGUIPSO;
-	FPSOCache::FPSOHandle UIPSO;
-	int32 ImGUIVertexDecl = -1;
 	double Time = 0;
 
 	float LastDelta = 1.0f / 60.0f;
@@ -628,7 +642,7 @@ struct FApp
 			ImGuiIB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 			ImGuiVB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 
-			SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(ImGUIPSO, ImGUIVertexDecl);
+			SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(ImGUIPSO, FPSOCache::FPSOSecondHandle(ImGUIVertexDecl, EPSODoubleSided));
 			{
 				{
 					float* ScaleTranslate = (float*)ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Lock();
@@ -944,7 +958,11 @@ struct FApp
 
 				if (IsVisible(Prim, ObjectMatrix))
 				{
-					SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, FPSOCache::FPSOSecondHandle(Prim.VertexDecl, Scene.Materials[Prim.Material].bDoubleSided, g_bWireframe));
+					SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSO, 
+						FPSOCache::FPSOSecondHandle(Prim.VertexDecl, 
+							(Scene.Materials[Prim.Material].bDoubleSided ? EPSODoubleSided : 0) |
+							(g_bWireframe ? EPSOWireFrame : 0))
+						);
 					vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 					GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
 					std::vector<VkBuffer> VBs;
@@ -1016,12 +1034,11 @@ struct FApp
 
 	void RenderPointLight(SVulkan::FCmdBuffer* CmdBuffer, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer)
 	{
-		int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(GetPosOnlyDecl());
 		int NumIndices = 20 * 3;
-		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(12 * sizeof(FVector3), CmdBuffer);
+		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(12 * sizeof(FUnlitVertex), CmdBuffer);
 		FStagingBuffer* IB = GStagingBufferMgr.AcquireBuffer(NumIndices * sizeof(uint32), CmdBuffer);
 		GenerateIcosahedron(VB, IB, PointLight.GetVector3(), 10);
-		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOBoundsSphere, FPSOCache::FPSOSecondHandle(VertexDeclHandle, true, true));
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(UnlitPSO, FPSOCache::FPSOSecondHandle(UnlitVertexDecl, EPSODoubleSided | EPSOWireFrame));
 
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 		VkDeviceSize VBs[1] = { 0 };
@@ -1040,20 +1057,12 @@ struct FApp
 
 	void RenderBoundingBox(SVulkan::FCmdBuffer* CmdBuffer, const FScene::FPrim& Prim, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer)
 	{
-		int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(GetPosOnlyDecl());
-#if 1
 		int NumIndices = 12 * 2;
-		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(8 * sizeof(FVector3), CmdBuffer);
+		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(8 * sizeof(FUnlitVertex), CmdBuffer);
 		FStagingBuffer* IB = GStagingBufferMgr.AcquireBuffer(NumIndices * sizeof(uint32), CmdBuffer);
 		GenerateBoundingBox(VB, IB, Prim.ObjectSpaceBounds);
-		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOBounds, FPSOCache::FPSOSecondHandle(VertexDeclHandle, true, false));
-#else
-		int NumIndices = 20 * 3;
-		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(12 * sizeof(FVector3), CmdBuffer);
-		FStagingBuffer* IB = GStagingBufferMgr.AcquireBuffer(NumIndices * sizeof(uint32), CmdBuffer);
-		GenerateIcosahedron(VB, IB, Prim.ObjectSpaceBounds.GetCenter(), Prim.ObjectSpaceBounds.GetRadius());
-		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(TestGLTFPSOBoundsSphere, FPSOCache::FPSOSecondHandle(VertexDeclHandle, true, true));
-#endif
+		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(UnlitPSO, FPSOCache::FPSOSecondHandle(UnlitVertexDecl, EPSODoubleSided | EPSOLineList));
+
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
 		VkDeviceSize VBs[1] = { 0 };
 		vkCmdBindIndexBuffer(CmdBuffer->CmdBuffer, IB->Buffer->Buffer.Buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -1127,12 +1136,6 @@ static bool GenerateImGuiUI(SVulkan::SDevice& Device, FApp& App, SVulkan::FCmdBu
 {
 	bool bRecompileShaders = false;
 	FMarkerScope MarkerScope(Device, CmdBuffer, "ImGUI");
-	//if (bGH)
-	{
-		//extern void Tick(float);
-		//Tick(App.LastDelta / 1000.0f);
-	}
-	//else
 	if (ImGui::Begin("Debug"))
 	{
 		if (!App.LoadedGLTF.empty())
@@ -1238,11 +1241,8 @@ static double Render(FApp& App)
 
 	static float F = 0.7f;
 
-	bool bGH = false;//RCUtils::FCmdLine::Get().Contains("-ghjotl");
-	if (!bGH)
-	{
-		F += 0.005f;
-	}
+	F += 0.005f;
+
 	float ClearColor[4] = {0.0f, abs(sin(F)), abs(cos(F)), 0.0f};
 	ClearColorImage(CmdBuffer->CmdBuffer, GVulkan.Swapchain.Images[GVulkan.Swapchain.ImageIndex], ClearColor);
 	ClearDepthImage(CmdBuffer->CmdBuffer, App.DepthBuffer.Image.Image, 1.0f, 0);
@@ -1257,77 +1257,13 @@ static double Render(FApp& App)
 		VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 
 	CmdBuffer->BeginRenderPass(Framebuffer);
-	if (0)
+	if (!App.Scene.Meshes.empty())
 	{
-		FMarkerScope MarkerScope(Device, CmdBuffer, "TestTriangle");
-		if (0)
-		{
-			//vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.NoVBClipVSRedPSO.Pipeline);
-		}
-		else if (0)
-		{
-			//vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.PassThroughVSRedPSPSO.Pipeline);
-		}
-		else if (1)
-		{
-			SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(App.DataClipVSColorPSO);
-
-			vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
-
-			FDescriptorPSOCache Cache(PSO);
-			Cache.SetTexelBuffer("Pos", App.ClipVB);
-			Cache.SetUniformBuffer("$Global", App.ColorUB);
-			Cache.UpdateDescriptors(GDescriptorCache, CmdBuffer);
-		}
-		/*
-			else if (1)
-			{
-				SVulkan::FGfxPSO* PSO = GPSOCache.GetPSO(App.DataClipVSRedPSO);
-				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.DataClipVSRedPSO.Pipeline);
-
-				VkWriteDescriptorSet DescriptorWrites;
-				ZeroVulkanMem(DescriptorWrites, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
-				//DescriptorWrites.pNext = NULL;
-				//DescriptorWrites.dstSet = 0;  // dstSet is ignored by the extension
-				DescriptorWrites.descriptorCount = 1;
-				DescriptorWrites.descriptorType = (VkDescriptorType)App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->descriptor_type;
-				DescriptorWrites.pTexelBufferView = &App.ClipVB.View;
-				DescriptorWrites.dstBinding = App.DataClipVSRedPSO.Reflection[EShaderStages::Vertex]->bindings[0]->binding;
-
-				GDescriptorCache.UpdateDescriptors(CmdBuffer, 1, &DescriptorWrites, App.DataClipVSRedPSO);
-			}
-			else if (1)
-			{
-				vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, App.VBClipVSRedPSO.Pipeline);
-				VkDeviceSize Offsets = 0;
-				vkCmdBindVertexBuffers(CmdBuffer->CmdBuffer, 0, 1, &App.ClipVB.Buffer.Buffer, &Offsets);
-			}
-		*/
-		GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
-
-		vkCmdDraw(CmdBuffer->CmdBuffer, 3, 1, 0, 0);
-	}
-
-	if (bGH)
-	{
-		GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
-
-		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(App.UIPSO, App.ImGUIVertexDecl);
-		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
-
-		//RenderJOTL(Device, GStagingBufferMgr, GDescriptorCache, PSO, CmdBuffer);
-	}
-	else
-	{
-		if (!App.Scene.Meshes.empty())
-		{
-			App.DrawScene(Device, CmdBuffer);
-		}
+		App.DrawScene(Device, CmdBuffer);
 	}
 
 	CmdBuffer->EndRenderPass();
 
-	if (!bGH)
 	{
 		FMarkerScope MarkerScope(Device, CmdBuffer, "TestCompute");
 		SVulkan::FComputePSO* PSO = GPSOCache.GetComputePSO(App.TestCSPSO);
@@ -1379,21 +1315,13 @@ static double Render(FApp& App)
 static void SetupShaders(FApp& App)
 {
 	FShaderInfo* TestCS = GShaderLibrary.RegisterShader("Shaders/TestCS.hlsl", "TestCS", FShaderInfo::EStage::Compute);
-	FShaderInfo* VBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "VBClipVS", FShaderInfo::EStage::Vertex);
-	FShaderInfo* NoVBClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainNoVBClipVS", FShaderInfo::EStage::Vertex);
-	FShaderInfo* DataClipVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipVS", FShaderInfo::EStage::Vertex);
-	//FShaderInfo* DataClipHS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipHS", FShaderInfo::EStage::Hull);
-	//FShaderInfo* DataClipDS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "MainBufferClipDS", FShaderInfo::EStage::Domain);
+	FShaderInfo* UnlitVS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "UnlitVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* RedPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "RedPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* ColorPS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ColorPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* UIVS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainVS", FShaderInfo::EStage::Vertex);
 	FShaderInfo* UIPS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainPS", FShaderInfo::EStage::Pixel);
-	FShaderInfo* UIColorPS = GShaderLibrary.RegisterShader("Shaders/UI.hlsl", "UIMainColorPS", FShaderInfo::EStage::Pixel);
 	FShaderInfo* TestGLTFVS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFVS", FShaderInfo::EStage::Vertex);
-	FShaderInfo* TestGLTFVSBounds = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFVSBounds", FShaderInfo::EStage::Vertex);
 	FShaderInfo* TestGLTFPS = GShaderLibrary.RegisterShader("Shaders/TestMesh.hlsl", "TestGLTFPS", FShaderInfo::EStage::Pixel);
-	FShaderInfo* ShowDebugVectorsGS = GShaderLibrary.RegisterShader("Shaders/Unlit.hlsl", "ShowDebugVectorsGS", FShaderInfo::EStage::Geometry);
-	FShaderInfo* PassThroughVS = GShaderLibrary.RegisterShader("Shaders/PassThroughVS.hlsl", "MainVS", FShaderInfo::EStage::Vertex);
 	GShaderLibrary.RecompileShaders();
 
 	App.TestCSPSO = GPSOCache.CreateComputePSO("TestCSPSO", TestCS);
@@ -1403,24 +1331,6 @@ static void SetupShaders(FApp& App)
 	VkViewport Viewport = GVulkan.Swapchain.GetViewport();
 	VkRect2D Scissor = GVulkan.Swapchain.GetScissor();
 
-	App.DataClipVSColorPSO = GPSOCache.CreateGfxPSO("DataClipVSColorPSO", DataClipVS, ColorPS, RenderPass);
-//	App.DataClipVSColorTessPSO = GPSOCache.CreateGfxPSO(DataClipVS, DataClipHS, DataClipDS, ColorPS, RenderPass);
-	App.NoVBClipVSRedPSO = GPSOCache.CreateGfxPSO("NoVBClipVSRedPSO", NoVBClipVS, RedPS, RenderPass);
-	App.DataClipVSRedPSO = GPSOCache.CreateGfxPSO("DataClipVSRedPSO", DataClipVS, RedPS, RenderPass);
-	App.PassThroughVSRedPSPSO = GPSOCache.CreateGfxPSO("PassThroughVSRedPSPSO", PassThroughVS, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-	{
-		VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
-		RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
-	});
-
-	{
-		//FPSOCache::FVertexDecl Decl;
-		//Decl.AddAttribute(0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0, "Position");
-		//Decl.AddBinding(0, 4 * sizeof(float));
-		//int32 VertexDeclHandle = GPSOCache.FindOrAddVertexDecl(Decl);
-		//App.VBClipVSRedPSO = GPSOCache.CreateGfxPSO("VBClipVSRedPSO", VBClipVS, RedPS, RenderPass,  VertexDeclHandle);
-	}
-
 	{
 		FPSOCache::FVertexDecl Decl;
 		Decl.AddAttribute(0, 0, VK_FORMAT_R32G32_SFLOAT, IM_OFFSETOF(ImDrawVert, pos), "pos");
@@ -1428,12 +1338,16 @@ static void SetupShaders(FApp& App)
 		Decl.AddAttribute(0, 2, VK_FORMAT_R8G8B8A8_UNORM, IM_OFFSETOF(ImDrawVert, col), "col");
 		Decl.AddBinding(0, sizeof(ImDrawVert));
 		App.ImGUIVertexDecl = GPSOCache.FindOrAddVertexDecl(Decl);
-		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-			{
-				VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
-				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
-			});
-		App.UIPSO = GPSOCache.CreateGfxPSO("UIPSO", UIVS, UIColorPS, RenderPass);
+		App.ImGUIPSO = GPSOCache.CreateGfxPSO("ImGUIPSO", UIVS, UIPS, RenderPass);
+	}
+
+	{
+		FPSOCache::FVertexDecl Decl;
+		Decl.AddAttribute(0, 0, VK_FORMAT_R32G32B32_SFLOAT, IM_OFFSETOF(FUnlitVertex, Position), "Position");
+		Decl.AddAttribute(0, 1, VK_FORMAT_R8G8B8A8_UNORM, IM_OFFSETOF(FUnlitVertex, Color), "Color");
+		Decl.AddBinding(0, sizeof(FUnlitVertex));
+		App.UnlitVertexDecl = GPSOCache.FindOrAddVertexDecl(Decl);
+		App.UnlitPSO = GPSOCache.CreateGfxPSO("UnlitPSO", UnlitVS, ColorPS, RenderPass);
 	}
 
 	{
@@ -1448,33 +1362,6 @@ static void SetupShaders(FApp& App)
 				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
 				// Flip handed-ness as we mirrored it
 				RasterizerInfo->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-			});
-
-		App.TestGLTFPSOBounds = GPSOCache.CreateGfxPSO("TestGLTFPSOBounds", TestGLTFVSBounds, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-			{
-				VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
-				DSInfo->depthTestEnable = VK_TRUE;
-				DSInfo->depthWriteEnable = VK_FALSE;// VK_TRUE;
-				DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
-				VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
-				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
-				//RasterizerInfo->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-				VkPipelineInputAssemblyStateCreateInfo* IAInfo = (VkPipelineInputAssemblyStateCreateInfo*)GfxPipelineInfo.pInputAssemblyState;
-				IAInfo->topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
-			});
-
-		App.TestGLTFPSOBoundsSphere = GPSOCache.CreateGfxPSO("TestGLTFPSOBoundsSphere", TestGLTFVSBounds, RedPS, RenderPass, [=](VkGraphicsPipelineCreateInfo& GfxPipelineInfo)
-			{
-				VkPipelineDepthStencilStateCreateInfo* DSInfo = (VkPipelineDepthStencilStateCreateInfo*)GfxPipelineInfo.pDepthStencilState;
-				DSInfo->depthTestEnable = VK_TRUE;
-				DSInfo->depthWriteEnable = VK_FALSE;// VK_TRUE;
-				DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
-				VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
-				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
-				//RasterizerInfo->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 			});
 	}
 }

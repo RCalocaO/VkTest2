@@ -1798,6 +1798,13 @@ struct FRenderTargetCache
 	}
 };
 
+enum EPSOFlags
+{
+	EPSODoubleSided		= 1 << 0,
+	EPSOWireFrame		= 1 << 1,
+	EPSOLineList		= 1 << 2,
+};
+
 struct FPSOCache
 {
 	struct FVertexDecl
@@ -1859,7 +1866,7 @@ struct FPSOCache
 				&& Entry.Names == VertexDecl.Names
 				)
 			{
-				check(Entry.Names == VertexDecl.Names);
+				//check(Entry.Names == VertexDecl.Names);
 				return Index;
 			}
 
@@ -1899,9 +1906,10 @@ struct FPSOCache
 			uint32 Data;
 			struct
 			{
-				uint32 VertexDecl : 30;
+				uint32 VertexDecl : 29;
 				uint32 bDoubleSided : 1;
 				uint32 bWireframe : 1;
+				uint32 bLines : 1;
 			};
 		};
 
@@ -1911,11 +1919,12 @@ struct FPSOCache
 			Data = 0;
 		}
 
-		FPSOSecondHandle(int32 InVertexDecl, bool bInDoubleSided = false, bool bInWireframe = false)
+		FPSOSecondHandle(int32 InVertexDecl, uint32 PSOFlags = 0)
 			: VertexDecl(InVertexDecl)
-			, bDoubleSided(bInDoubleSided)
-			, bWireframe(bInWireframe)
 		{
+			bDoubleSided = (PSOFlags & EPSODoubleSided) == EPSODoubleSided;
+			bWireframe = (PSOFlags & EPSOWireFrame) == EPSOWireFrame;
+			bLines = (PSOFlags & EPSOLineList) == EPSOLineList;
 		}
 	};
 
@@ -2057,6 +2066,8 @@ struct FPSOCache
 
 			RasterizerInfo.cullMode = SecondHandle.bDoubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
 			RasterizerInfo.polygonMode = SecondHandle.bWireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+
+			IAInfo.topology = SecondHandle.bLines ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		}
 
 		void FixPointers(SVulkan::SDevice* Device)

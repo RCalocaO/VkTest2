@@ -4,7 +4,6 @@ C:\GitHub\VkTest2\Shaders\Unlit.hlsl
 // Id's are bound by 18
 
                               Capability Shader
-                              Capability SampledBuffer
                1:             ExtInstImport  "GLSL.std.450"
                               MemoryModel Logical GLSL450
                               EntryPoint Fragment 4  "RedPS" 17
