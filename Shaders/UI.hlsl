@@ -15,9 +15,7 @@ struct FVSOut
 
 cbuffer CB : register(b0)
 {
-	float2 Scale;
-	float2 Translate;
-	float4 Color;
+	float4x4 Projection;
 }
 
 SamplerState Sampler : register(s1);
@@ -26,7 +24,8 @@ Texture2D Font : register(t2);
 FVSOut UIMainVS(in FVSIn In) : SV_Position
 {
 	FVSOut Out;
-	Out.Pos = float4(In.Pos.xy * Scale + Translate, 0, 1);
+	//Out.Pos = float4(In.Pos.xy * Scale + Translate, 0, 1);
+	Out.Pos = mul(Projection, float4(In.Pos.xy, 0, 1));
 	Out.Color = In.Color;
 	Out.UVs = In.UVs;
 	return Out;

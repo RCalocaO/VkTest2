@@ -967,6 +967,9 @@ struct SVulkan
 		void SetViewportAndScissor(FCmdBuffer* CmdBuffer)
 		{
 			VkViewport Viewport = GetViewport();
+			check(Viewport.height >= 0);
+			Viewport.y = Viewport.height;
+			Viewport.height *= -1.0f;
 			vkCmdSetViewport(CmdBuffer->CmdBuffer, 0, 1, &Viewport);
 			VkRect2D Scissor = GetScissor();
 			vkCmdSetScissor(CmdBuffer->CmdBuffer, 0, 1, &Scissor);
@@ -1989,7 +1992,6 @@ struct FPSOCache
 			
 			ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
 			RasterizerInfo.cullMode = VK_CULL_MODE_BACK_BIT;
-			RasterizerInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
 			RasterizerInfo.lineWidth = 1.0f;
 
 			ZeroMem(BlendAttachState);

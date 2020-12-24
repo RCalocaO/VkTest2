@@ -178,7 +178,7 @@ struct FCamera
 
 	FCamera()
 	{
-		Yaw = 0;
+		Yaw = -90;
 		Pitch = 0;
 	}
 
@@ -488,7 +488,7 @@ struct FApp
 			ImGuiVB[Index].Create(Device, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, ImGuiVertexSize, true);
 			static_assert(sizeof(uint16) == sizeof(ImDrawIdx), "");
 			ImGuiIB[Index].Create(Device, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, ImGuiMaxIndices * sizeof(uint16), true);
-			ImGuiScaleTranslateUB[Index].Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, 4 * sizeof(float), true);
+			ImGuiScaleTranslateUB[Index].Create(Device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, EMemLocation::CPU_TO_GPU, (16 + 4) * sizeof(float), true);
 		}
 
 		{
@@ -645,14 +645,16 @@ struct FApp
 			SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(ImGUIPSO, FPSOCache::FPSOSecondHandle(ImGUIVertexDecl, EPSODoubleSided));
 			{
 				{
-					float* ScaleTranslate = (float*)ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Lock();
-					FVector2 Scale ={2.0f / DrawData->DisplaySize.x, 2.0f / DrawData->DisplaySize.y};
-					FVector2 Translate ={-1.0f - DrawData->DisplayPos.x * Scale.x, -1.0f - DrawData->DisplayPos.y * Scale.y};
-					//float ScaleTranslate[4];
-					ScaleTranslate[0] = Scale.x;
-					ScaleTranslate[1] = Scale.y;
-					ScaleTranslate[2] = Translate.x;
-					ScaleTranslate[3] = Translate.y;
+					float L = DrawData->DisplayPos.x;
+					float R = DrawData->DisplayPos.x + DrawData->DisplaySize.x;
+					float T = DrawData->DisplayPos.y;
+					float B = DrawData->DisplayPos.y + DrawData->DisplaySize.y;
+
+					FMatrix4x4* UBData = (FMatrix4x4*)ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Lock();
+					UBData->Rows[0].Set(2.0f/(R-L),   0.0f,           0.0f,       0.0f);
+					UBData->Rows[1].Set(0.0f,         2.0f/(T-B),     0.0f,       0.0f);
+					UBData->Rows[2].Set(0.0f,         0.0f,           0.5f,       0.0f);
+					UBData->Rows[3].Set((R+L)/(L-R),  (T+B)/(B-T),    0.5f,       1.0f);
 					ImGuiScaleTranslateUB[FrameIndex % NUM_IMGUI_BUFFERS].Unlock();
 				}
 
@@ -669,9 +671,9 @@ struct FApp
 			{
 				VkViewport Viewport;
 				Viewport.x = 0;
-				Viewport.y = 0;
+				Viewport.y = DrawData->DisplaySize.y;
 				Viewport.width = DrawData->DisplaySize.x;
-				Viewport.height = DrawData->DisplaySize.y;
+				Viewport.height = -DrawData->DisplaySize.y;
 				Viewport.minDepth = 0.0f;
 				Viewport.maxDepth = 1.0f;
 				vkCmdSetViewport(CmdBuffer->CmdBuffer, 0, 1, &Viewport);
@@ -696,7 +698,7 @@ struct FApp
 					Scissor.offset.x = (int32)(Cmd->ClipRect.x - DisplayPos.x) > 0 ? (int32_t)(Cmd->ClipRect.x - DisplayPos.x) : 0;
 					Scissor.offset.y = (int32)(Cmd->ClipRect.y - DisplayPos.y) > 0 ? (int32_t)(Cmd->ClipRect.y - DisplayPos.y) : 0;
 					Scissor.extent.width = (uint32)(Cmd->ClipRect.z - Cmd->ClipRect.x);
-					Scissor.extent.height = (uint32)(Cmd->ClipRect.w - Cmd->ClipRect.y + 1);
+					Scissor.extent.height = (uint32)(Cmd->ClipRect.w - Cmd->ClipRect.y);
 					vkCmdSetScissor(CmdBuffer->CmdBuffer, 0, 1, &Scissor);
 
 					vkCmdDrawIndexed(CmdBuffer->CmdBuffer, Cmd->ElemCount, 1, IndexOffset, VertexOffset, 0);
@@ -1357,11 +1359,6 @@ static void SetupShaders(FApp& App)
 				DSInfo->depthTestEnable = VK_TRUE;
 				DSInfo->depthWriteEnable = VK_TRUE;
 				DSInfo->depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
-				VkPipelineRasterizationStateCreateInfo* RasterizerInfo = (VkPipelineRasterizationStateCreateInfo*)GfxPipelineInfo.pRasterizationState;
-				RasterizerInfo->cullMode = VK_CULL_MODE_NONE;
-				// Flip handed-ness as we mirrored it
-				RasterizerInfo->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 			});
 	}
 }

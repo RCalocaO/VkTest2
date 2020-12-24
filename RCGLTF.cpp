@@ -121,17 +121,12 @@ static int GetOrAddVertexDecl(SVulkan::SDevice& Device, tinygltf::Model& Model, 
 		auto FixNormalOrPosition = [&](const std::string& InName, uint32 Count, FVector3* Data)
 		{
 			bool bPosition = InName == "POSITION";
-			if (bPosition || InName == "NORMAL")
+			if (bPosition)
 			{
 				for (uint32 Index = 0; Index < Count; ++Index)
 				{
-					// Flip Ys
-					Data->y *= -1;
-					if (bPosition)
-					{
-						OutPrim.ObjectSpaceBounds.Min = FVector3::Min(OutPrim.ObjectSpaceBounds.Min, *Data);
-						OutPrim.ObjectSpaceBounds.Max = FVector3::Max(OutPrim.ObjectSpaceBounds.Max, *Data);
-					}
+					OutPrim.ObjectSpaceBounds.Min = FVector3::Min(OutPrim.ObjectSpaceBounds.Min, *Data);
+					OutPrim.ObjectSpaceBounds.Max = FVector3::Max(OutPrim.ObjectSpaceBounds.Max, *Data);
 					++Data;
 				}
 			}
