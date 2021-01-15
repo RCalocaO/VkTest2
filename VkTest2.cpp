@@ -81,7 +81,7 @@ static void GenerateBoundingBox(FStagingBuffer* VB, FStagingBuffer* IB, const FB
 #endif
 }
 
-static void GenerateIcosahedron(FStagingBuffer* VB, FStagingBuffer* IB, FVector3 Center, float Radius)
+static void GenerateIcosahedron(FStagingBuffer* VB, FStagingBuffer* IB, FVector3 Center, float Radius, uint32 Color = 0xff0000ff)
 {
 	uint32 SrcIndices[] = { 
 		0,4,1,
@@ -114,7 +114,6 @@ static void GenerateIcosahedron(FStagingBuffer* VB, FStagingBuffer* IB, FVector3
 	float X = 0.525731112119133606f * Radius;
 	float Z = 0.850650808352039932f * Radius;
 
-	uint32 Color = 0xff0000ff;
 	Pos[0].Set(FVector3(-X, 0, Z) + Center, Color);
 	Pos[1].Set(FVector3(X, 0, Z) + Center, Color);
 	Pos[2].Set(FVector3(-X, 0, -Z) + Center, Color);
@@ -178,7 +177,7 @@ struct FCamera
 
 	FCamera()
 	{
-		Yaw = -90;
+		Yaw = 90;
 		Pitch = 0;
 	}
 
@@ -198,23 +197,26 @@ struct FCamera
 		Direction.z = sin(ToRadians(Yaw)) * cos(ToRadians(Pitch));
 		Front = Direction.GetNormalized();
 
-		FVector3 f = Front/*.GetNormalized()*/;
+		FVector3 f = Front;
 		FVector3 u = Up.GetNormalized();
-		FVector3 s = FVector3::Cross(f, u).GetNormalized();
-		u = FVector3::Cross(s, f);
+		FVector3 s = FVector3::Cross(u, f).GetNormalized();
+		u = FVector3::Cross(f, s);
 
 		FMatrix4x4 ViewMtx = FMatrix4x4::GetIdentity();
 		ViewMtx.Set(0, 0, s.x);
-		ViewMtx.Set(1, 0, s.y);
-		ViewMtx.Set(2, 0, s.z);
 		ViewMtx.Set(0, 1, u.x);
+		ViewMtx.Set(0, 2, f.x);
+
+		ViewMtx.Set(1, 0, s.y);
 		ViewMtx.Set(1, 1, u.y);
+		ViewMtx.Set(1, 2, f.y);
+
+		ViewMtx.Set(2, 0, s.z);
 		ViewMtx.Set(2, 1, u.z);
-		ViewMtx.Set(0, 2, -f.x);
-		ViewMtx.Set(1, 2, -f.y);
-		ViewMtx.Set(2, 2, -f.z);
-		ViewMtx.Set(3, 0, FVector3::Dot(s, Pos));
-		ViewMtx.Set(3, 1, FVector3::Dot(u, Pos));
+		ViewMtx.Set(2, 2, f.z);
+
+		ViewMtx.Set(3, 0, -FVector3::Dot(s, Pos));
+		ViewMtx.Set(3, 1, -FVector3::Dot(u, Pos));
 		ViewMtx.Set(3, 2, -FVector3::Dot(f, Pos));
 
 		return ViewMtx;
@@ -563,12 +565,12 @@ struct FApp
 
 		if (glfwGetKey(Window, GLFW_KEY_W) == GLFW_PRESS)
 		{
-			Camera.Pos -= CameraSpeed * Camera.Front;
+			Camera.Pos += CameraSpeed * Camera.Front;
 		}
 
 		if (glfwGetKey(Window, GLFW_KEY_S) == GLFW_PRESS)
 		{
-			Camera.Pos += CameraSpeed * Camera.Front;
+			Camera.Pos -= CameraSpeed * Camera.Front;
 		}
 
 		if (glfwGetKey(Window, GLFW_KEY_A) == GLFW_PRESS)
@@ -843,7 +845,7 @@ struct FApp
 	struct : FCamera
 	{
 		FMatrix4x4 ViewMtx;
-		FVector3 FOVNearFar = {35.0f, 100.0f, 3000.0f};
+		FVector3 FOVNearFar = {35.0f, 1.0f, 3000.0f};
 
 		void UpdateMatrix()
 		{
@@ -853,7 +855,7 @@ struct FApp
 
 	FVector4 LightDir = {0, 1, 0, 0};
 	FVector4 PointLight = {0, 0, 0, 0};
-	bool bRotateObject = false;
+	//bool bRotateObject = false;
 	bool bSkipCull = true;
 	bool bForceCull = false;
 	bool bShowBounds = false;
@@ -895,14 +897,47 @@ struct FApp
 		return true;
 	}
 
-	void DrawScene(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
+	FStagingBuffer* GetObjUB(SVulkan::FCmdBuffer* CmdBuffer, FMatrix4x4 ObjectMatrix = FMatrix4x4::GetIdentity())
 	{
-		FMarkerScope MarkerScope(&Device, CmdBuffer, "Scene");
+		FObjUB ObjUB;
+		ObjUB.ObjMtx = ObjectMatrix;
+		FStagingBuffer* ObjBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ObjUB), CmdBuffer);
+		*(FObjUB*)ObjBuffer->Buffer->Lock() = ObjUB;
+		ObjBuffer->Buffer->Unlock();
+		return ObjBuffer;
+	}
 
+	FViewUB GetViewUBStruct()
+	{
 		int W = 0, H = 1;
 		glfwGetWindowSize(Window, &W, &H);
 		float FOVRadians = tan(ToRadians(Camera.FOVNearFar.x));
 
+		FViewUB ViewUB;
+		ViewUB.Mode = g_vMode;
+		ViewUB.Mode2 = g_vMode2;
+		ViewUB.LightDir = LightDir.GetNormalized();
+		ViewUB.PointLight = PointLight;
+		ViewUB.ViewMtx = Camera.ViewMtx;
+		ViewUB.CameraPosition = FVector4(Camera.Pos, 1.0f);
+		ViewUB.ProjMtx = CalculateProjectionMatrixLH(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
+		return ViewUB;
+	}
+
+	FStagingBuffer* GetViewUB(SVulkan::FCmdBuffer* CmdBuffer)
+	{
+		FViewUB ViewUB = GetViewUBStruct();
+		FStagingBuffer* ViewBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ViewUB), CmdBuffer);
+		*(FViewUB*)ViewBuffer->Buffer->Lock() = ViewUB;
+		ViewBuffer->Buffer->Unlock();
+		return ViewBuffer;
+	}
+
+	void DrawScene(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
+	{
+		FMarkerScope MarkerScope(&Device, CmdBuffer, "Scene");
+
+/*
 		static float DeltaRot = 0;
 		float RotateObjectAngle = 0;
 		if (bRotateObject)
@@ -914,18 +949,8 @@ struct FApp
 		{
 			DeltaRot = 0;
 		}
-
-		FViewUB ViewUB;
-		ViewUB.Mode = g_vMode;
-		ViewUB.Mode2 = g_vMode2;
-		ViewUB.LightDir = LightDir.GetNormalized();
-		ViewUB.PointLight = PointLight;
-		ViewUB.ViewMtx = Camera.ViewMtx;
-		ViewUB.CameraPosition = FVector4(Camera.Pos, 1.0f);
-		ViewUB.ProjMtx = CalculateProjectionMatrix(FOVRadians, (float)W / (float)H, Camera.FOVNearFar.y, Camera.FOVNearFar.z);
-		FStagingBuffer* ViewBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ViewUB), CmdBuffer);
-		*(FViewUB*)ViewBuffer->Buffer->Lock() = ViewUB;
-		ViewBuffer->Buffer->Unlock();
+*/
+		FStagingBuffer* ViewBuffer = GetViewUB(CmdBuffer);
 
 		for (auto& Instance : Scene.Instances)
 		{
@@ -943,20 +968,17 @@ struct FApp
 				FMarkerScope MarkerScope(Device, CmdBuffer, ss2.str().c_str());
 
 				FMatrix4x4 ObjectMatrix = FMatrix4x4::GetIdentity();//FMatrix4x4::GetRotationZ(ToRadians(180));
-				//ObjectMatrix *= FMatrix4x4::GetScale(Instance.Scale);
+																	//ObjectMatrix *= FMatrix4x4::GetScale(Instance.Scale);
 				ObjectMatrix.Rows[3] = Instance.Pos;
-				ObjectMatrix *= FMatrix4x4::GetRotationY(RotateObjectAngle);
+				//float RotateObjectAngle = 0;
+				//ObjectMatrix *= FMatrix4x4::GetRotationY(RotateObjectAngle);
+				FStagingBuffer* ObjBuffer = GetObjUB(CmdBuffer, ObjectMatrix);
+
 				if (Prim.ID == 96)
 				{
 					int i = 0;
 					++i;
 				}
-
-				FObjUB ObjUB;
-				ObjUB.ObjMtx = ObjectMatrix;
-				FStagingBuffer* ObjBuffer = GStagingBufferMgr.AcquireBuffer(sizeof(ObjUB), CmdBuffer);
-				*(FObjUB*)ObjBuffer->Buffer->Lock() = ObjUB;
-				ObjBuffer->Buffer->Unlock();
 
 				if (IsVisible(Prim, ObjectMatrix))
 				{
@@ -1034,12 +1056,12 @@ struct FApp
 		return NewDecl;
 	}
 
-	void RenderPointLight(SVulkan::FCmdBuffer* CmdBuffer, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer)
+	void RenderSphere(SVulkan::FCmdBuffer* CmdBuffer, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer, FVector3 Pos, float Radius, uint32 Color)
 	{
 		int NumIndices = 20 * 3;
 		FStagingBuffer* VB = GStagingBufferMgr.AcquireBuffer(12 * sizeof(FUnlitVertex), CmdBuffer);
 		FStagingBuffer* IB = GStagingBufferMgr.AcquireBuffer(NumIndices * sizeof(uint32), CmdBuffer);
-		GenerateIcosahedron(VB, IB, PointLight.GetVector3(), 10);
+		GenerateIcosahedron(VB, IB, Pos, Radius, Color);
 		SVulkan::FGfxPSO* PSO = GPSOCache.GetGfxPSO(UnlitPSO, FPSOCache::FPSOSecondHandle(UnlitVertexDecl, EPSODoubleSided | EPSOWireFrame));
 
 		vkCmdBindPipeline(CmdBuffer->CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PSO->Pipeline);
@@ -1055,6 +1077,11 @@ struct FApp
 		}
 
 		vkCmdDrawIndexed(CmdBuffer->CmdBuffer, NumIndices, 1, 0, 0, 0);
+	}
+
+	void RenderPointLight(SVulkan::FCmdBuffer* CmdBuffer, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer)
+	{
+		RenderSphere(CmdBuffer, ViewBuffer, ObjBuffer, PointLight.GetVector3(), 10, 0xff0000ff);
 	}
 
 	void RenderBoundingBox(SVulkan::FCmdBuffer* CmdBuffer, const FScene::FPrim& Prim, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer)
@@ -1095,6 +1122,31 @@ struct FApp
 		Device.WaitForIdle();
 
 		Swapchain.Recreate(Device, Window);
+	}
+
+	void RenderTests(SVulkan::SDevice& Device, SVulkan::FCmdBuffer* CmdBuffer)
+	{
+		GVulkan.Swapchain.SetViewportAndScissor(CmdBuffer);
+		FStagingBuffer* ViewBuffer = GetViewUB(CmdBuffer);
+		FStagingBuffer* ObjBuffer = GetObjUB(CmdBuffer);
+		float Radius = 10;
+		float Dist = 100;
+		FVector3 Center(0, 0, 100);
+
+		auto InnerRenderSphere = [&](SVulkan::FCmdBuffer* CmdBuffer, FStagingBuffer* ViewBuffer, FStagingBuffer* ObjBuffer, FVector3 Pos, float Radius, uint32 Color)
+		{
+			std::stringstream ss;
+			ss << "Sphere " << Pos.x << "," << Pos.y << "," << Pos.z;
+			ss.flush();
+			FMarkerScope MarkerScope(&Device, CmdBuffer, ss.str().c_str());
+			RenderSphere(CmdBuffer, ViewBuffer, ObjBuffer, Pos, Radius, Color);
+		};
+
+		InnerRenderSphere(CmdBuffer, ViewBuffer, ObjBuffer, Center + FVector3(0, 0, 0), Radius, 0xffffffff);
+		InnerRenderSphere(CmdBuffer, ViewBuffer, ObjBuffer, Center + FVector3(-Dist, 0, -Dist), Radius, 0xff0000ff);
+		InnerRenderSphere(CmdBuffer, ViewBuffer, ObjBuffer, Center + FVector3(Dist, 0, -Dist), Radius, 0xff00ff00);
+		InnerRenderSphere(CmdBuffer, ViewBuffer, ObjBuffer, Center + FVector3(-Dist, 0, Dist), Radius, 0xffff0000);
+		InnerRenderSphere(CmdBuffer, ViewBuffer, ObjBuffer, Center + FVector3(Dist, 0, Dist), Radius, 0xff000000);
 	}
 };
 static FApp GApp;
@@ -1157,7 +1209,7 @@ static bool GenerateImGuiUI(SVulkan::SDevice& Device, FApp& App, SVulkan::FCmdBu
 		ImGui::Checkbox("Skip Culling", &App.bSkipCull);
 		ImGui::Checkbox("Force Cull", &App.bForceCull);
 		ImGui::Checkbox("Show Bounds (even if culled)", &App.bShowBounds);
-		ImGui::Checkbox("Rotate Object", &App.bRotateObject);
+		//ImGui::Checkbox("Rotate Object", &App.bRotateObject);
 		ImGui::InputFloat3("FOV,Near,Far", App.Camera.FOVNearFar.Values);
 		ImGui::InputFloat3("Light Dir", App.LightDir.Values);
 		ImGui::InputFloat4("Point Light", App.PointLight.Values);
@@ -1264,8 +1316,11 @@ static double Render(FApp& App)
 		App.DrawScene(Device, CmdBuffer);
 	}
 
+	App.RenderTests(Device, CmdBuffer);
+
 	CmdBuffer->EndRenderPass();
 
+	if (0)
 	{
 		FMarkerScope MarkerScope(Device, CmdBuffer, "TestCompute");
 		SVulkan::FComputePSO* PSO = GPSOCache.GetComputePSO(App.TestCSPSO);
@@ -1391,7 +1446,7 @@ static void MouseCallback(GLFWwindow* Window, double XPos, double YPos)
 		}
 
 		float XOffset = (float)XPos - GApp.Camera.LastX;
-		float YOffset = (float)YPos - GApp.Camera.LastY; // reversed since y-coordinates range from bottom to top
+		float YOffset = -((float)YPos - GApp.Camera.LastY);
 		GApp.Camera.LastX = (float)XPos;
 		GApp.Camera.LastY = (float)YPos;
 
@@ -1400,7 +1455,7 @@ static void MouseCallback(GLFWwindow* Window, double XPos, double YPos)
 			const float Sensitivity = 0.25f;
 			XOffset *= Sensitivity;
 			YOffset *= Sensitivity;
-			GApp.Camera.Yaw += XOffset;
+			GApp.Camera.Yaw -= XOffset;
 			GApp.Camera.Pitch += YOffset;
 		}
 
@@ -1410,7 +1465,7 @@ static void MouseCallback(GLFWwindow* Window, double XPos, double YPos)
 			XOffset *= Sensitivity;
 			YOffset *= Sensitivity;
 			GApp.Camera.Pos += YOffset * GApp.Camera.Front;
-			GApp.Camera.Pos -= FVector3::Cross(GApp.Camera.Front, GApp.Camera.Up).GetNormalized() * XOffset;
+			GApp.Camera.Pos += FVector3::Cross(GApp.Camera.Up, GApp.Camera.Front).GetNormalized() * XOffset;
 		}
 	}
 	else
@@ -1433,8 +1488,8 @@ static GLFWwindow* Init(FApp& App)
 	uint32 ResY = RCUtils::FCmdLine::Get().TryGetIntPrefix("-resy=", 1080);
 
 	{
-		App.Camera.Pos = TryGetVector3Prefix("-pos=", FVector3::GetZero());
-		App.Camera.Rot = TryGetVector2Prefix("-rot=", FVector2::GetZero());
+		App.Camera.Pos = TryGetVector3Prefix("-pos=", App.Camera.Pos);
+		App.Camera.Rot = TryGetVector2Prefix("-rot=", App.Camera.Rot);
 		App.Camera.FOVNearFar.x = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-fov=", App.Camera.FOVNearFar.x);
 		App.Camera.FOVNearFar.y = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-near=", App.Camera.FOVNearFar.y);
 		App.Camera.FOVNearFar.z = RCUtils::FCmdLine::Get().TryGetFloatPrefix("-far=", App.Camera.FOVNearFar.z);

@@ -1992,6 +1992,7 @@ struct FPSOCache
 			
 			ZeroVulkanMem(RasterizerInfo, VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO);
 			RasterizerInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+			RasterizerInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
 			RasterizerInfo.lineWidth = 1.0f;
 
 			ZeroMem(BlendAttachState);
